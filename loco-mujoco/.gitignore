@@ -1,0 +1,9 @@
+.idea/
+__pycache__/
+*.egg-info/
+logs/
+None/
+.pytest_cache/
+.DS_Store
+
+
