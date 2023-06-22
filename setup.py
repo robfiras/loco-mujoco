@@ -4,7 +4,7 @@ requires_list = ["mushroom_rl>=1.9.0"]
 
 setup(name='loco-mujoco',
       version='0.1',
-      description='Imitation learning benchmark focussing on complex locomotion tasks using MuJoCo.',
+      description='Imitation learning benchmark focusing on complex locomotion tasks using MuJoCo.',
       license='MIT',
       author="Firas Al-Hafez",
       author_mail="fi.alhafez@gmail.com",
