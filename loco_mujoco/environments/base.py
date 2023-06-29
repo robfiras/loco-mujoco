@@ -1,0 +1,499 @@
+import warnings
+import mujoco
+
+from mushroom_rl.environments import MultiMuJoCo
+
+from mushroom_rl.utils import spaces
+from mushroom_rl.utils.running_stats import *
+from mushroom_rl.utils.mujoco import *
+
+from loco_mujoco.utils import Trajectory
+from loco_mujoco.utils import NoReward, CustomReward,\
+    TargetVelocityReward, PosReward
+
+
+class BaseEnv(MultiMuJoCo):
+    """
+    Base class for all kinds of locomotion environments.
+
+    """
+
+    def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
+                 n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
+                 init_step_no=None, timestep=0.001, use_foot_forces=True):
+        """
+        Constructor.
+
+        Args:
+            xml_path (string): The path to the XML file with which the environment should be created;
+            actuation_spec (list): A list specifying the names of the joints
+                which should be controllable by the agent. Can be left empty
+                when all actuators should be used;
+            observation_spec (list): A list containing the names of data that
+                should be made available to the agent as an observation and
+                their type (ObservationType). They are combined with a key,
+                which is used to access the data. An entry in the list
+                is given by: (key, name, type). The name can later be used
+                to retrieve specific observations;
+            collision_groups (list, None): A list containing groups of geoms for
+                which collisions should be checked during simulation via
+                ``check_collision``. The entries are given as:
+                ``(key, geom_names)``, where key is a string for later
+                referencing in the "check_collision" method, and geom_names is
+                a list of geom names in the XML specification;
+            gamma (float): The discounting factor of the environment;
+            horizon (int): The maximum horizon for the environment;
+            n_substeps (int): The number of substeps to use by the MuJoCo
+                simulator. An action given by the agent will be applied for
+                n_substeps before the agent receives the next observation and
+                can act accordingly;
+            reward_type (string): Type of reward function to be used.
+            reward_params (dict): Dictionary of parameters corresponding to
+                the chosen reward function;
+            traj_params (dict): Dictionrary of parameters to construct trajectories.
+            random_start (bool): If True, a random sample from the trajectories
+                is chosen at the beginning of each time step and initializes the
+                simulation according to that. This requires traj_params to be passed!
+            init_step_no (int): If set, the respective sample from the trajectories
+                is taken to initialize the simulation;
+            timestep (float): The timestep used by the MuJoCo simulator. If None, the
+                default timestep specified in the XML will be used;
+            use_foot_forces (bool): If True, foot forces are computed and added to
+                the observation space;
+
+        """
+
+        if type(xml_path) != list:
+            xml_path = [xml_path]
+
+        if collision_groups is None:
+            collision_groups = list()
+
+        super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
+                         n_substeps=n_substeps, timestep=timestep, collision_groups=collision_groups)
+
+        # specify reward function
+        self._reward_function = self._get_reward_function(reward_type, reward_params)
+
+        # optionally use foot forces in the observation space
+        self._use_foot_forces = use_foot_forces
+
+        self.info.observation_space = spaces.Box(*self._get_observation_space())
+
+        # the action space is supposed to be between -1 and 1, so we normalize it
+        low, high = self.info.action_space.low.copy(), self.info.action_space.high.copy()
+        self.norm_act_mean = (high + low) / 2.0
+        self.norm_act_delta = (high - low) / 2.0
+        self.info.action_space.low[:] = -1.0
+        self.info.action_space.high[:] = 1.0
+
+        # mask to get kinematic observations (-2 for neglecting x and z)
+        self._kinematic_obs_mask = np.arange(len(observation_spec) - 2)
+
+        # setup a running average window for the mean ground forces
+        self.mean_grf = self._setup_ground_force_statistics()
+
+        if traj_params:
+            self.load_trajectory(traj_params)
+        else:
+            self.trajectories = None
+
+        self._random_start = random_start
+        self._init_step_no = init_step_no
+
+    def load_trajectory(self, traj_params):
+        """
+        Loads trajectories. If there were trajectories loaded already, this function overrides the latter.
+
+        Args:
+            traj_params (dict): Dictionary of parameters needed to load trajectories;
+
+        """
+
+        if self.trajectories is not None:
+            warnings.warn("New trajectories loaded, which overrides the old ones.", RuntimeWarning)
+
+        self.trajectories = Trajectory(keys=self.get_all_observation_keys(),
+                                       low=self.info.observation_space.low,
+                                       high=self.info.observation_space.high,
+                                       joint_pos_idx=self.obs_helper.joint_pos_idx,
+                                       **traj_params)
+
+    def reward(self, state, action, next_state, absorbing):
+        """
+        Calls the reward function of the environment.
+
+        """
+
+        return self._reward_function(state, action, next_state, absorbing)
+
+    def setup(self, obs):
+        """
+        A function that allows to execute setup code after an environment
+        reset.
+
+        Args:
+            obs (np.array): Observation to initialize the environment from;
+
+        """
+
+        self._reward_function.reset_state()
+
+        if obs is not None:
+            self._init_sim_from_obs(obs)
+        else:
+            if not self.trajectories and self._random_start:
+                raise ValueError("Random start not possible without trajectory data.")
+            elif not self.trajectories and self._init_step_no is not None:
+                raise ValueError("Setting an initial step is not possible without trajectory data.")
+            elif self._init_step_no is not None and self._random_start:
+                raise ValueError("Either use a random start or set an initial step, not both.")
+
+            if self.trajectories is not None:
+                if self._random_start:
+                    sample = self.trajectories.reset_trajectory()
+                    self.set_sim_state(sample)
+                elif self._init_step_no:
+                    traj_len = self.trajectories.trajectory_length
+                    n_traj = self.trajectories.nnumber_of_trajectories
+                    assert self._init_step_no <= traj_len * n_traj
+                    substep_no = int(self._init_step_no % traj_len)
+                    traj_no = int(self._init_step_no / traj_len)
+                    sample = self.trajectories.reset_trajectory(substep_no, traj_no)
+                    self.set_sim_state(sample)
+
+    def is_absorbing(self, obs):
+        """
+        Checks if an observation is an absorbing state or not.
+
+        Args:
+            obs (np.array): Current observation;
+
+        Returns:
+            True, if the observation is an absorbing state; otherwise False;
+
+        """
+
+        return self._has_fallen(obs)
+
+    def get_kinematic_obs_mask(self):
+        """
+        Returns a mask (np.array) for the observation specified in observation_spec (or part of it).
+
+        """
+
+        return self._kinematic_obs_mask
+
+    def obs_to_kinematics_conversion(self, obs):
+        """
+        Calculates a dictionary containing the kinematics given the observation.
+
+        Args:
+            obs (np.array): Current observation;
+
+        Returns:
+            Dictionary containing the keys specified in observation_spec with the corresponding
+            values from the observation.
+
+        """
+
+        obs = np.atleast_2d(obs)
+        rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
+        num_data = len(obs)
+        dataset = dict()
+        for i, key in enumerate(rel_keys):
+            if i < 2:
+                # fill with zeros for x and y position
+                data = np.zeros(num_data)
+            else:
+                data = obs[:, i-2]
+            dataset[key] = data
+
+        return dataset
+
+    def get_obs_idx(self, key):
+        """
+        Returns a list of indices corresponding to the respective key.
+
+        """
+
+        idx = self.obs_helper.obs_idx_map[key]
+
+        # shift by 2 to account for deleted x and y
+        idx = [i-2 for i in idx]
+
+        return idx
+
+    def create_dataset(self, ignore_keys=None):
+        """
+        Creates a dataset from the specified trajectories.
+
+        Args:
+            ignore_keys (list): List of keys to ignore in the dataset.
+
+        Returns:
+            Dictionary containing states, next_states and absorbing flags. For the states the shape is
+            (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
+            (N_traj x N_samples_per_traj).
+
+        """
+
+        if self.trajectories is not None:
+            return self.trajectories.create_dataset(ignore_keys=ignore_keys)
+        else:
+            raise ValueError("No trajectory was passed to the environment. "
+                             "To create a dataset pass a trajectory first.")
+
+    def play_trajectory_demo(self):
+        """
+        Plays a demo of the loaded trajectory by forcing the model
+        positions to the ones in the trajectories at every step.
+
+        """
+
+        assert self.trajectories is not None
+
+        sample = self.trajectories.reset_trajectory(substep_no=1)
+        self.set_sim_state(sample)
+        while True:
+            sample = self.trajectories.get_next_sample()
+
+            self.set_sim_state(sample)
+
+            mujoco.mj_forward(self._model, self._data)
+
+            obs = self._create_observation(sample)
+            if self._has_fallen(obs):
+                print("Has fallen!")
+
+            self.render()
+
+    def play_trajectory_demo_from_velocity(self):
+        """
+        Plays a demo of the loaded trajectory by forcing the model
+        positions to the ones in the trajectories at every step.
+
+        """
+
+        assert self.trajectories is not None
+
+        sample = self.trajectories.reset_trajectory(substep_no=1)
+        self.set_sim_state(sample)
+        len_qpos, len_qvel = self._len_qpos_qvel()
+        curr_qpos = sample[0:len_qpos]
+        while True:
+
+            sample = self.trajectories.get_next_sample()
+            qvel = sample[len_qpos:len_qpos + len_qvel]
+            qpos = curr_qpos + self.dt * qvel
+            sample[:len(qpos)] = qpos
+
+            self.set_sim_state(sample)
+
+            mujoco.mj_forward(self._model, self._data)
+
+            # save current qpos
+            curr_qpos = self._get_joint_pos()
+
+            obs = self._create_observation(sample)
+            if self._has_fallen(obs):
+                print("Has fallen!")
+
+            self.render()
+
+    def set_sim_state(self, sample):
+        """
+        Sets the state of the simulation according to an observation.
+
+        Args:
+            sample (np.array): Sample used to set the joint positions and velocities.
+
+        """
+
+        obs_spec = self.obs_helper.observation_spec
+        assert len(sample) == len(obs_spec)
+
+        for key_name_ot, value in zip(obs_spec, sample):
+            key, name, ot = key_name_ot
+            if ot == ObservationType.JOINT_POS:
+                self._data.joint(name).qpos = value
+            elif ot == ObservationType.JOINT_VEL:
+                self._data.joint(name).qvel = value
+            elif ot == ObservationType.SITE_ROT:
+                self._data.site(name).xmat = value
+
+    def _get_observation_space(self):
+        """
+        Returns a tuple of the lows and highs (np.array) of the observation space.
+
+        """
+
+        sim_low, sim_high = (self.info.observation_space.low[2:],
+                             self.info.observation_space.high[2:])
+
+        if self._use_foot_forces:
+            grf_low, grf_high = (-np.ones((12,)) * np.inf,
+                                 np.ones((12,)) * np.inf)
+            return (np.concatenate([sim_low, grf_low]),
+                    np.concatenate([sim_high, grf_high]))
+        else:
+            return sim_low, sim_high
+
+    def _create_observation(self, obs):
+        """
+        Creates full vector of observations.
+
+        Args:
+            obs (np.array): Observation vector to be modified or extended;
+
+        Returns:
+            New observation vector (np.array);
+
+        """
+
+        if self._use_foot_forces:
+            obs = np.concatenate([obs[2:],
+                                  self.mean_grf.mean / 1000.,
+                                  ]).flatten()
+        else:
+            obs = np.concatenate([obs[2:],
+                                  ]).flatten()
+
+        return obs
+
+    def _preprocess_action(self, action):
+        """
+        This function preprocesses all actions. All actions in this environment expected to be between -1 and 1.
+        Hence, we need to unnormalize the action to send to correct action to the simulation.
+        Note: If the action is not in [-1, 1], the unnormalized version will be clipped in Mujoco.
+
+        Args:
+            action (np.array): Action to be send to the environment;
+
+        Returns:
+            Unnormalized action (np.array) that is send to the environment;
+
+        """
+
+        unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
+        return unnormalized_action
+
+    def _simulation_post_step(self):
+        """
+        Update the ground forces statistics if needed.
+
+        """
+
+        if self._use_foot_forces:
+            grf =self._get_ground_forces()
+            self.mean_grf.update_stats(grf)
+
+    def _init_sim_from_obs(self, obs):
+        """
+        Initializes the simulation from an observation.
+
+        Args:
+            obs (np.array): The observation to set the simulation state to.
+
+        """
+        raise NotImplementedError
+
+    def _setup_ground_force_statistics(self):
+        """
+        Returns a running average method for the mean ground forces.  By default, 4 ground force sensors are used.
+        Environments that use more or less have to override this function.
+
+        """
+
+        mean_grf = RunningAveragedWindow(shape=(12,), window_size=self._n_substeps)
+
+        return mean_grf
+
+    def _get_ground_forces(self):
+        """
+        Returns the ground forces (np.array). By default, 4 ground force sensors are used.
+        Environments that use more or less have to override this function.
+
+        """
+
+        grf = np.concatenate([self._get_collision_force("floor", "foot_r")[:3],
+                              self._get_collision_force("floor", "front_foot_r")[:3],
+                              self._get_collision_force("floor", "foot_l")[:3],
+                              self._get_collision_force("floor", "front_foot_l")[:3]])
+
+        return grf
+
+    def _get_reward_function(self, reward_type, reward_params):
+        """
+        Constructs a reward function.
+
+        Args:
+            reward_type (string): Name of the reward.
+            reward_params (dict): Parameters of the reward function.
+
+        Returns:
+            Reward function.
+
+        """
+
+        if reward_type == "custom":
+            reward_func = CustomReward(**reward_params)
+        elif reward_type == "target_velocity":
+            x_vel_idx = self.get_obs_idx("dq_pelvis_tx")
+            assert len(x_vel_idx) == 1
+            x_vel_idx = x_vel_idx[0]
+            reward_func = TargetVelocityReward(x_vel_idx=x_vel_idx, **reward_params)
+        elif reward_type == "x_pos":
+            x_idx = self.get_obs_idx("q_pelvis_tx")
+            assert len(x_idx) == 1
+            x_idx = x_idx[0]
+            reward_func = PosReward(pos_idx=x_idx)
+        elif reward_type is None:
+            reward_func = NoReward()
+        else:
+            raise NotImplementedError("The specified reward has not been implemented: ", reward_type)
+
+        return reward_func
+
+    def _get_joint_pos(self):
+        """
+        Returns a vector (np.array) containing the current joint position of the model in the simulation.
+
+        """
+
+        return self.obs_helper.get_joint_pos_from_obs(self.obs_helper.build_obs(self._data))
+
+    def _get_joint_vel(self):
+        """
+        Returns a vector (np.array) containing the current joint velocities of the model in the simulation.
+
+        """
+
+        return self.obs_helper.get_joint_vel_from_obs(self.obs_helper.build_obs(self._data))
+
+    def _len_qpos_qvel(self):
+        """
+        Returns the lengths of the joint position vector and the joint velocity vector, including x and y.
+
+        """
+
+        keys = self.get_all_observation_keys()
+        len_qpos = len([key for key in keys if key.startswith("q_")])
+        len_qvel = len([key for key in keys if key.startswith("dq_")])
+
+        return len_qpos, len_qvel
+
+    @staticmethod
+    def _has_fallen(obs):
+        """
+        Checks if a model has fallen. This has to be implemented for each environment.
+        
+        Args:
+            obs (np.array): Current observation; 
+
+        Returns:
+            True, if the model has fallen for the current observation, False otherwise.
+
+        """
+        
+        raise NotImplementedError
