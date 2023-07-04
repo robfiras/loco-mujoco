@@ -1,6 +1,4 @@
-import os
 from pathlib import Path
-from tempfile import mkdtemp
 
 from dm_control import mjcf
 
@@ -61,6 +59,17 @@ class ReducedHumanoidTorque(BaseEnv):
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
 
     def _get_xml_modifications(self):
+        """
+        Function that specifies which joints, motors and equality constraints
+        should be removed from the Mujoco xml. Also the required collision
+        groups will be returned.
+
+        Returns:
+            A tuple of lists consisting of names of joints to remove, names of motors to remove,
+             names of equality constraints to remove, and names of collision groups to be used.
+
+        """
+
         joints_to_remove = []
         motors_to_remove = []
         equ_constr_to_remove = []
@@ -103,21 +112,16 @@ class ReducedHumanoidTorque(BaseEnv):
 
         """
 
-        pelvis_euler = obs[1:4]
+        pelvis_euler = self._get_from_obs(obs, ["q_pelvis_tilt", "q_pelvis_list", "q_pelvis_rotation"])
         pelvis_condition = ((obs[0] < -0.46) or (obs[0] > 0.0)
                             or (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
                             or (pelvis_euler[1] < -np.pi / 12) or (pelvis_euler[1] > np.pi / 8)
                             or (pelvis_euler[2] < (-np.pi / 10)) or (pelvis_euler[2] > (np.pi / 10)))
 
-        if self._use_box_feet:
-            lumbar_euler = obs[14:17]
-        else:
-            lumbar_euler = obs[18:21]
-
+        lumbar_euler = self._get_from_obs(obs, ["q_lumbar_extension", "q_lumbar_bending", "q_lumbar_rotation"])
         lumbar_condition = ((lumbar_euler[0] < (-np.pi / 6)) or (lumbar_euler[0] > (np.pi / 10))
                             or (lumbar_euler[1] < -np.pi / 10) or (lumbar_euler[1] > np.pi / 10)
-                            or (lumbar_euler[2] < (-np.pi / 4.5)) or (lumbar_euler[2] > (np.pi / 4.5))
-                            )
+                            or (lumbar_euler[2] < (-np.pi / 4.5)) or (lumbar_euler[2] > (np.pi / 4.5)))
 
         return pelvis_condition or lumbar_condition
 
@@ -160,29 +164,6 @@ class ReducedHumanoidTorque(BaseEnv):
                                   self._get_collision_force("floor", "front_foot_l")[:3]])
 
         return grf
-
-    def _init_sim_from_obs(self, obs):
-        """
-        Initializes the simulation from an observation.
-
-        Args:
-            obs (np.array): The observation to set the simulation state to.
-
-        """
-
-        assert len(obs.shape) == 1
-
-        # append x and y pos
-        obs = np.concatenate([[0.0, 0.0], obs])
-
-        obs_spec = self.obs_helper.observation_spec
-        assert len(obs) >= len(obs_spec)
-
-        # remove anything added to obs that is not in obs_spec
-        obs = obs[:len(obs_spec)]
-
-        # set state
-        self.set_sim_state(obs)
 
     @staticmethod
     def _get_observation_specification():
@@ -308,34 +289,6 @@ class ReducedHumanoidTorque(BaseEnv):
         return action_spec
 
     @staticmethod
-    def _delete_from_xml_handle(xml_handle, joints_to_remove, motors_to_remove, equ_constraints):
-        """
-        Deletes certain joints, motors and equality constraints from a Mujoco XML handle.
-
-        Args:
-            xml_handle: Handle to Mujoco XML.
-            joints_to_remove (list): List of joint names to remove.
-            motors_to_remove (list): List of motor names to remove.
-            equ_constraints (list): List of equality constraint names to remove.
-
-        Returns:
-            Modified Mujoco XML handle.
-
-        """
-
-        for j in joints_to_remove:
-            j_handle = xml_handle.find("joint", j)
-            j_handle.remove()
-        for m in motors_to_remove:
-            m_handle = xml_handle.find("actuator", m)
-            m_handle.remove()
-        for e in equ_constraints:
-            e_handle = xml_handle.find("equality", e)
-            e_handle.remove()
-
-        return xml_handle
-
-    @staticmethod
     def _add_box_feet_to_xml_handle(xml_handle, alpha_box_feet, scaling=1.0):
         """
         Adds box feet to Mujoco XML handle and makes old feet non-collidable.
@@ -395,32 +348,5 @@ class ReducedHumanoidTorque(BaseEnv):
         h.quat = [1.0, 0.1, 1.0, -0.1]
         h = xml_handle.find("body", "ulna_r")
         h.quat = [1.0, -0.6, 0.0, 0.0]
+
         return xml_handle
-
-    @staticmethod
-    def _save_xml_handle(xml_handle, tmp_dir_name):
-        """
-        Save the Mujoco XML handle to a file at tmp_dir_name. If tmp_dir_name is None,
-        a temporary directory is created at /tmp.
-
-        Args:
-            xml_handle: Mujoco XML handle.
-            tmp_dir_name (str): Path to temporary directory. If None, a
-            temporary directory is created at /tmp.
-
-        Returns:
-            String of the save path.
-
-        """
-
-        if tmp_dir_name is not None:
-            assert os.path.exists(tmp_dir_name), "specified directory (\"%s\") does not exist." % tmp_dir_name
-
-        dir = mkdtemp(dir=tmp_dir_name)
-        file_name = "humanoid.xml"
-        file_path = os.path.join(dir, file_name)
-
-        # dump data
-        mjcf.export_with_assets(xml_handle, dir, file_name)
-
-        return file_path

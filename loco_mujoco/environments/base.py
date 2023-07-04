@@ -1,8 +1,12 @@
+import os
 import warnings
+from tempfile import mkdtemp
+
 import mujoco
+import numpy as np
+from dm_control import mjcf
 
 from mushroom_rl.environments import MultiMuJoCo
-
 from mushroom_rl.utils import spaces
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
@@ -399,7 +403,20 @@ class BaseEnv(MultiMuJoCo):
             obs (np.array): The observation to set the simulation state to.
 
         """
-        raise NotImplementedError
+
+        assert len(obs.shape) == 1
+
+        # append x and y pos
+        obs = np.concatenate([[0.0, 0.0], obs])
+
+        obs_spec = self.obs_helper.observation_spec
+        assert len(obs) >= len(obs_spec)
+
+        # remove anything added to obs that is not in obs_spec
+        obs = obs[:len(obs_spec)]
+
+        # set state
+        self.set_sim_state(obs)
 
     def _setup_ground_force_statistics(self):
         """
@@ -408,7 +425,7 @@ class BaseEnv(MultiMuJoCo):
 
         """
 
-        mean_grf = RunningAveragedWindow(shape=(12,), window_size=self._n_substeps)
+        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_substeps)
 
         return mean_grf
 
@@ -425,6 +442,15 @@ class BaseEnv(MultiMuJoCo):
                               self._get_collision_force("floor", "front_foot_l")[:3]])
 
         return grf
+
+    @staticmethod
+    def _get_grf_size():
+        """
+        Returns the size of the ground force vector.
+
+        """
+
+        return 12
 
     def _get_reward_function(self, reward_type, reward_params):
         """
@@ -474,6 +500,33 @@ class BaseEnv(MultiMuJoCo):
 
         return self.obs_helper.get_joint_vel_from_obs(self.obs_helper._build_obs(self._data))
 
+    def _get_from_obs(self, obs, keys):
+        """
+        Returns a part of the observation based on the specified keys.
+
+        Args:
+            obs (np.array): Observation array.
+            keys (list or str): List of keys or just one key which are
+                used to extract entries from the observation.
+
+        Returns:
+            np.array including the parts of the original observation whose
+            keys were specified.
+
+        """
+
+        # obs has removed x and y positions, add dummy entries
+        obs = np.concatenate([[0.0, 0.0], obs])
+        if type(keys) != list:
+            assert type(keys) == str
+            keys = list(keys)
+
+        entries = []
+        for key in keys:
+            entries.append(self.obs_helper.get_from_obs(obs, key))
+
+        return np.concatenate(entries)
+
     def _len_qpos_qvel(self):
         """
         Returns the lengths of the joint position vector and the joint velocity vector, including x and y.
@@ -499,3 +552,58 @@ class BaseEnv(MultiMuJoCo):
         """
         
         raise NotImplementedError
+
+    @staticmethod
+    def _delete_from_xml_handle(xml_handle, joints_to_remove, motors_to_remove, equ_constraints):
+        """
+        Deletes certain joints, motors and equality constraints from a Mujoco XML handle.
+
+        Args:
+            xml_handle: Handle to Mujoco XML.
+            joints_to_remove (list): List of joint names to remove.
+            motors_to_remove (list): List of motor names to remove.
+            equ_constraints (list): List of equality constraint names to remove.
+
+        Returns:
+            Modified Mujoco XML handle.
+
+        """
+
+        for j in joints_to_remove:
+            j_handle = xml_handle.find("joint", j)
+            j_handle.remove()
+        for m in motors_to_remove:
+            m_handle = xml_handle.find("actuator", m)
+            m_handle.remove()
+        for e in equ_constraints:
+            e_handle = xml_handle.find("equality", e)
+            e_handle.remove()
+
+        return xml_handle
+
+    @staticmethod
+    def _save_xml_handle(xml_handle, tmp_dir_name, file_name="tmp_model.xml"):
+        """
+        Save the Mujoco XML handle to a file at tmp_dir_name. If tmp_dir_name is None,
+        a temporary directory is created at /tmp.
+
+        Args:
+            xml_handle: Mujoco XML handle.
+            tmp_dir_name (str): Path to temporary directory. If None, a
+            temporary directory is created at /tmp.
+
+        Returns:
+            String of the save path.
+
+        """
+
+        if tmp_dir_name is not None:
+            assert os.path.exists(tmp_dir_name), "specified directory (\"%s\") does not exist." % tmp_dir_name
+
+        dir = mkdtemp(dir=tmp_dir_name)
+        file_path = os.path.join(dir, file_name)
+
+        # dump data
+        mjcf.export_with_assets(xml_handle, dir, file_name)
+
+        return file_path
