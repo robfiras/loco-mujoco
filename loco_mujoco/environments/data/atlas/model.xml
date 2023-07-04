@@ -88,16 +88,16 @@
                 <joint name="pelvis_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
             <body name="ltorso" pos="-0.0125 0 0">
                 <inertial pos="-0.0112984 -3.15366e-006 0.0746835" quat="0.997071 0.000128212 0.076485 -0.00012406" mass="2.27" diaginertia="0.003962 0.00341694 0.00169212" />
-<!--                <joint name="back_bkz" axis="0 0 1" range="-0.663225 0.663225"/>-->
+                <joint name="back_bkz" axis="0 0 1" range="-0.663225 0.663225"/>
                 <geom class="viz" mesh="ltorso"/>
                 <body name="mtorso" pos="0 0 0.162">
                     <inertial pos="-0.00816266 -0.0131245 0.0305974" quat="0.108378 0.49314 0.746335 0.433648" mass="0.799" diaginertia="0.000536243 0.000487378 0.000358057" />
-<!--                    <joint name="back_bky" axis="0 1 0" range="-0.219388 0.538783"/>-->
+                    <joint name="back_bky" axis="0 1 0" range="-0.219388 0.538783"/>
                     <geom class="viz" mesh="mtorso"/>
                     <geom type="cylinder" size="0.02 0.075" pos="0 0 -0.02" />
                     <body name="utorso" pos="0 0 0.05">
                         <inertial pos="-0.0622 0.0023 0.3157" quat="0.450601 -0.0341277 -0.0439518 0.89099" mass="84.409" diaginertia="1.62425 1.5673 0.552443" />
-<!--                        <joint name="back_bkx" axis="1 0 0" range="-0.523599 0.523599"/>-->
+                        <joint name="back_bkx" axis="1 0 0" range="-0.523599 0.523599"/>
                         <geom class="viz" mesh="utorso"/>
                         <geom type="box" size="0.2 0.175 0.25" pos="-0.102 0 0.25" />
                         <geom type="box" size="0.065 0.25 0.05" pos="0.2 0 0.46" quat="0.707141 0 0.707073 0" />
@@ -117,14 +117,14 @@
                         <geom type="cylinder" size="0.055 0.008" pos="0.261 -0.156 0.6215" quat="0.707141 0.707073 0 0" />
                         <body name="l_clav" pos="0.1406 0.2256 0.4776" quat="0 0 0 1">
                             <inertial pos="0 0 -0.084" quat="0.684588 0.177029 -0.177029 0.684588" mass="4.466" diaginertia="0.011217 0.011 0.00178301" />
-<!--                            <joint name="l_arm_shz" axis="0 0 1" range="-1.5708 0.785398"/>-->
+                            <joint name="l_arm_shz" axis="0 0 1" range="-1.5708 0.785398"/>
                             <geom class="viz" mesh="r_clav"/>
                             <geom type="cylinder" size="0.0555 0.07625" pos="0 -0.11 -0.248" quat="0.707107 0 0.707107 0" />
                             <geom type="cylinder" size="0.067 0.13" pos="0.005 -0.015 -0.08" />
                             <geom type="box" size="0.05 0.035 0.036" pos="0.004 -0.064 -0.247" quat="0.865324 0.501213 0 0" />
                             <body name="l_scap" pos="0 -0.11 -0.245" axisangle="1 0 0 1.5708">
                                 <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="3.899" diaginertia="0.00583 0.00583 0.00319" />
-<!--                                <joint name="l_arm_shx" axis="-1 0 0" range="-1.5708 1.5708"/>-->
+                                <joint name="l_arm_shx" axis="-1 0 0" range="-1.5708 1.5708"/>
                                 <geom class="viz" mesh="r_scap"/>
                                 <geom type="cylinder" size="0.057 0.0525" pos="-0.005 -0.115 -0.014" quat="0.707107 0.707107 0 0" />
                                 <geom type="box" size="0.08 0.085 0.04" pos="-0.005 -0.075 -0.015" />
@@ -132,13 +132,13 @@
                                 <geom type="box" size="0.014 0.045 0.025" pos="-0.075 0.015 0.019" quat="0.877583 0.479426 0 0" />
                                 <body name="l_uarm" pos="0 -0.187 -0.016">
                                     <inertial pos="0 0.065 0" quat="0.707107 0.707107 0 0" mass="4.386" diaginertia="0.00656 0.00656 0.00358" />
-<!--                                    <joint name="l_arm_ely" axis="0 -1 0" range="0 3.14159"/>-->
+                                    <joint name="l_arm_ely" axis="0 -1 0" range="0 3.14159"/>
                                     <geom class="viz" mesh="r_uarm"/>
                                     <geom type="cylinder" size="0.065 0.055" pos="0 -0.035 -0.005" quat="0.707105 0.707108 0 0" />
                                     <geom type="box" size="0.025 0.035 0.075" pos="-0.01 -0.043 0.002" quat="0.707107 0 0.707107 0" />
                                     <body name="l_larm" pos="0 -0.119 0.0092">
                                         <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="3.248" diaginertia="0.00446 0.00446 0.00265" />
-<!--                                        <joint name="l_arm_elx" axis="-1 0 0" range="0 2.35619"/>-->
+                                        <joint name="l_arm_elx" axis="-1 0 0" range="0 2.35619"/>
                                         <geom class="viz" mesh="r_larm"/>
                                         <geom type="cylinder" size="0.051 0.02" pos="0 -0.075 -0.01" quat="0.707107 -0.707107 0 0" />
                                         <geom type="cylinder" size="0.045 0.0735" pos="-0.012 0 0.0025" quat="0.707107 0 0.707107 0" />
@@ -148,23 +148,19 @@
                                         <geom type="box" size="0.0225 0.0275 0.0115" pos="0.03 0.01 -0.05" />
                                         <body name="l_ufarm" pos="0 -0.29955 -0.00921" quat="0 0 1 0">
                                             <inertial pos="0.00015 0.08296 0.00037" quat="0.707107 0.707107 0 0" mass="2.4798" diaginertia="0.012731 0.011948 0.002857" />
-<!--                                            <joint name="l_arm_wry" axis="0 -1 0" range="-3.011 3.011"/>-->
+                                            <joint name="l_arm_wry" axis="0 -1 0" range="-3.011 3.011"/>
                                             <geom class="viz" mesh="r_farm"/>
                                             <geom type="cylinder" size="0.053 0.05" pos="0 0.15 0" quat="0.707388 0.706825 0 0" />
                                             <geom type="box" size="0.04 0.045 0.055" pos="-0.001 0.07 0" quat="0.707107 0 0.707107 0" />
                                             <geom type="cylinder" size="0.04 0.0625" pos="0 0.005 0" quat="0.707388 0 0.706825 0" />
                                             <body name="l_lfarm" pos="0 0 0">
                                                 <inertial pos="0.00017 -0.02515 0.00163" quat="0.5 0.5 -0.5 0.5" mass="0.648" diaginertia="0.000825 0.000764 0.000429" />
-<!--                                                <joint name="l_arm_wrx" axis="1 0 0" range="-1.7628 1.7628"/>-->
+                                                <joint name="l_arm_wrx" axis="1 0 0" range="-1.7628 1.7628"/>
                                                 <geom class="viz" mesh="r_hand"/>
                                                 <geom type="cylinder" size="0.031 0.01" pos="0 -0.104 0" quat="0.707107 0.707107 0 0" />
                                                 <geom type="cylinder" size="0.045 0.0075" pos="0 -0.087 0" quat="0.707107 0.707107 0 0" />
                                                 <geom type="cylinder" size="0.052 0.0075" pos="0 -0.075 0" quat="0.707107 0.707107 0 0" />
                                                 <geom type="cylinder" size="0.043 0.0135" pos="0 -0.052 0" quat="0.707107 0.707107 0 0" />
-                                                <body name="l_hand" pos="0 0 0" quat="0 0 1 0">
-                                                    <inertial pos="0.00016 -0.08159 2e-005" quat="0.707107 0 0 0.707107" mass="0.5839" diaginertia="0.000477 0.000388 0.000379" />
-<!--                                                    <joint name="l_arm_wry2" axis="0 1 0" range="-2.9671 2.9671"/>-->
-                                                </body>
                                             </body>
                                         </body>
                                     </body>
@@ -173,14 +169,14 @@
                         </body>
                         <body name="r_clav" pos="0.1406 -0.2256 0.4776">
                             <inertial pos="0 0 -0.084" quat="0.684588 0.177029 -0.177029 0.684588" mass="4.466" diaginertia="0.011217 0.011 0.00178301" />
-<!--                            <joint name="r_arm_shz" axis="0 0 1" range="-0.785398 1.5708"/>-->
+                            <joint name="r_arm_shz" axis="0 0 1" range="-0.785398 1.5708"/>
                             <geom class="viz" mesh="r_clav"/>
                             <geom type="cylinder" size="0.0555 0.07625" pos="0 -0.11 -0.248" quat="0.707107 0 0.707107 0" />
                             <geom type="cylinder" size="0.067 0.13" pos="0.005 -0.015 -0.08" />
                             <geom type="box" size="0.05 0.035 0.036" pos="0.004 -0.064 -0.247" quat="0.865324 0.501213 0 0" />
                             <body name="r_scap" pos="0 -0.11 -0.245" axisangle="1 0 0 1.5708">
                                 <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="3.899" diaginertia="0.00583 0.00583 0.00319" />
-<!--                                <joint name="r_arm_shx" axis="1 0 0" range="-1.5708 1.5708"/>-->
+                                <joint name="r_arm_shx" axis="1 0 0" range="-1.5708 1.5708"/>
                                 <geom class="viz" mesh="r_scap"/>
                                 <geom type="cylinder" size="0.057 0.0525" pos="-0.005 -0.115 -0.014" quat="0.707107 0.707107 0 0" />
                                 <geom type="box" size="0.08 0.085 0.04" pos="-0.005 -0.075 -0.015" />
@@ -188,13 +184,13 @@
                                 <geom type="box" size="0.014 0.045 0.025" pos="-0.075 0.015 0.019" quat="0.877583 0.479426 0 0" />
                                 <body name="r_uarm" pos="0 -0.187 -0.016">
                                     <inertial pos="0 0.065 0" quat="0.707107 0.707107 0 0" mass="4.386" diaginertia="0.00656 0.00656 0.00358" />
-<!--                                    <joint name="r_arm_ely" axis="0 1 0" range="0 3.14159"/>-->
+                                    <joint name="r_arm_ely" axis="0 1 0" range="0 3.14159"/>
                                     <geom class="viz" mesh="r_uarm"/>
                                     <geom type="cylinder" size="0.065 0.055" pos="0 -0.035 -0.005" quat="0.707105 0.707108 0 0" />
                                     <geom type="box" size="0.025 0.035 0.075" pos="-0.01 -0.043 0.002" quat="0.707107 0 0.707107 0" />
                                     <body name="r_larm" pos="0 -0.119 0.0092">
                                         <inertial pos="0 0 0" quat="0.5 0.5 0.5 0.5" mass="3.248" diaginertia="0.00446 0.00446 0.00265" />
-<!--                                        <joint name="r_arm_elx" axis="1 0 0" range="-2.35619 0"/>-->
+                                        <joint name="r_arm_elx" axis="1 0 0" range="-2.35619 0"/>
                                         <geom class="viz" mesh="r_larm"/>
                                         <geom type="cylinder" size="0.051 0.02" pos="0 -0.075 -0.01" quat="0.707107 -0.707107 0 0" />
                                         <geom type="cylinder" size="0.045 0.0735" pos="-0.012 0 0.0025" quat="0.707107 0 0.707107 0" />
@@ -204,23 +200,19 @@
                                         <geom type="box" size="0.0225 0.0275 0.0115" pos="0.03 0.01 -0.05" />
                                         <body name="r_ufarm" pos="0 -0.29955 -0.00921">
                                             <inertial pos="0.00015 0.08296 0.00037" quat="0.707107 0.707107 0 0" mass="2.4798" diaginertia="0.012731 0.011948 0.002857" />
-<!--                                            <joint name="r_arm_wry" axis="0 1 0" range="-3.011 3.011"/>-->
+                                            <joint name="r_arm_wry" axis="0 1 0" range="-3.011 3.011"/>
                                             <geom class="viz" mesh="r_farm"/>
                                             <geom type="cylinder" size="0.053 0.05" pos="0 0.15 0" quat="0.707388 0.706825 0 0" />
                                             <geom type="box" size="0.04 0.045 0.055" pos="-0.001 0.07 0" quat="0.707107 0 0.707107 0" />
                                             <geom type="cylinder" size="0.04 0.0625" pos="0 0.005 0" quat="0.707388 0 0.706825 0" />
                                             <body name="r_lfarm" pos="0 0 0">
                                                 <inertial pos="0.00017 -0.02515 0.00163" quat="0.5 0.5 -0.5 0.5" mass="0.648" diaginertia="0.000825 0.000764 0.000429" />
-<!--                                                <joint name="r_arm_wrx" axis="1 0 0" range="-1.7628 1.7628"/>-->
+                                                <joint name="r_arm_wrx" axis="1 0 0" range="-1.7628 1.7628"/>
                                                 <geom class="viz" mesh="r_hand"/>
                                                 <geom type="cylinder" size="0.031 0.01" pos="0 -0.104 0" quat="0.707107 0.707107 0 0" />
                                                 <geom type="cylinder" size="0.045 0.0075" pos="0 -0.087 0" quat="0.707107 0.707107 0 0" />
                                                 <geom type="cylinder" size="0.052 0.0075" pos="0 -0.075 0" quat="0.707107 0.707107 0 0" />
                                                 <geom type="cylinder" size="0.043 0.0135" pos="0 -0.052 0" quat="0.707107 0.707107 0 0" />
-                                                <body name="r_hand" pos="0 0 0">
-                                                    <inertial pos="0.00016 -0.08159 2e-005" quat="0.707107 0 0 0.707107" mass="0.5839" diaginertia="0.000477 0.000388 0.000379" />
-<!--                                                    <joint name="r_arm_wry2" axis="0 1 0" range="-2.9671 2.9671"/>-->
-                                                </body>
                                             </body>
                                         </body>
                                     </body>
@@ -282,8 +274,8 @@
                                     <inertial pos="0.027 0 -0.067" quat="0 0.707107 0 0.707107" mass="2.41" diaginertia="0.008 0.007 0.002" />
 <!--                                    <joint name="l_leg_akx" axis="1 0 0" range="-0.8 0.8"/>-->
                                     <geom class="viz" mesh="l_foot"/>
-                                    <geom name="left_foot_back" type="box" size="0.1135 0.0669435 0.025" pos="0.023 0 -0.049119" rgba="0.9 0 0 0.2"/>
-                                    <geom name="left_foot_front" type="box" size="0.05 0.04 0.01" pos="0.1225 0 -0.0641"  rgba="0.0 0.9 0 0.2"/>
+                                    <geom name="left_foot_back" type="box" size="0.1135 0.0669435 0.025" pos="0.023 0 -0.049119" />
+                                    <geom name="left_foot_front" type="box" size="0.05 0.04 0.01" pos="0.1225 0 -0.0641" />
                                     <site name='left_foot_front_left' type="sphere" size="0.005" pos="0.1775 0.06 -0.08" rgba="0 0 .99 0.5" />
                                     <site name='left_foot_front_right' type="sphere" size="0.005" pos="0.1775 -0.04 -0.08" rgba="0 0 .99 0.5" />
                                     <site name='left_foot_back_left' type="sphere" size="0.005" pos="-0.0425 0.05 -0.08" rgba="0 0 .99 0.5" />
@@ -348,25 +340,23 @@
     </worldbody>
 
 	<actuator>
-<!--		<motor name="back_bkz_actuator"  joint="back_bkz" gear="106"/>-->
-<!--		<motor name="back_bky_actuator"  joint="back_bky" gear="445"/>-->
-<!--		<motor name="back_bkx_actuator"  joint="back_bkx" gear="300"/>-->
+		<motor name="back_bkz_actuator"  joint="back_bkz" gear="106"/>
+		<motor name="back_bky_actuator"  joint="back_bky" gear="445"/>
+		<motor name="back_bkx_actuator"  joint="back_bkx" gear="300"/>
 
-<!--		<motor name="l_arm_shz_actuator" joint="l_arm_shz" gear="87"/>-->
-<!--		<motor name="l_arm_shx_actuator" joint="l_arm_shx" gear="99"/>-->
-<!--		<motor name="l_arm_ely_actuator" joint="l_arm_ely" gear="63"/>-->
-<!--		<motor name="l_arm_elx_actuator" joint="l_arm_elx" gear="112"/>-->
-<!--		<motor name="l_arm_wry_actuator" joint="l_arm_wry" gear="25"/>-->
-<!--		<motor name="l_arm_wrx_actuator" joint="l_arm_wrx" gear="25"/>		-->
-<!--		<motor name="l_arm_wry2_ctuator" joint="l_arm_wry2" gear="25"/>-->
+		<motor name="l_arm_shz_actuator" joint="l_arm_shz" gear="87"/>
+		<motor name="l_arm_shx_actuator" joint="l_arm_shx" gear="99"/>
+		<motor name="l_arm_ely_actuator" joint="l_arm_ely" gear="63"/>
+		<motor name="l_arm_elx_actuator" joint="l_arm_elx" gear="112"/>
+		<motor name="l_arm_wry_actuator" joint="l_arm_wry" gear="25"/>
+		<motor name="l_arm_wrx_actuator" joint="l_arm_wrx" gear="25"/>
 
-<!--		<motor name="r_arm_shz_actuator" joint="r_arm_shz" gear="87"/>-->
-<!--		<motor name="r_arm_shx_actuator" joint="r_arm_shx" gear="99"/>-->
-<!--		<motor name="r_arm_ely_actuator" joint="r_arm_ely" gear="63"/>-->
-<!--		<motor name="r_arm_elx_actuator" joint="r_arm_elx" gear="112"/>-->
-<!--		<motor name="r_arm_wry_actuator" joint="r_arm_wry" gear="25"/>-->
-<!--		<motor name="r_arm_wrx_actuator" joint="r_arm_wrx" gear="25"/>		-->
-<!--		<motor name="r_arm_wry2_actuator"joint="r_arm_wry2" gear="25"/>-->
+		<motor name="r_arm_shz_actuator" joint="r_arm_shz" gear="87"/>
+		<motor name="r_arm_shx_actuator" joint="r_arm_shx" gear="99"/>
+		<motor name="r_arm_ely_actuator" joint="r_arm_ely" gear="63"/>
+		<motor name="r_arm_elx_actuator" joint="r_arm_elx" gear="112"/>
+		<motor name="r_arm_wry_actuator" joint="r_arm_wry" gear="25"/>
+		<motor name="r_arm_wrx_actuator" joint="r_arm_wrx" gear="25"/>
 
 		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="275"/>
 		<motor name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="530"/>

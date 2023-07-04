@@ -60,7 +60,7 @@ class Trajectory(object):
 
         # 3d matrix: (len state space, no trajectories, no of samples)
         self.trajectories = np.array([[list(self._trajectory_files[key])[self.split_points[i]:self.split_points[i+1]]
-                                     for i in range(len(self.split_points)-1)] for key in keys], dtype=object)
+                                     for i in range(len(self.split_points)-1)] for key in keys])
 
         self.traj_dt = traj_dt
         self.control_dt = control_dt
@@ -137,12 +137,16 @@ class Trajectory(object):
 
             new_trajs.append(new_traj)
 
-        self.trajectories = np.concatenate(new_trajs, axis=1)
+        if len(new_trajs) == 1:
+            self.trajectories = np.expand_dims(new_trajs[0], axis=1)
+        else:
+            self.trajectories = np.concatenate(new_trajs, axis=1)
 
+        # todo: this is currently not working properly, maybe this is not even needed
         # interpolation of split_points
-        self.split_points = [0]
-        for k in range(self.number_of_trajectories):
-            self.split_points.append(self.split_points[-1] + len(self.trajectories[0][k]))
+        #self.split_points = [0]
+        #for k in range(self.number_of_trajectories):
+        #    self.split_points.append(self.split_points[-1] + len(self.trajectories[0][k]))
 
     def reset_trajectory(self, substep_no=None, traj_no=None):
         """

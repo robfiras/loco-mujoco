@@ -20,7 +20,8 @@ class BaseEnv(MultiMuJoCo):
 
     def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
-                 init_step_no=None, timestep=0.001, use_foot_forces=True):
+                 init_step_no=None, timestep=0.001, use_foot_forces=True, default_camera_mode="follow",
+                 **viewer_params):
         """
         Constructor.
 
@@ -70,7 +71,8 @@ class BaseEnv(MultiMuJoCo):
             collision_groups = list()
 
         super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
-                         n_substeps=n_substeps, timestep=timestep, collision_groups=collision_groups)
+                         n_substeps=n_substeps, timestep=timestep, collision_groups=collision_groups,
+                         default_camera_mode=default_camera_mode, **viewer_params)
 
         # specify reward function
         self._reward_function = self._get_reward_function(reward_type, reward_params)
@@ -94,6 +96,7 @@ class BaseEnv(MultiMuJoCo):
         self.mean_grf = self._setup_ground_force_statistics()
 
         if traj_params:
+            self.trajectories = None
             self.load_trajectory(traj_params)
         else:
             self.trajectories = None
@@ -129,8 +132,8 @@ class BaseEnv(MultiMuJoCo):
 
     def setup(self, obs):
         """
-        A function that allows to execute setup code after an environment
-        reset.
+        Function to setup the initial state of the simulation. Initialization can be done either
+        randomly, from a certain initial, or from the default initial state of the model.
 
         Args:
             obs (np.array): Observation to initialize the environment from;
@@ -341,7 +344,7 @@ class BaseEnv(MultiMuJoCo):
 
     def _create_observation(self, obs):
         """
-        Creates full vector of observations.
+        Creates a full vector of observations.
 
         Args:
             obs (np.array): Observation vector to be modified or extended;
@@ -461,7 +464,7 @@ class BaseEnv(MultiMuJoCo):
 
         """
 
-        return self.obs_helper.get_joint_pos_from_obs(self.obs_helper.build_obs(self._data))
+        return self.obs_helper.get_joint_pos_from_obs(self.obs_helper._build_obs(self._data))
 
     def _get_joint_vel(self):
         """
@@ -469,7 +472,7 @@ class BaseEnv(MultiMuJoCo):
 
         """
 
-        return self.obs_helper.get_joint_vel_from_obs(self.obs_helper.build_obs(self._data))
+        return self.obs_helper.get_joint_vel_from_obs(self.obs_helper._build_obs(self._data))
 
     def _len_qpos_qvel(self):
         """
@@ -483,8 +486,7 @@ class BaseEnv(MultiMuJoCo):
 
         return len_qpos, len_qvel
 
-    @staticmethod
-    def _has_fallen(obs):
+    def _has_fallen(self, obs):
         """
         Checks if a model has fallen. This has to be implemented for each environment.
         

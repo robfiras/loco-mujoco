@@ -25,7 +25,11 @@ class Atlas(BaseEnv):
 
         xml_path = (Path(__file__).resolve().parent.parent / "data" / "atlas" / "model.xml").as_posix()
 
-        action_spec = ["hip_flexion_r_actuator", "hip_adduction_r_actuator", "hip_rotation_r_actuator",
+        action_spec = ["back_bkz_actuator", "back_bky_actuator", "back_bkx_actuator", "l_arm_shz_actuator",
+                       "l_arm_shx_actuator", "l_arm_ely_actuator", "l_arm_elx_actuator", "l_arm_wry_actuator",
+                       "l_arm_wrx_actuator", "r_arm_shz_actuator", "r_arm_shx_actuator",
+                       "r_arm_ely_actuator", "r_arm_elx_actuator", "r_arm_wry_actuator", "r_arm_wrx_actuator",
+                       "hip_flexion_r_actuator", "hip_adduction_r_actuator", "hip_rotation_r_actuator",
                        "knee_angle_r_actuator", "ankle_angle_r_actuator", "hip_flexion_l_actuator",
                        "hip_adduction_l_actuator", "hip_rotation_l_actuator", "knee_angle_l_actuator",
                        "ankle_angle_l_actuator"]
@@ -37,6 +41,21 @@ class Atlas(BaseEnv):
                             ("q_pelvis_tilt", "pelvis_tilt", ObservationType.JOINT_POS),
                             ("q_pelvis_list", "pelvis_list", ObservationType.JOINT_POS),
                             ("q_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_POS),
+                            ("q_back_bkz", "back_bkz", ObservationType.JOINT_POS),
+                            ("q_back_bkx", "back_bkx", ObservationType.JOINT_POS),
+                            ("q_back_bky", "back_bky", ObservationType.JOINT_POS),
+                            ("q_l_arm_shz", "l_arm_shz", ObservationType.JOINT_POS),
+                            ("q_l_arm_shx", "l_arm_shx", ObservationType.JOINT_POS),
+                            ("q_l_arm_ely", "l_arm_ely", ObservationType.JOINT_POS),
+                            ("q_l_arm_elx", "l_arm_elx", ObservationType.JOINT_POS),
+                            ("q_l_arm_wry", "l_arm_wry", ObservationType.JOINT_POS),
+                            ("q_l_arm_wrx", "l_arm_wrx", ObservationType.JOINT_POS),
+                            ("q_r_arm_shz", "r_arm_shz", ObservationType.JOINT_POS),
+                            ("q_r_arm_shx", "r_arm_shx", ObservationType.JOINT_POS),
+                            ("q_r_arm_ely", "r_arm_ely", ObservationType.JOINT_POS),
+                            ("q_r_arm_elx", "r_arm_elx", ObservationType.JOINT_POS),
+                            ("q_r_arm_wry", "r_arm_wry", ObservationType.JOINT_POS),
+                            ("q_r_arm_wrx", "r_arm_wrx", ObservationType.JOINT_POS),
                             ("q_hip_flexion_r", "hip_flexion_r", ObservationType.JOINT_POS),
                             ("q_hip_adduction_r", "hip_adduction_r", ObservationType.JOINT_POS),
                             ("q_hip_rotation_r", "hip_rotation_r", ObservationType.JOINT_POS),
@@ -55,6 +74,21 @@ class Atlas(BaseEnv):
                             ("dq_pelvis_tilt", "pelvis_tilt", ObservationType.JOINT_VEL),
                             ("dq_pelvis_list", "pelvis_list", ObservationType.JOINT_VEL),
                             ("dq_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_VEL),
+                            ("dq_back_bkz", "back_bkz", ObservationType.JOINT_VEL),
+                            ("dq_back_bkx", "back_bkx", ObservationType.JOINT_VEL),
+                            ("dq_back_bky", "back_bky", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_shz", "l_arm_shz", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_shx", "l_arm_shx", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_ely", "l_arm_ely", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_elx", "l_arm_elx", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_wry", "l_arm_wry", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_wrx", "l_arm_wrx", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_shz", "r_arm_shz", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_shx", "r_arm_shx", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_ely", "r_arm_ely", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_elx", "r_arm_elx", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_wry", "r_arm_wry", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_wrx", "r_arm_wrx", ObservationType.JOINT_VEL),
                             ("dq_hip_flexion_r", "hip_flexion_r", ObservationType.JOINT_VEL),
                             ("dq_hip_adduction_r", "hip_adduction_r", ObservationType.JOINT_VEL),
                             ("dq_hip_rotation_r", "hip_rotation_r", ObservationType.JOINT_VEL),
@@ -117,7 +151,7 @@ class Atlas(BaseEnv):
         return obs
 
     @staticmethod
-    def has_fallen(state):
+    def _has_fallen(state):
         pelvis_euler = state[1:4]
         pelvis_y_cond = (state[0] < -0.3) or (state[0] > 0.1)
         pelvis_tilt_cond = (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
@@ -125,7 +159,7 @@ class Atlas(BaseEnv):
         pelvis_rot_cond = (pelvis_euler[2] < (-np.pi / 10)) or (pelvis_euler[2] > (np.pi / 10))
         pelvis_condition = (pelvis_y_cond or pelvis_tilt_cond or pelvis_list_cond or pelvis_rot_cond)
 
-        return pelvis_condition
+        return pelvis_condition and False
 
     def get_mask(self, obs_to_hide):
         """ This function returns a boolean mask to hide observations from a fully observable state. """
@@ -136,6 +170,7 @@ class Atlas(BaseEnv):
                                                                  "supported. Valid observations to hide are %s." \
                                                                  % (self._hidable_obs,)
 
+        # todo: this is not correct anymore
         pos_dim = 14
         vel_dim = 16
         force_dim = 12  # 3*4
@@ -199,19 +234,19 @@ class Atlas(BaseEnv):
 
 if __name__ == '__main__':
 
-    env = Atlas(random_start=False, hold_weight=True, tmp_dir_name="new_atlas")
+    env = Atlas(random_start=False, hold_weight=False, tmp_dir_name="new_atlas")
     action_dim = env.info.action_space.shape[0]
 
     env.reset()
     env.render()
-
     absorbing = False
-    for i in range(100):
-        env.reset()
+    i = 0
+    while True:
+        if i == 1000 or absorbing:
+            env.reset()
+            i = 0
+        action = np.random.randn(action_dim)*0.1
+        nstate, _, absorbing, _ = env.step(action)
+
         env.render()
-        for j in range(100):
-            action = np.random.randn(action_dim)
-            nstate, _, absorbing, _ = env.step(action)
-            if absorbing:
-                break
-            env.render()
+        i += 1
