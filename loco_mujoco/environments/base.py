@@ -249,7 +249,11 @@ class BaseEnv(MultiMuJoCo):
         """
 
         if self.trajectories is not None:
-            return self.trajectories.create_dataset(ignore_keys=ignore_keys)
+            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys)
+            # check that all state in the dataset satisfy the has fallen method.
+            for state in dataset["states"]:
+                assert self._has_fallen(state) is False, "Some of the states in the created dataset are terminal " \
+                                                         "states. This should not happen."
         else:
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
@@ -531,6 +535,27 @@ class BaseEnv(MultiMuJoCo):
             entries.append(self.obs_helper.get_from_obs(obs, key))
 
         return np.concatenate(entries)
+
+    def _get_idx(self, keys):
+        """
+        Returns the indices of the specified keys.
+        Args:
+            keys (list or str): List of keys or just one key which are
+                used to get the indices from the observation space.
+
+        Returns:
+             np.array including the indices of the specified keys.
+
+        """
+        if type(keys) != list:
+            assert type(keys) == str
+            keys = list(keys)
+
+        entries = []
+        for key in keys:
+            entries.append(self.obs_helper.obs_idx_map[key])
+
+        return np.concatenate(entries) - 2
 
     def _len_qpos_qvel(self):
         """

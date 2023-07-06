@@ -254,7 +254,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             goal_reward_func = MultiTargetVelocityReward(x_vel_idx=x_vel_idx, scalings=self._scalings,
                                                          env_id_len=env_id_len, **reward_params)
         else:
-            goal_reward_func = super()._get_reward_function(reward_type, reward_params)
+             goal_reward_func = super()._get_reward_function(reward_type, reward_params)
 
         return goal_reward_func
 

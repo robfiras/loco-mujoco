@@ -81,12 +81,15 @@ class Trajectory(object):
         self.traj_no = 0
         self.subtraj = self._get_subtraj(self.traj_no)
 
-    def create_dataset(self, ignore_keys=None):
+    def create_dataset(self, ignore_keys=None, state_callback=None, state_callback_params=None):
         """
         Creates a dataset used by imitation learning algorithms.
 
         Args:
             ignore_keys (list): List of keys to ignore in the dataset.
+            state_callback (func): Function that should be called on each state.
+            state_callback_params (dict): Dictionary of parameters needed to make
+                the state transformation.
 
         Returns:
             Dictionary containing states, next_states and absorbing flags. For the states the shape is
@@ -106,6 +109,12 @@ class Trajectory(object):
 
         # create states array shape=(n_states, dim_obs)
         states = np.concatenate(traj, axis=1)
+
+        if state_callback is not None:
+            transformed_states = []
+            for state in states:
+                transformed_states.append(state_callback(state, **state_callback_params))
+            states = np.array(transformed_states)
 
         # convert to dict with states and next_states
         new_states = states[:-1]
@@ -271,6 +280,45 @@ class Trajectory(object):
             sample = self._get_ith_sample_from_subtraj(self.subtraj_step_no)
 
         return sample
+
+    def get_from_sample(self, sample, key):
+        """
+        Returns the part of the sample whose key is specified. In contrast to the
+        function _get_from_obs from the base environment, this function also allows to
+        access information that is in the trajectory, but not in the simulation such
+        as goal definitions.
+
+        Note: This function is not suited for getting an observation from environment samples!
+
+        Args:
+            sample (list or np.array): Current sample to extract an observation from.
+            key (string): Name of the observation to extract from sample
+
+        Returns:
+            np.array consisting of the observation specified by the key.
+
+        """
+        assert len(sample) == len(self.keys)
+
+        idx = self.get_index(key)
+
+        return sample[idx]
+
+    def get_idx(self, key):
+        """
+        Returns the index of the key.
+
+        Note: This function is not suited for getting the index for an observation of the environment!
+
+        Args:
+            key (string): Name of the observation to extract from sample
+
+        Returns:
+            int containing the desired index.
+
+        """
+
+        return self.keys.index(key)
 
     def flattened_trajectories(self):
         """

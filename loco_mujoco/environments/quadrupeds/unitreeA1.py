@@ -1,33 +1,22 @@
 import os
-import time
-import sys
-from abc import abstractmethod
-import mujoco
+
 from dm_control import mjcf
-from copy import deepcopy
 
 from pathlib import Path
-from scipy import interpolate
 
-import numpy as np
-from time import perf_counter
-from contextlib import contextmanager
-
-from mushroom_rl.environments.mujoco import MuJoCo, ObservationType
-from pathlib import Path
-
-from mushroom_rl.utils import spaces
-from mushroom_rl.utils.angles import quat_to_euler
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 from loco_mujoco.environments import BaseEnv
-from loco_mujoco.utils.reward import MultiTargetVelocityReward
-from loco_mujoco.utils.dataset import rotate_obs
+from loco_mujoco.utils.reward import VelocityVectorReward
+from loco_mujoco.utils.math import rotate_obs
+from loco_mujoco.utils.goals import GoalDirectionVelocity
+from loco_mujoco.utils.math import mat2angle_xy, angle2mat_xy, transform_angle_2pi
+
 
 class UnitreeA1(BaseEnv):
     """
-    Mujoco simulation of unitree A1 model
+    Mujoco simulation of Unitree A1 model.
 
     """
 
@@ -70,6 +59,9 @@ class UnitreeA1(BaseEnv):
 
         self.setup_random_rot = setup_random_rot
 
+        # setup goal including the desired direction and velocity
+        self._goal = GoalDirectionVelocity()
+
         super().__init__(xml_path, action_spec, observation_spec,  collision_groups, **kwargs)
 
     def setup(self, obs):
@@ -101,7 +93,6 @@ class UnitreeA1(BaseEnv):
                         angle = np.random.uniform(0, 2 * np.pi)
                         sample = rotate_obs(sample, angle,  *self._get_relevant_idx_rotation())
                     self.set_sim_state(sample)
-
                 elif self._init_step_no:
                     traj_len = self.trajectories.trajectory_length
                     n_traj = self.trajectories.nnumber_of_trajectories
@@ -110,318 +101,101 @@ class UnitreeA1(BaseEnv):
                     traj_no = int(self._init_step_no / traj_len)
                     sample = self.trajectories.reset_trajectory(substep_no, traj_no)
                     self.set_sim_state(sample)
+                else:
+                    raise ValueError("You have specified a trajectory, either choose \"random_start\" "
+                                     "or set \"init_step_no\".")
 
+                # set the goal
+                rotmat = self.trajectories.get_from_sample(sample, "dir_arrow")
+                angle = mat2angle_xy(rotmat)
+                desired_vel = self.trajectories.get_from_sample(sample, "goal_speed")
+                self._goal.set_goal(angle, desired_vel)
 
-        if self.trajectory is not None:
-            if self._random_start:
-                # choose random state from trajectory
-                sample = self.trajectory.reset_trajectory()
-            else:
-                # choose specified state
-                sample = self.trajectory.reset_trajectory(self._init_step_no, self._init_traj_no)
-            # if we want to set up the robot with a random rotation
-            if self.setup_random_rot:
-                angle = np.random.uniform(0, 2 * np.pi)
-                sample = rotate_obs(sample, angle, *self._get_relevant_idx_rotation())
+                # set the state of the simulation
+                self.set_sim_state(sample)
 
-            # if we use the direction arrow
-            if self.use_2d_ctrl:
-                # turn matrix into angle
-                mat = np.dot(sample[36].reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))
-                angle = np.arctan2(mat[3], mat[0])
-                # _goals contains two lists: first the list of goal states already represented in the observation_spec \
-                #   (direction angle), and the list of goal states that are not in obs_spec (velo) # todo double check on the latter
-                self._goals = np.array([[angle], [sample[37]]], dtype=float)
+    def set_sim_state(self, sample):
+        """
+        Sets the state of the simulation according to an observation. For correct
+        visualization of the direction arrow the trunk rotation is added to the
+        arrow's rotation matrix to make sure it is from the robot's point of view.
 
-                # add the trunk rotation to the direction to make sure the direction arrow matrix is interpreted from \
-                # the robot's point of view
-                trunk_rotation = sample[3]
-                # calc rotation matrix with rotation of trunk
-                R = np.array(
-                    [[np.cos(trunk_rotation), -np.sin(trunk_rotation), 0],
-                     [np.sin(trunk_rotation), np.cos(trunk_rotation), 0],
-                     [0, 0, 1]])
-                sample[36] = np.dot(R, sample[36].reshape((3, 3))).reshape((9,))
-            # set state
-            self.set_qpos_qvel(sample)
-        else:  # TODO: because init position from xml is bad
-            # defines default position
-            sample = [0, 0, -0.16, 0, 0, 0, 0, 0.9, -1.8, 0, 0.9, -1.8, 0, 0.9, -1.8, 0, 0.9, -1.8,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            if self.setup_random_rot:
-                angle = np.random.uniform(0, 2 * np.pi)
-                sample = rotate_obs(sample, angle, False)
-            len_qpos, len_qvel = self.len_qpos_qvel()
-            self._data.qpos = sample[0:len_qpos]
-            self._data.qvel = sample[len_qpos:len_qpos + len_qvel]
-            if self.use_2d_ctrl:
-                # _goals contains two lists: first the list of goal states already represented in the observation_spec \
-                #   (direction angle), and the list of goal states that are not in obs_spec (velo)
-                self._goals = np.array([[0], [0]], dtype=float)
+        Args:
+            sample (list or np.array): Sample used to set the state of the simulation.
+
+        """
+        # todo maybe this is not need, just call the new method for setting the goal arrow.
+        # add the trunk rotation to the direction to make sure the direction arrow matrix is interpreted from
+        # the robot's point of view. This is just for visualization
+        trunk_rotation = self.obs_helper.get_from_obs(sample, "q_trunk_rotation")
+
+        # calc rotation matrix with rotation of trunk
+        rotation = np.array([[np.cos(trunk_rotation), -np.sin(trunk_rotation), 0],
+                             [np.sin(trunk_rotation), np.cos(trunk_rotation), 0],
+                             [0, 0, 1]])
+        dir_arrow_idx = self.obs_helper.obs_idx_map["dir_arrow"]
+        current_rot_mat = sample[dir_arrow_idx]
+        sample[dir_arrow_idx] = np.dot(rotation, current_rot_mat.reshape((3, 3))).reshape((9,))
+
+        # set simulation state
+        super(UnitreeA1, self).set_sim_state(sample)
 
     def _simulation_post_step(self):
         """
-        what to do before the simulation step:
-            update ground forces
-            and set the position of the direction arrow corresponding to the angle in goals[0,0]
+        Sets the correct rotation of the goal arrow and the calculates the
+        statistics of the ground forces if required. This function is
+        called after each step.
+
         """
-        grf = np.concatenate([self._get_collision_force("floor", "foot_FL")[:3],
-                              self._get_collision_force("floor", "foot_FR")[:3],
-                              self._get_collision_force("floor", "foot_RL")[:3],
-                              self._get_collision_force("floor", "foot_RR")[:3]])
 
-        self.mean_grf.update_stats(grf)
+        self._set_goal_arrow()
+        super()._simulation_post_step()
 
-        # adapt orientation of the goal arrow
-        if self.use_2d_ctrl:
-            # read rotation of trunk
-            trunk_rotation = self._data.joint("trunk_rotation").qpos[0]
-            desired_rot = self._goals[0, 0] + trunk_rotation
-            # calc rotation matrix with rotation of trunk
-            rot_matrix = np.array(
-                [[np.cos(desired_rot), -np.sin(desired_rot), 0], [np.sin(desired_rot), np.cos(desired_rot), 0],
-                 [0, 0, 1]])
-            # rotate with the default arrow rotation (else the arrow is vertical)
-            arrow = np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))
-            dir_arrow = np.dot(rot_matrix, arrow).reshape((9,))
-
-            # and set the rotation of the cylinder
-            self._data.site("dir_arrow").xmat = dir_arrow
-            # calc position of the ball corresponding to the arrow
-            self._data.site("dir_arrow_ball").xpos = self._data.body("dir_arrow").xpos + \
-                                                     [-0.1 * np.cos(desired_rot), -0.1 * np.sin(desired_rot), 0]
-
-    def create_dataset(self, actions_path=None, ignore_keys=[], normalizer=None, only_state=True, use_next_states=True):
+    def create_dataset(self, ignore_keys=None):
         """
-        creates dataset for learning with the states stored in self.trajectory
+        Creates a dataset from the specified trajectories.
+
         Args:
-            actions_path: path to actions, if not None only_states must be false
-            ignore_keys: which keys to ignore
-            normalizer: to normalize the states
-            only_state: if the training is with only states
-            use_next_states: if the dataset should consider next states
+            ignore_keys (list): List of keys to ignore in the dataset.
+
         Returns:
-            dictionary with the desired datasets
+            Dictionary containing states, next_states and absorbing flags. For the states the shape is
+            (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
+            (N_traj x N_samples_per_traj).
+
         """
 
-        trajectories = deepcopy(self.trajectory.trajectory)
-
-        # check for has_fallen violations
-
-        for i in range(len(trajectories[0])):
-            try:
-                transposed = np.transpose(trajectories[2:, i])
-                has_fallen_violation = next(x for x in transposed if self.has_fallen(x))
-                np.set_printoptions(threshold=sys.maxsize)
-                raise RuntimeError("has_fallen violation occured: ", has_fallen_violation)
-            except StopIteration:
-                pass
-        print("No has_fallen violation found")
-        # could be helpfull for a new dataset if the ranges in has fallen are still good
-        # print("   Traj minimal height:", min([min(trajectories[2][i]) for i in range(len(trajectories[0]))]))
-        # print("   Traj max x-rotation:",
-        #      max([max(trajectories[4][i], key=abs) for i in range(len(trajectories[0]))], key=abs))
-        # print("   Traj max y-rotation:",
-        #      max([max(trajectories[5][i], key=abs) for i in range(len(trajectories[0]))], key=abs))
-
-        # remove ignore_keys unimportant for training
-        ignore_index = [self.trajectory.keys.index(ikey) for ikey in ignore_keys]
-        for idx in sorted(ignore_index, reverse=True):
-            trajectories = np.delete(trajectories, idx, 0)
-
-        # apply modify obs to every sample to make sure to store the same obs as in training
-        obs_dim = len(self._modify_observation(np.hstack(trajectories[:, 0, 0]), dir_arrow_from_robot_pov=True))
-        new_trajectories = np.empty((obs_dim, trajectories.shape[1], trajectories.shape[2]))
-        for i in range(len(trajectories[0])):
-            transposed_traj = np.transpose(trajectories[:, i])
-            for j in range(len(transposed_traj)):
-                flat_sample = np.hstack(transposed_traj[j])
-                new_trajectories[:, i, j] = self._modify_observation(flat_sample, dir_arrow_from_robot_pov=True)
-        trajectories = new_trajectories
-
-        new_states = []
-        new_next_states = []
-        # for each trajectory in trajectories append to the result vars
-        for i in range(len(trajectories[0])):
-            trajectory = trajectories[:, i]
-            states = np.transpose(trajectory)
-
-            # normalize if needed
-            if normalizer:
-                normalizer.set_state(dict(mean=np.mean(states, axis=0),
-                                          var=1 * (np.std(states, axis=0) ** 2),
-                                          count=1))
-                states = np.array([normalizer(st) for st in states])
-
-            # to obtain next states: shift the dataset by one
-            new_states += list(states[:-1])
-            new_next_states += list(states[1:])
-
-        # if actions are also needed
-        if not only_state:
-            # read values
-            trajectory_files_actions = np.load(actions_path, allow_pickle=True)
-            trajectory_files_actions = {k: d for k, d in trajectory_files_actions.items()}
-            # 3 dim matrix: (no of trajectories, no of samples per trajectory, length of action space)
-            interpolate_factor = self.trajectory.traj_dt / self.trajectory.control_dt
-            # *1/interpolate_factor because if we need to interpolate, split_points is already interpolated
-
-            trajectories_actions = np.array([list(trajectory_files_actions["action"]
-                                                  [int(self.trajectory.split_points[i] * 1 / interpolate_factor + i):
-                                                   int(self.trajectory.split_points[
-                                                           i + 1] * 1 / interpolate_factor + i + 1)])
-                                             for i in range(len(self.trajectory.split_points) - 1)], dtype=object)
-            # interpolate if neccessary
-            if self.trajectory.traj_dt != self.trajectory.control_dt:
-                interpolated_trajectories = [list() for x in range(len(trajectories_actions))]
-                for i in range(len(trajectories_actions)):
-                    trajectory = trajectories_actions[i]
-                    length = len(trajectory)
-                    x = np.arange(length)
-                    x_new = np.linspace(0, length - 1, round(length * interpolate_factor), endpoint=True)
-                    interpolated_trajectories[i] = interpolate.interp1d(x, trajectory, kind="cubic", axis=0)(x_new)
-                trajectories_actions = np.array(interpolated_trajectories)
-            # leave out last action of every trajectory to be even with the states
-            new_actions = []
-            for i in range(len(trajectories_actions)):
-                new_actions += list(trajectories_actions[i, :-1])
-
-        # should be always false for expert data/checked for has_fallen
-        absorbing = np.zeros(len(new_states))
-
-        # depending on the dataset we need, return dictionary
-        if only_state and use_next_states:
-            print("Using only states and next_states for training")
-            return dict(states=np.array(new_states), next_states=np.array(new_next_states), absorbing=absorbing)
-        elif not only_state and not use_next_states:
-            print("Using states and actions for training")
-            return dict(states=np.array(new_states), actions=np.array(new_actions), absorbing=absorbing)
-        elif not only_state and use_next_states:
-            print("Using states, next_states and actions for training")
-            return dict(states=np.array(new_states), next_states=np.array(new_next_states),
-                        actions=np.array(new_actions), absorbing=absorbing)
+        if self.trajectories is not None:
+            rot_mat_idx = self._get_idx("dir_arrow") + 2  # account for x, y missing
+            state_callback_params = dict(rot_mat_idx=rot_mat_idx, goal_velocity_idx=self._goal_velocity_idx)
+            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
+                                                       state_callback=self._modify_observation_callback,
+                                                       state_callback_params=state_callback_params)
+            # check that all state in the dataset satisfy the has fallen method.
+            for state in dataset["states"]:
+                assert self._has_fallen(state) is False, "Some of the states in the created dataset are terminal " \
+                                                         "states. This should not happen."
         else:
-            raise NotImplementedError("Wrong input or method doesn't support this type now")
+            raise ValueError("No trajectory was passed to the environment. "
+                             "To create a dataset pass a trajectory first.")
 
-    # in commit preprocess expert data: to simulate the actions and get states in mujoco to corresponding states;
-    # cut off initial few samples -> but is not up to date/needs adaptions
-
-    def play_action_demo(self, actions_path,
-                         use_rendering=True, use_pd_controller=False, interpolate_map=None, interpolate_remap=None):
-        """
-
-        Plays a demo of the loaded actions by using the actions in actions_path.
-        Args:
-            actions_path: path to the .npz file. Should be in format (number of samples/steps, action dimension)
-            use_rendering: if the mujoco simulation should be rendered
-            use_pd_controller: if the actions should be calculated by a pd controller depending on the positions
-            interpolate_map: used for interpolation of the states
-            interpolate_remap: used for interpolation of the states
-        Returns:
-            observed states and performed actions
-
-        """
-        # set init step and traj no if set; else choose it random
-        traj_no = self._init_traj_no if self._init_traj_no is not None else \
-            int(np.random.rand() * len(self.trajectory.trajectory[0]))
-        step_no = self._init_step_no if self._init_step_no is not None else \
-            int(np.random.rand() * (self.trajectory.traj_length[traj_no] * 0.45))
-
-        # used for initial states
-        trajectory = deepcopy(self.trajectory.trajectory[:, traj_no])
-
-        demo_dt = self.trajectory.traj_dt
-        control_dt = self.trajectory.control_dt
-        interpolate_factor = demo_dt / control_dt
-
-        # load actions
-        action_files = np.load(actions_path, allow_pickle=True)
-        action_files = {k: d for k, d in action_files.items()}
-
-        # *1/interpolate_factor because if interpolation is needed, split_points is already interpolated
-        actions = np.array([list(action_files[key])[int(self.trajectory.split_points[traj_no] * 1 / interpolate_factor):
-                                                    int(self.trajectory.split_points[
-                                                            traj_no + 1] * 1 / interpolate_factor)]
-                            for key in action_files.keys()], dtype=object)[0]
-
-        # interpolate actions
-        if demo_dt != control_dt:
-            x = np.arange(actions.shape[0])
-            x_new = np.linspace(0, actions.shape[0] - 1, round(actions.shape[0] * interpolate_factor),
-                                endpoint=True)
-            actions = interpolate.interp1d(x, actions, kind="cubic", axis=0)(x_new)
-
-        # set x and y to 0: be carefull need to be at index 0,1
-        trajectory[0, :] -= trajectory[0, step_no]
-        trajectory[1, :] -= trajectory[1, step_no]
-
-        # set initial position
-        self.set_qpos_qvel(trajectory[:, step_no])
-
-        # to return the states & actions
-        actions_dataset = []
-        states_dataset = [list() for j in range(len(self.obs_helper.observation_spec))]
-        assert len(states_dataset) == len(self.obs_helper.observation_spec)
-
-        # for kp controller if needed
-        e_old = 0
-        # perform actions
-        for i in np.arange(actions.shape[0] - 1):
-            # choose actions of dataset or pd-controller
-            if not use_pd_controller:
-                action = actions[i]
-            else:
-                e = trajectory[6:18, i + 1] - self._data.qpos[6:]
-                de = e - e_old
-                """
-                kp = np.array([100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100])
-                kd = np.array([1, 2, 2, 1, 2, 2, 1, 2, 2, 1, 2, 2])
-                """
-                kp = 10
-                # kd defined the damping of the joints in the xml file
-                hip = 1
-                rest = 2
-                kd = np.array([hip, rest, rest, hip, rest, rest, hip, rest, rest, hip, rest, rest])
-                action = kp * e + (kd / control_dt) * de
-                e_old = e
-
-            # store actions and states for datasets
-            actions_dataset.append(list(action))
-            q_pos_vel = list(self._data.qpos[:]) + list(self._data.qvel[:])
-            if self.use_2d_ctrl:
-                q_pos_vel.append(list(trajectory[36, i]))  #
-            for i in range(len(states_dataset)):
-                states_dataset[i].append(q_pos_vel[i])
-
-            # preform action
-            nstate, _, absorbing, _ = self.step(action)
-            if use_rendering:
-                self.render()
-
-        return np.array(states_dataset, dtype=object), np.array(actions_dataset)
+        return dataset
 
     def _modify_observation(self, obs):
         """
-        transform the rotation from the simulation to the observation we need for training:
-        transform rotation matrix of the direction arrow into sind and cos of the corresponding angle
+        Transforms the rotation matrix from obs to a sin-cos feature.
 
         Args:
-            obs (np.ndarray): the generated observation
+            obs (np.array): Generated observation.
 
         Returns:
-            The environment observation.
+            The final environment observation for the agent.
 
         """
 
-        new_obs = obs[:34]
-        # transform rotation matrix into rotation angle
-        temp = np.dot(obs[34:43].reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))
-        # depending on the point of view subtract the trunk rotation
-        angle = (np.arctan2(temp[3], temp[0]) + np.pi) % (2 * np.pi) - np.pi
-        # and turn angle to sin, cos (for a closed angle range)
-        new_obs = np.append(new_obs, [np.cos(angle), np.sin(angle)])
-        new_obs = np.append(new_obs, obs[43:])
-        return new_obs
+        rot_mat_idx = self._get_idx("dir_arrow")
+
+        return self._modify_observation_callback(obs, rot_mat_idx, self._goal_velocity_idx)
 
     def _get_reward_function(self, reward_type, reward_params):
         """
@@ -435,15 +209,14 @@ class UnitreeA1(BaseEnv):
             Reward function.
 
         """
-        # todo: here the correct reward needs to be specified
-        if reward_type == "multi_target_velocity":
-            x_vel_idx = self.get_obs_idx("dq_pelvis_tx")
-            assert len(x_vel_idx) == 1
-            x_vel_idx = x_vel_idx[0]
-            n_models = len(self._models)
-            env_id_len = len(self._get_env_id_map(0, n_models))
-            goal_reward_func = MultiTargetVelocityReward(x_vel_idx=x_vel_idx, scalings=self._scalings,
-                                                         env_id_len=env_id_len, **reward_params)
+
+        if reward_type == "velocity_vector":
+            x_vel_idx = self.get_obs_idx("dq_pelvis_tx")[0]
+            y_vel_idx = self.get_obs_idx("dq_pelvis_ty")[0]
+            rot_mat_idx = self.get_obs_idx("dir_arrow")[0]
+            goal_vel_idx = self._goal_velocity_idx
+            goal_reward_func = VelocityVectorReward(x_vel_idx=x_vel_idx, y_vel_idx=y_vel_idx,
+                                                    rot_mat_idx=rot_mat_idx, goal_vel_idx=goal_vel_idx)
         else:
             goal_reward_func = super()._get_reward_function(reward_type, reward_params)
 
@@ -485,6 +258,87 @@ class UnitreeA1(BaseEnv):
         idx_xvel = keys.index("dq_trunk_tx")
         idx_yvel = keys.index("dq_trunk_ty")
         return idx_rot, idx_xvel, idx_yvel
+
+    def _get_ground_forces(self):
+        """
+        Returns the ground forces (np.array).
+
+        """
+
+        grf = np.concatenate([self._get_collision_force("floor", "foot_FL")[:3],
+                              self._get_collision_force("floor", "foot_FR")[:3],
+                              self._get_collision_force("floor", "foot_RL")[:3],
+                              self._get_collision_force("floor", "foot_RR")[:3]])
+
+        return grf
+
+    def _set_goal_arrow(self):
+        """
+        Sets the rotation of the goal arrow based on the current trunk
+        rotation angle and the current goal direction.
+
+        """
+
+        trunk_rotation = self._data.joint("trunk_rotation").qpos[0]
+        desired_angle = self._goal.get_direction() + trunk_rotation
+        rot_mat = angle2mat_xy(desired_angle)
+
+        # and set the rotation of the cylinder
+        self._data.site("dir_arrow").xmat = rot_mat.reshape((9,))
+
+        # calc position of the ball corresponding to the arrow
+        self._data.site("dir_arrow_ball").xpos = self._data.body("dir_arrow").xpos + \
+                                                 [-0.1 * np.cos(desired_angle), -0.1 * np.sin(desired_angle), 0]
+
+    def _init_sim_from_obs(self, obs):
+        """
+        Initializes the simulation from an observation.
+
+        Args:
+            obs (np.array): The observation to set the simulation state to.
+
+        """
+        raise TypeError("Initializing from observation is currently not supported in this environment. ")
+
+    @property
+    def _goal_velocity_idx(self):
+        """
+        The goal speed is not in the observation helper, but only in the trajectory. This is a workaround
+        to access it anyways.
+
+        """
+        return 43
+
+    @staticmethod
+    def _modify_observation_callback(obs, rot_mat_idx, goal_velocity_idx):
+        """
+        Transforms the rotation matrix from obs to a sin-cos feature.
+
+        Args:
+            obs (np.array): Generated observation.
+            rot_mat_idx (int): Index of the beginning rotation matrix in the observation.
+            goal_velocity_idx (int): Index of the goal speed in the observation.
+
+        Returns:
+            The final environment observation for the agent.
+
+        """
+
+        rot_mat = obs[rot_mat_idx:rot_mat_idx+9].reshape((3, 3))
+        # convert mat to angle
+        angle = mat2angle_xy(rot_mat)
+        # transform the angle to be in [-pi, pi] todo: this is not needed anymore when doing sin cos transformation.
+        angle = transform_angle_2pi(angle)
+        # make sin-cos transformation
+        angle = np.array([np.cos(angle), np.sin(angle)])
+
+        # get goal velocity
+        goal_velocity = obs[goal_velocity_idx]
+
+        # concatenate everything to new obs
+        new_obs = np.concatenate([obs[:rot_mat_idx], angle, goal_velocity])
+
+        return new_obs
 
     @staticmethod
     def _add_dir_vector_to_xml_handle(xml_handle):
@@ -604,21 +458,20 @@ class UnitreeA1(BaseEnv):
             has to be one.
 
         """
-        # todo: clean this up
+
+        rot_mat_idx = interpolate_map_params["rot_mat_idx"]
+        trunk_orientation_idx = interpolate_map_params["trunk_orientation_idx"]
         traj_list = [list() for j in range(len(traj))]
         for i in range(len(traj_list)):
             # if the state is a rotation
-            if i in [3, 4, 5]:
+            if i in trunk_orientation_idx:  # todo: not sure if this is actually needed.
                 # change it to the nearest rotation presentation to the previous state
                 # -> no huge jumps between -pi and pi for example
                 traj_list[i] = list(np.unwrap(traj[i]))
             else:
                 traj_list[i] = list(traj[i])
-        # turn matrix into angle
-        traj_list[36] = np.unwrap([
-            np.arctan2(np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))[3],
-                       np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))[0])
-            for mat in traj[36]])
+        # turn matrices into angles todo: this is slow, implement vectorized implementation
+        traj_list[rot_mat_idx] = np.array([mat2angle_xy(mat) for mat in traj[rot_mat_idx]])
         return np.array(traj_list)
 
     @staticmethod
@@ -637,321 +490,17 @@ class UnitreeA1(BaseEnv):
             is one the shape of the array is just (n_trajectories, n_samples).
 
         """
-        # todo: clean this up
+
+        angle_idx = interpolate_remap_params["angle_idx"]
+        trunk_orientation_idx = interpolate_remap_params["trunk_orientation_idx"]
         traj_list = [list() for j in range(len(traj))]
         for i in range(len(traj_list)):
             # if the state is a rotation
-            if i in [3, 4, 5]:
+            if i in trunk_orientation_idx:
                 # make sure it is in range -pi,pi
-                traj_list[i] = [(angle + np.pi) % (2 * np.pi) - np.pi for angle in traj[i]]
+                traj_list[i] = [transform_angle_2pi(angle) for angle in traj[i]]
             else:
                 traj_list[i] = list(traj[i])
-        # transforms angle into rotation matrix
-        traj_list[36] = [
-            np.dot(np.array(
-                [[np.cos((angle + np.pi) % (2 * np.pi) - np.pi), -np.sin((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-                 [np.sin((angle + np.pi) % (2 * np.pi) - np.pi), np.cos((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-                 [0, 0, 1]]),
-                np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))).reshape((9,)) for angle in traj[36]]
+        # transforms angles into rotation matrices todo: this is slow, implement vectorized implementation
+        traj_list[angle_idx] = np.array([angle2mat_xy(angle) for angle in traj[angle_idx]])
         return traj_list
-
-def test_rotate_data(traj_path, rotation_angle, store_path='./new_unitree_a1_with_dir_vec_model'):
-    """
-    tests the rotation of a dataset:
-        adapts the first dataset in traj_path so it looks like the data from training (modified_observation),
-        applies rotation and transforms the rotated data back to the normal obs space
-        so we can simulate it with play_trajectory_demo
-    Returns:
-        path to the dataset rotated with the angle
-    """
-    # load data
-    trajectory_files = np.load(traj_path, allow_pickle=True)
-    trajectory_files = {k: d for k, d in trajectory_files.items()}
-    keys = list(trajectory_files.keys())
-    if "split_points" in trajectory_files.keys():
-        split_points = trajectory_files["split_points"]
-        keys.remove("split_points")
-    else:
-        split_points = np.array([0, len(list(trajectory_files.values())[0])])
-
-    trajectory = np.array([[list(trajectory_files[key])[split_points[i]:split_points[i + 1]] for i
-                            in range(len(split_points) - 1)] for key in keys], dtype=object)
-    # select the first dataset of that path
-    trajectory = trajectory[:, 0]
-
-    # preprocess to get same data as function fit()
-    preprocessed_traj = [list() for i in range(49)]
-    xy = trajectory[:2]
-    for state in trajectory.transpose():
-        temp = []
-        for entry in state[2:]:
-            # to flatten the states (not possible with flatten() because we have as dtype=object
-            if type(entry) == np.ndarray:
-                temp += list(entry)
-            else:
-                temp.append(entry)
-        obs = np.concatenate([temp,
-                              np.zeros(12),
-                              ]).flatten()
-        new_state = obs[:34]
-        # transform rotation matrix into rotation angle
-        temp = np.dot(obs[34:43].reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))
-        angle = np.arctan2(temp[3], temp[0])
-        # and turn angle to sin, cos (for a closed angle range)
-        new_state = np.append(new_state, [np.cos(angle), np.sin(angle)])
-        new_state = np.append(new_state, obs[43:])
-
-        for i in range(len(new_state)):
-            preprocessed_traj[i].append(new_state[i])
-
-    preprocessed_traj = np.array(preprocessed_traj)
-
-    # rotate_data:
-    rotated_traj = rotate_obs(preprocessed_traj, rotation_angle)
-    rotated_xy = [list() for x in range(2)]
-    # don't needed in fit
-    rotated_xy[0] = np.cos(rotation_angle) * np.array(xy[0]) - np.sin(rotation_angle) * np.array(xy[1])
-    rotated_xy[1] = np.sin(rotation_angle) * np.array(xy[0]) + np.cos(rotation_angle) * np.array(xy[1])
-
-    # post process data to be simulatable with play_trajectory_demo:
-    postprocessed_traj = list(rotated_traj[:34])
-    # turn sin and cos into angles again
-    temp = []
-    for j in range(len(rotated_traj[34])):
-        temp.append(np.arccos(rotated_traj[34][j]) * (1 if np.arcsin(rotated_traj[35][j]) > 0 else -1))
-
-    # turn angles into matrix
-    postprocessed_traj.append([
-        np.dot(np.array(
-            [[np.cos((angle + np.pi) % (2 * np.pi) - np.pi), -np.sin((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-             [np.sin((angle + np.pi) % (2 * np.pi) - np.pi), np.cos((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-             [0, 0, 1]]),
-            np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))).reshape((9,)) for angle in temp])
-    postprocessed_traj.append(rotated_traj[36])
-
-    if not os.path.exists(store_path):
-        os.mkdir(store_path)
-
-    # store new dataset
-    np.savez(os.path.join(store_path, 'test_rotate_dataset_' + str(rotation_angle) + '.npz'),
-             q_trunk_tx=rotated_xy[0],
-             q_trunk_ty=rotated_xy[1],
-             q_trunk_tz=postprocessed_traj[0],
-             q_trunk_rotation=postprocessed_traj[1],
-             q_trunk_list=postprocessed_traj[2],
-             q_trunk_tilt=postprocessed_traj[3],
-             q_FR_hip_joint=postprocessed_traj[4],
-             q_FR_thigh_joint=postprocessed_traj[5],
-             q_FR_calf_joint=postprocessed_traj[6],
-             q_FL_hip_joint=postprocessed_traj[7],
-             q_FL_thigh_joint=postprocessed_traj[8],
-             q_FL_calf_joint=postprocessed_traj[9],
-             q_RR_hip_joint=postprocessed_traj[10],
-             q_RR_thigh_joint=postprocessed_traj[11],
-             q_RR_calf_joint=postprocessed_traj[12],
-             q_RL_hip_joint=postprocessed_traj[13],
-             q_RL_thigh_joint=postprocessed_traj[14],
-             q_RL_calf_joint=postprocessed_traj[15],
-             dq_trunk_tx=postprocessed_traj[16],
-             dq_trunk_ty=postprocessed_traj[17],
-             dq_trunk_tz=postprocessed_traj[18],
-             dq_trunk_rotation=postprocessed_traj[19],
-             dq_trunk_list=postprocessed_traj[20],
-             dq_trunk_tilt=postprocessed_traj[21],
-             dq_FR_hip_joint=postprocessed_traj[22],
-             dq_FR_thigh_joint=postprocessed_traj[23],
-             dq_FR_calf_joint=postprocessed_traj[24],
-             dq_FL_hip_joint=postprocessed_traj[25],
-             dq_FL_thigh_joint=postprocessed_traj[26],
-             dq_FL_calf_joint=postprocessed_traj[27],
-             dq_RR_hip_joint=postprocessed_traj[28],
-             dq_RR_thigh_joint=postprocessed_traj[29],
-             dq_RR_calf_joint=postprocessed_traj[30],
-             dq_RL_hip_joint=postprocessed_traj[31],
-             dq_RL_thigh_joint=postprocessed_traj[32],
-             dq_RL_calf_joint=postprocessed_traj[33],
-             dir_arrow=postprocessed_traj[34],
-             goal_speed=postprocessed_traj[35],
-             split_points=[0, len(postprocessed_traj[0])])
-
-    # and return path to first rotation dataset
-    return os.path.join(store_path, 'test_rotate_dataset_' + str(rotation_angle) + '.npz')
-
-
-@contextmanager
-def catchtime() -> float:
-    start = perf_counter()
-    yield lambda: perf_counter() - start
-
-
-def interpolate_map(traj):
-    """
-    preprocesses the trajectory data before interpolating it:
-        in this case transforming the rotation matrix into an angle
-        and making sure the rotations we be interpolated right
-    """
-    traj_list = [list() for j in range(len(traj))]
-    for i in range(len(traj_list)):
-        # if the state is a rotation
-        if i in [3, 4, 5]:
-            # change it to the nearest rotation presentation to the previous state
-            # -> no huge jumps between -pi and pi for example
-            traj_list[i] = list(np.unwrap(traj[i]))
-        else:
-            traj_list[i] = list(traj[i])
-    # turn matrix into angle
-    traj_list[36] = np.unwrap([
-        np.arctan2(np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))[3],
-                   np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))[0])
-        for mat in traj[36]])
-    return np.array(traj_list)
-
-
-def interpolate_remap(traj):
-    """
-    postprocesses the trajectory data after interpolating it:
-        in this case transforming an angle into the rotation matrix
-        and makes sure the rotations are in the range -pi,pi
-    """
-    traj_list = [list() for j in range(len(traj))]
-    for i in range(len(traj_list)):
-        # if the state is a rotation
-        if i in [3, 4, 5]:
-            # make sure it is in range -pi,pi
-            traj_list[i] = [(angle + np.pi) % (2 * np.pi) - np.pi for angle in traj[i]]
-        else:
-            traj_list[i] = list(traj[i])
-    # transforms angle into rotation matrix
-    traj_list[36] = [
-        np.dot(np.array(
-            [[np.cos((angle + np.pi) % (2 * np.pi) - np.pi), -np.sin((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-             [np.sin((angle + np.pi) % (2 * np.pi) - np.pi), np.cos((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-             [0, 0, 1]]),
-               np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))).reshape((9,)) for angle in traj[36]]
-    return traj_list
-
-
-def reward_callback(state, action, next_state):
-    """
-    defines the reward how we want to measure the quality of a state
-        important: only a metric for the comparison of different agents
-        it's the difference between the desired velocity vector and the actual velocity vector of the trunk
-    """
-    # actual velocity vecotr
-    act_vel = np.array([state[16], state[17]])
-    # desired velocity vector with desired angle/direction
-    mat = np.dot(state[34:43].reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape(((9,)))
-    angle = np.arctan2(mat[3], mat[0])
-    norm_x = np.cos(angle)
-    norm_y = np.sin(angle)
-
-    wanted_vel = state[43] * np.array([norm_x, norm_y])
-    result = act_vel - wanted_vel
-    return np.exp(-np.square(np.linalg.norm(result)))
-
-
-if __name__ == '__main__':
-
-    #trajectory demo ---------------------------------------------------------------------------------------------------
-    #define env and data frequencies
-    env_freq = 1000  # hz, added here as a reminder
-    traj_data_freq = 500 #500 change interpolation in test_rotate too!!! # hz, added here as a reminder
-    desired_contr_freq = 100  # hz
-    n_substeps = env_freq // desired_contr_freq
-
-    traj_path =  '/home/moore/DataGeneration/data_generation/Quadruped_Unitree_A1/tim_quadruped_data/data/states_2023_02_23_19_48_33.npz' #'/home/tim/Documents/locomotion_simulation/locomotion/examples/log/2023_02_23_19_22_49/states.npz'#
-
-    rotation_angle = np.pi
-    # todo create dir if it does not exist
-    #traj_path = test_rotate_data(traj_path, rotation_angle, store_path='./new_unitree_a1_with_dir_vec_model')
-
-    # prepare trajectory params
-    traj_params = dict(traj_path=traj_path,
-                       traj_dt=(1 / traj_data_freq),
-                       control_dt=(1 / desired_contr_freq))
-    gamma = 0.99
-    horizon = 1000
-
-    env = UnitreeA1(timestep=1/env_freq, gamma=gamma, horizon=horizon, n_substeps=n_substeps, use_torque_ctrl=True,
-                    traj_params=traj_params, random_start=False, init_step_no=0, init_traj_no=0,
-                    use_2d_ctrl=True, tmp_dir_name=".",
-                    goal_reward="custom", goal_reward_params=dict(reward_callback=reward_callback))
-    exit()
-    # action_dim = env.info.action_space.shape[0]
-    # print("Dimensionality of Obs-space:", env.info.observation_space.shape[0])
-    # print("Dimensionality of Act-space:", env.info.action_space.shape[0])
-    #
-    # with catchtime() as t:
-    #     env.play_trajectory_demo(desired_contr_freq)
-    #     print("Time: %fs" % t())
-    # exit()
-
-    # play action demo -------------------------------------------------------------------------------------------------
-    # define env and data frequencies
-    env_freq = 1000  # hz, added here as a reminder simulation freq
-    traj_data_freq = 500  # hz, added here as a reminder
-    desired_contr_freq = 100  # hz
-    n_substeps = env_freq // desired_contr_freq
-
-    actions_path = '/home/moore/DataGeneration/data_generation/Quadruped_Unitree_A1/tim_quadruped_data/data/actions_position_2023_02_23_19_48_33_straight.npz'  # '/home/tim/Documents/IRL_unitreeA1/data/actions_position_2023_02_23_19_48_33_straight.npz'
-    states_path = '/home/moore/DataGeneration/data_generation/Quadruped_Unitree_A1/tim_quadruped_data/data/states_2023_02_23_19_48_33_straight.npz'  # '/home/tim/Documents/IRL_unitreeA1/data/states_2023_02_23_19_48_33_straight.npz'#
-    use_rendering = True
-    use_pd_controller = False
-
-    use_2d_ctrl = True
-    use_torque_ctrl = False
-
-    gamma = 0.99
-    horizon = 1000
-
-    traj_params = dict(traj_path=states_path,
-                       traj_dt=1 / traj_data_freq,
-                       control_dt=1 / desired_contr_freq,
-                       interpolate_map=interpolate_map,  # transforms 9dim rot matrix into one rot angle
-                       interpolate_remap=interpolate_remap  # and back
-                       )
-
-    env = UnitreeA1(timestep=1 / env_freq, gamma=gamma, horizon=horizon, n_substeps=n_substeps, traj_params=traj_params,
-                    random_start=False, init_step_no=0, init_traj_no=0,
-                    use_torque_ctrl=use_torque_ctrl, use_2d_ctrl=use_2d_ctrl)
-
-    dataset = env.create_dataset()
-
-    action_dim = env.info.action_space.shape[0]
-    print("Dimensionality of Obs-space:", env.info.observation_space.shape[0])
-    print("Dimensionality of Act-space:", env.info.action_space.shape[0])
-
-    env.reset()
-
-    env.play_action_demo(actions_path=actions_path,
-                         use_rendering=use_rendering, use_pd_controller=use_pd_controller,
-                         interpolate_map=interpolate_map, interpolate_remap=interpolate_remap)
-    print("Finished")
-    exit()
-
-    # simulation demo --------------------------------------------------------------------------------------------------
-
-    env_freq = 1000  # hz, added here as a reminder simulation freq
-    traj_data_freq = 500  # hz, added here as a reminder
-    desired_contr_freq = 100  # hz
-    n_substeps = env_freq // desired_contr_freq
-
-    gamma = 0.99
-    horizon = 1000
-
-    env = UnitreeA1(timestep=1 / env_freq, gamma=gamma, horizon=horizon, n_substeps=n_substeps,
-                    use_torque_ctrl=False, use_2d_ctrl=True, tmp_dir_name='.', setup_random_rot=True)
-    action_dim = env.info.action_space.shape[0]
-    print("Dimensionality of Obs-space:", env.info.observation_space.shape[0])
-    print("Dimensionality of Act-space:", env.info.action_space.shape[0])
-
-    env.reset()
-    env.render()
-    while True:
-        action = np.random.randn(action_dim)
-        nstate, _, absorbing, _ = env.step(action)
-        env.render()
-
-
-
-

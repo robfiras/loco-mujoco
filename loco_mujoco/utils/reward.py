@@ -1,5 +1,5 @@
 import numpy as np
-
+from loco_mujoco.utils.math import mat2angle_xy
 
 class RewardInterface:
     """
@@ -38,6 +38,16 @@ class NoReward(RewardInterface):
 
     def __call__(self, state, action, next_state, absorbing):
         return 0
+
+
+class PosReward(RewardInterface):
+
+    def __init__(self, pos_idx):
+        self._pos_idx = pos_idx
+
+    def __call__(self, state, action, next_state, absorbing):
+        pos = state[self._pos_idx]
+        return pos
 
 
 class CustomReward(RewardInterface):
@@ -86,11 +96,24 @@ class MultiTargetVelocityReward(RewardInterface):
         return np.exp(- np.square(x_vel - target_vel))
 
 
-class PosReward(RewardInterface):
+class VelocityVectorReward(RewardInterface):
 
-    def __init__(self, pos_idx):
-        self._pos_idx = pos_idx
+    def __init__(self, x_vel_idx, y_vel_idx, rot_mat_idx, goal_vel_idx):
+        self._x_vel_idx = x_vel_idx
+        self._y_vel_idx = y_vel_idx
+        self._rot_mat_idx = rot_mat_idx
+        self._goal_vel_idx = goal_vel_idx
 
     def __call__(self, state, action, next_state, absorbing):
-        pos = state[self._pos_idx]
-        return pos
+
+        # get current velocity vector in x-y-plane
+        curr_velocity_xy = np.array([state[self._x_vel_idx], state[self._y_vel_idx]])
+
+        # get desired velocity vector in x-y-plane
+        rot_mat = state[self._rot_mat_idx].reshape((3, 3))
+        angle = mat2angle_xy(rot_mat)
+        norm_x = np.cos(angle)
+        norm_y = np.sin(angle)
+        des_vel = state[self._goal_vel_idx] * np.array([norm_x, norm_y])
+
+        return np.exp(-np.square(np.linalg.norm(curr_velocity_xy - des_vel)))
