@@ -14,8 +14,9 @@ class Trajectory(object):
     All trajectories are required to be of equal length.
 
     """
-    def __init__(self, keys, traj_path, low, high, joint_pos_idx, traj_dt=0.002, control_dt=0.01, ignore_keys=None,
-                 interpolate_map=None, interpolate_remap=None):
+    def __init__(self, keys, traj_path, low, high, joint_pos_idx, interpolate_map, interpolate_remap,
+             interpolate_map_params=None, interpolate_remap_params=None,
+             traj_dt=0.002, control_dt=0.01, ignore_keys=None):
         """
         Constructor.
 
@@ -32,6 +33,8 @@ class Trajectory(object):
             interpolate_map (func): Function used to map a trajectory to some space that allows interpolation.
             interpolate_remap (func): Function used to map a transformed trajectory back to the original space after
                 interpolation.
+            interpolate_map_params: Set of parameters needed to do the interpolation by the Unitree environment.
+            interpolate_remap_params: Set of parameters needed to do the interpolation by the Unitree environment.
 
         """
 
@@ -58,20 +61,25 @@ class Trajectory(object):
         else:
             self.split_points = np.array([0, len(list(self._trajectory_files.values())[0])])
 
-        # 3d matrix: (len state space, no trajectories, no of samples)
-        self.trajectories = np.array([[list(self._trajectory_files[key])[self.split_points[i]:self.split_points[i+1]]
-                                     for i in range(len(self.split_points)-1)] for key in keys])
+        #  Extract trajectory from files. This returns a list of np.arrays. The length of the
+        #  list is the number of observations. Each np.array has the shape
+        #  (n_trajectories, n_samples, (dim_observation)). If dim_observation is one
+        #  the shape of the array is just (n_trajectories, n_samples).
+        self.trajectories = self._extract_trajectory_from_files()
 
         self.traj_dt = traj_dt
         self.control_dt = control_dt
 
         # interpolation of the trajectories
         if self.traj_dt != control_dt:
-            self._interpolate_trajectories(map_funct=interpolate_map, re_map_funct=interpolate_remap)
+            self._interpolate_trajectories(map_funct=interpolate_map,
+                                           map_params=interpolate_map_params,
+                                           re_map_funct=interpolate_remap,
+                                           re_map_params=interpolate_remap_params)
 
         self.subtraj_step_no = 0
         self.traj_no = 0
-        self.subtraj = self.trajectories[:, self.traj_no].copy()
+        self.subtraj = self._get_subtraj(self.traj_no)
 
     def create_dataset(self, ignore_keys=None):
         """
@@ -95,7 +103,9 @@ class Trajectory(object):
                 del all_data[ikey]
 
         traj = list(all_data.values())
-        states = np.transpose(deepcopy(np.array(traj)))
+
+        # create states array shape=(n_states, dim_obs)
+        states = np.concatenate(traj, axis=1)
 
         # convert to dict with states and next_states
         new_states = states[:-1]
@@ -104,43 +114,82 @@ class Trajectory(object):
 
         return dict(states=new_states, next_states=new_next_states, absorbing=absorbing)
 
-    def _interpolate_trajectories(self, map_funct=None, re_map_funct=None):
+    def _extract_trajectory_from_files(self):
         """
-        Interpolates all trajectories.
+        Extracts the trajectory from the trajectory files by filtering for the relevant keys.
+        The trajectory is then split to multiple trajectories using the split points.
+
+        Returns:
+            A list of np.arrays. The length of the list is the number of observations.
+            Each np.array has the shape (n_trajectories, n_samples, (dim_observation)).
+            If dim_observation is one the shape of the array is just (n_trajectories, n_samples).
+
+        """
+
+        # load data of relevant keys
+        trajectories = [self._trajectory_files[key] for key in self.keys]
+
+        # check that all observations have equal lengths
+        len_obs = np.array([len(obs) for obs in trajectories])
+        assert np.all(len_obs == len_obs[0]), "Some observations have different lengths than others. " \
+                                              "Trajectory is corrupted. "
+
+        # split trajectory into multiple trajectories using split points
+        for i in range(len(trajectories)):
+            trajectories[i] = np.split(trajectories[i], self.split_points[1:-1])
+            # check if all trajectories are of equal length
+            len_trajectories = np.array([len(traj) for traj in trajectories[i]])
+            assert np.all(len_trajectories == len_trajectories[0]), "Only trajectories of equal length " \
+                                                                    "are currently supported."
+            trajectories[i] = np.array(trajectories[i])
+
+        return trajectories
+
+    def _interpolate_trajectories(self, map_funct, re_map_funct, map_params, re_map_params):
+        """
+        Interpolates all trajectories cubically.
 
         Args:
             map_funct (func): Function used to map a trajectory to some space that allows interpolation.
             re_map_funct (func): Function used to map a transformed trajectory back to the original space after
                 interpolation.
+            map_params: Set of parameters needed to do the interpolation by the respective environment.
+            re_map_params: Set of parameters needed to do the interpolation by the respective environment.
 
         """
+
         assert (map_funct is None) == (re_map_funct is None)
 
         new_trajs = list()
 
         # interpolate over each trajectory
-        for traj in np.rollaxis(self.trajectories, 1):
+        for i in range(self.number_of_trajectories):
 
-            x = np.arange(traj.shape[1])
+            traj = [obs[i] for obs in self.trajectories]
+
+            x = np.arange(self.trajectory_length)
             new_traj_sampling_factor = self.traj_dt / self.control_dt
-            x_new = np.linspace(0, traj.shape[1] - 1, round(traj.shape[1] * new_traj_sampling_factor), endpoint=True)
+            x_new = np.linspace(0, self.trajectory_length - 1, round(self.trajectory_length * new_traj_sampling_factor),
+                                endpoint=True)
 
             # preprocess trajectory
-            if map_funct is not None:
-                traj = map_funct(traj)
+            traj = map_funct(traj) if map_params is None else map_funct(traj, **map_params)
 
             new_traj = interpolate.interp1d(x, traj, kind="cubic", axis=1)(x_new)
 
             # postprocess trajectory
-            if re_map_funct is not None:
-                new_traj = re_map_funct(new_traj)
+            new_traj = re_map_funct(new_traj) if re_map_params is None else re_map_funct(new_traj, **re_map_params)
 
             new_trajs.append(new_traj)
 
-        if len(new_trajs) == 1:
-            self.trajectories = np.expand_dims(new_trajs[0], axis=1)
-        else:
-            self.trajectories = np.concatenate(new_trajs, axis=1)
+        # convert trajectory back to original shape
+        trajectories = []
+        for i in range(self.number_obs_trajectory):
+            trajectories.append([])
+            for traj in new_trajs:
+                trajectories[i].append(traj[i])
+            trajectories[i] = np.array(trajectories[i])
+        self.trajectories = trajectories
 
         # todo: this is currently not working properly, maybe this is not even needed
         # interpolation of split_points
@@ -177,13 +226,15 @@ class Trajectory(object):
             self.subtraj_step_no = substep_no
 
         # choose a sub trajectory
-        self.subtraj = self.trajectories[:, self.traj_no].copy()
+        self.subtraj = self._get_subtraj(self.traj_no)
 
         # reset x and y to middle position
-        self.subtraj[0] -= self.subtraj[0, self.subtraj_step_no]
-        self.subtraj[1] -= self.subtraj[1, self.subtraj_step_no]
+        self.subtraj[0] -= self.subtraj[0][self.subtraj_step_no]
+        self.subtraj[1] -= self.subtraj[1][self.subtraj_step_no]
 
-        return self.subtraj[:, self.subtraj_step_no]
+        sample = [obs[self.subtraj_step_no] for obs in self.subtraj]
+
+        return sample
 
     def check_if_trajectory_is_in_range(self, low, high, keys, j_idx):
 
@@ -217,16 +268,49 @@ class Trajectory(object):
         if self.subtraj_step_no == self.trajectory_length:
             sample = self.reset_trajectory(substep_no=0)
         else:
-            sample = deepcopy(self.subtraj[:, self.subtraj_step_no])
+            sample = self._get_ith_sample_from_subtraj(self.subtraj_step_no)
 
         return sample
 
     def flattened_trajectories(self):
         """
-        Returns the trajectories flattened in the N_traj dimension.
+        Returns the trajectories flattened in the N_traj dimension. Also expands dim if obs has dimension 1.
 
         """
-        return self.trajectories.reshape((len(self.trajectories), -1))
+        trajectories = []
+        for obs in self.trajectories:
+            if len(obs.shape) == 2:
+                trajectories.append(obs.reshape((-1, 1)))
+            elif len(obs.shape) == 3:
+                trajectories.append(obs.reshape((-1, obs.shape[2])))
+            else:
+                raise ValueError("Unsupported shape of observation %s." % obs.shape)
+
+        return trajectories
+
+    def _get_subtraj(self, i):
+        """
+        Returns a copy of the i-th trajectory included in trajectories.
+
+        """
+
+        return [obs[i].copy() for obs in self.trajectories]
+
+    def _get_ith_sample_from_subtraj(self, i):
+        """
+        Returns a copy of the i-th sample included in the current subtraj.
+
+        """
+
+        return [obs[i].copy() for obs in self.subtraj]
+
+    @property
+    def number_obs_trajectory(self):
+        """
+        Returns the number of observations in the trajectory.
+
+        """
+        return len(self.trajectories)
 
     @property
     def trajectory_length(self):
@@ -234,7 +318,7 @@ class Trajectory(object):
         Returns the length of a trajectory. Note that all trajectories have to be equal in length.
 
         """
-        return self.trajectories.shape[-1]
+        return self.trajectories[0].shape[1]
 
     @property
     def number_of_trajectories(self):
@@ -242,4 +326,4 @@ class Trajectory(object):
         Returns the number of trajectories.
 
         """
-        return self.trajectories.shape[1]
+        return self.trajectories[0].shape[0]

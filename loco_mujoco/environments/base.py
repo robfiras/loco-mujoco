@@ -3,7 +3,6 @@ import warnings
 from tempfile import mkdtemp
 
 import mujoco
-import numpy as np
 from dm_control import mjcf
 
 from mushroom_rl.environments import MultiMuJoCo
@@ -124,6 +123,10 @@ class BaseEnv(MultiMuJoCo):
                                        low=self.info.observation_space.low,
                                        high=self.info.observation_space.high,
                                        joint_pos_idx=self.obs_helper.joint_pos_idx,
+                                       interpolate_map=self._interpolate_map,
+                                       interpolate_remap=self._interpolate_remap,
+                                       interpolate_map_params=self._get_interpolate_map_params(),
+                                       interpolate_remap_params=self._get_interpolate_remap_params(),
                                        **traj_params)
 
     def reward(self, state, action, next_state, absorbing):
@@ -287,6 +290,7 @@ class BaseEnv(MultiMuJoCo):
         sample = self.trajectories.reset_trajectory(substep_no=1)
         self.set_sim_state(sample)
         len_qpos, len_qvel = self._len_qpos_qvel()
+        # todo: adapt this to new trajectory format.
         curr_qpos = sample[0:len_qpos]
         while True:
 
@@ -313,7 +317,7 @@ class BaseEnv(MultiMuJoCo):
         Sets the state of the simulation according to an observation.
 
         Args:
-            sample (np.array): Sample used to set the joint positions and velocities.
+            sample (list or np.array): Sample used to set the state of the simulation.
 
         """
 
@@ -327,6 +331,7 @@ class BaseEnv(MultiMuJoCo):
             elif ot == ObservationType.JOINT_VEL:
                 self._data.joint(name).qvel = value
             elif ot == ObservationType.SITE_ROT:
+                assert len(value.shape) == 2
                 self._data.site(name).xmat = value
 
     def _get_observation_space(self):
@@ -552,6 +557,63 @@ class BaseEnv(MultiMuJoCo):
         """
         
         raise NotImplementedError
+
+    def _get_interpolate_map_params(self):
+        """
+        Returns all parameters needed to do the interpolation mapping for the respective environment.
+
+        """
+
+        pass
+
+    def _get_interpolate_remap_params(self):
+        """
+        Returns all parameters needed to do the interpolation remapping for the respective environment.
+
+        """
+
+        pass
+
+    @staticmethod
+    def _interpolate_map(traj, **interpolate_map_params):
+        """
+        A mapping that is supposed to transform a trajectory into a space where interpolation is
+        allowed. E.g., maps a rotation matrix to a set of angles. If this function is not
+        overwritten, it just converts the list of np.arrays to a np.array.
+
+        Args:
+            traj (list): List of np.arrays containing each observations. Each np.array
+                has the shape (n_trajectories, n_samples, (dim_observation)). If dim_observation
+                is one the shape of the array is just (n_trajectories, n_samples).
+            interpolate_map_params: Set of parameters needed by the individual environments.
+
+        Returns:
+            A np.array with shape (n_observations, n_trajectories, n_samples). dim_observation
+            has to be one.
+
+        """
+
+        return np.array(traj)
+
+    @staticmethod
+    def _interpolate_remap(traj, **interpolate_remap_params):
+        """
+        The corresponding backwards transformation to _interpolation_map. If this function is
+        not overwritten, it just converts the np.array to a list of np.arrays.
+
+        Args:
+            traj (np.array): Trajectory as np.array with shape (n_observations, n_trajectories, n_samples).
+            dim_observation is one.
+            interpolate_remap_params: Set of parameters needed by the individual environments.
+
+        Returns:
+            List of np.arrays containing each observations. Each np.array has the shape
+            (n_trajectories, n_samples, (dim_observation)). If dim_observation
+            is one the shape of the array is just (n_trajectories, n_samples).
+
+        """
+
+        return [obs for obs in traj]
 
     @staticmethod
     def _delete_from_xml_handle(xml_handle, joints_to_remove, motors_to_remove, equ_constraints):

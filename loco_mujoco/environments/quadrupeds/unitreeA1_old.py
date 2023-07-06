@@ -20,98 +20,201 @@ from mushroom_rl.utils import spaces
 from mushroom_rl.utils.angles import quat_to_euler
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
+from mushroom_rl.environments.mujoco_envs.humanoids.trajectory import Trajectory
+
+import matplotlib.pyplot as plt
+import random
+
+from mushroom_rl.environments.mujoco_envs.humanoids.reward import NoGoalReward, CustomReward
 
 from loco_mujoco.environments import BaseEnv
-from loco_mujoco.utils.reward import MultiTargetVelocityReward
-from loco_mujoco.utils.dataset import rotate_obs
+
+# optional imports
+try:
+    mujoco_viewer_available = True
+    import mujoco_viewer
+except ModuleNotFoundError:
+    mujoco_viewer_available = False
+
 
 class UnitreeA1(BaseEnv):
     """
     Mujoco simulation of unitree A1 model
-
     """
 
-    def __init__(self, use_torque_ctrl=True, setup_random_rot=False, tmp_dir_name=None, **kwargs):
+    def __init__(self, gamma=0.99, horizon=1000, n_substeps=10, timestep=0.001, random_start=False,
+                 init_step_no=None, init_traj_no=None, traj_params=None, goal_reward=None, goal_reward_params=None,
+                 use_torque_ctrl=True, use_2d_ctrl=False, tmp_dir_name=None, setup_random_rot=False):
         """
         Constructor.
-
         Args:
-            use_torque_ctrl (bool): If True, the Unitree uses torque control, else position control;
-            setup_random_rot (bool): If True, the robot is initialized with a random rotation;
-            tmp_dir_name (str): Specifies a name of a directory to which temporary files are
-                written, if created. By default, temporary directory names are created automatically.
-
+            gamma (float): The discounting factor of the environment;
+            horizon (int): The maximum horizon for the environment;
+            n_substeps (int, 1): The number of substeps to use by the MuJoCo
+                simulator. An action given by the agent will be applied for
+                n_substeps before the agent receives the next observation and
+                can act accordingly;
+            timestep (float): The timestep used by the MuJoCo
+                simulator. If None, the default timestep specified in the XML will be used;
+            random_start (bool): if the robot should start in a random state from self.trajectory
+            init_step_no (int): if not random start in which step no the robot should start
+            init_traj_no (int): no of trajectory if multiple trajectories are in self.trajectory
+            traj_params (list): list of parameters for the trajectory class
+            goal_reward (str): how the reward should be calculated; options: "custom", "target_velocity", None
+            goal_reward_params (list): parameters for a custom goal reward
+            use_torque_ctrl (bool): if the unitree should use torque or position control
+            use_2d_ctrl (bool): if the goal is to walk in two dimensions: will add a direction arrow to distinguish
+                between different directions
+            tmp_dir_name (str): path to a temporary directory to store the temporary new xml file with the
+                direction arrow
+            setup_random_rot (bool): if the robot should be set up with a random rotation
         """
-
-        # Choose xml file (either for torque or position control)
+        # different xml files for torque and position control
         if use_torque_ctrl:
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_torque.xml").as_posix()
-            print("Using torque-control for Unitree A1.")
+            xml_path = "/home/moore/PycharmProjects/loco-mujoco/loco_mujoco/environments/data/quadrupeds"
+            print("Using torque-control for unitreeA1")
         else:
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_position.xml").as_posix()
-            print("Using position-control for Unitree A1.")
+            print("Using position-control for unitreeA1")
 
-        action_spec = self._get_action_specification()
+        # motors
+        action_spec = [
+            "FR_hip", "FR_thigh", "FR_calf",
+            "FL_hip", "FL_thigh", "FL_calf",
+            "RR_hip", "RR_thigh", "RR_calf",
+            "RL_hip", "RL_thigh", "RL_calf"]
+        observation_spec = [
+            # ------------------- JOINT POS -------------------
+            # --- Trunk ---
+            ("q_trunk_tx", "trunk_tx", ObservationType.JOINT_POS),
+            ("q_trunk_ty", "trunk_ty", ObservationType.JOINT_POS),
+            ("q_trunk_tz", "trunk_tz", ObservationType.JOINT_POS),
+            ("q_trunk_rotation", "trunk_rotation", ObservationType.JOINT_POS),
+            ("q_trunk_list", "trunk_list", ObservationType.JOINT_POS),
+            ("q_trunk_tilt", "trunk_tilt", ObservationType.JOINT_POS),
+            # --- Front ---
+            ("q_FR_hip_joint", "FR_hip_joint", ObservationType.JOINT_POS),
+            ("q_FR_thigh_joint", "FR_thigh_joint", ObservationType.JOINT_POS),
+            ("q_FR_calf_joint", "FR_calf_joint", ObservationType.JOINT_POS),
+            ("q_FL_hip_joint", "FL_hip_joint", ObservationType.JOINT_POS),
+            ("q_FL_thigh_joint", "FL_thigh_joint", ObservationType.JOINT_POS),
+            ("q_FL_calf_joint", "FL_calf_joint", ObservationType.JOINT_POS),
+            # --- Rear ---
+            ("q_RR_hip_joint", "RR_hip_joint", ObservationType.JOINT_POS),
+            ("q_RR_thigh_joint", "RR_thigh_joint", ObservationType.JOINT_POS),
+            ("q_RR_calf_joint", "RR_calf_joint", ObservationType.JOINT_POS),
+            ("q_RL_hip_joint", "RL_hip_joint", ObservationType.JOINT_POS),
+            ("q_RL_thigh_joint", "RL_thigh_joint", ObservationType.JOINT_POS),
+            ("q_RL_calf_joint", "RL_calf_joint", ObservationType.JOINT_POS),
+            # ------------------- JOINT VEL -------------------
+            # --- Trunk ---
+            ("dq_trunk_tx", "trunk_tx", ObservationType.JOINT_VEL),
+            ("dq_trunk_ty", "trunk_ty", ObservationType.JOINT_VEL),
+            ("dq_trunk_tz", "trunk_tz", ObservationType.JOINT_VEL),
+            ("dq_trunk_rotation", "trunk_rotation", ObservationType.JOINT_VEL),
+            ("dq_trunk_list", "trunk_list", ObservationType.JOINT_VEL),
+            ("dq_trunk_tilt", "trunk_tilt", ObservationType.JOINT_VEL),
+            # --- Front ---
+            ("dq_FR_hip_joint", "FR_hip_joint", ObservationType.JOINT_VEL),
+            ("dq_FR_thigh_joint", "FR_thigh_joint", ObservationType.JOINT_VEL),
+            ("dq_FR_calf_joint", "FR_calf_joint", ObservationType.JOINT_VEL),
+            ("dq_FL_hip_joint", "FL_hip_joint", ObservationType.JOINT_VEL),
+            ("dq_FL_thigh_joint", "FL_thigh_joint", ObservationType.JOINT_VEL),
+            ("dq_FL_calf_joint", "FL_calf_joint", ObservationType.JOINT_VEL),
+            # --- Rear ---
+            ("dq_RR_hip_joint", "RR_hip_joint", ObservationType.JOINT_VEL),
+            ("dq_RR_thigh_joint", "RR_thigh_joint", ObservationType.JOINT_VEL),
+            ("dq_RR_calf_joint", "RR_calf_joint", ObservationType.JOINT_VEL),
+            ("dq_RL_hip_joint", "RL_hip_joint", ObservationType.JOINT_VEL),
+            ("dq_RL_thigh_joint", "RL_thigh_joint", ObservationType.JOINT_VEL),
+            ("dq_RL_calf_joint", "RL_calf_joint", ObservationType.JOINT_VEL)]
 
-        observation_spec = self._get_observation_specification()
-
+        # important contact forces
         collision_groups = [("floor", ["floor"]),
                             ("foot_FR", ["FR_foot"]),
                             ("foot_FL", ["FL_foot"]),
                             ("foot_RR", ["RR_foot"]),
                             ("foot_RL", ["RL_foot"])]
 
-        # append observation_spec with the direction arrow and add it to the xml file
-        observation_spec.append(("dir_arrow", "dir_arrow", ObservationType.SITE_ROT))
-        xml_handle = self._add_dir_vector_to_xml_handle(mjcf.from_path(xml_path))
-        xml_path = self._save_xml_handle(xml_handle, tmp_dir_name)
-
+        if use_2d_ctrl:
+            # append observation_spec with the direction arrow & add it to a temporary xml file
+            observation_spec.append(("dir_arrow", "dir_arrow", ObservationType.SITE_ROT))
+            assert tmp_dir_name is not None, "If you want to use 2d_ctrl, you have to specify a" \
+                                             "directory name for the xml-files to be saved."
+            xml_handle = self.add_dir_vector_to_xml_handle(mjcf.from_path(xml_path))
+            xml_path = self.save_xml_handle(xml_handle, tmp_dir_name)
+        self.use_2d_ctrl = use_2d_ctrl
         self.setup_random_rot = setup_random_rot
 
-        super().__init__(xml_path, action_spec, observation_spec,  collision_groups, **kwargs)
+        super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon, n_substeps=n_substeps,
+                         timestep=timestep, collision_groups=collision_groups, traj_params=traj_params,
+                         init_step_no=init_step_no, init_traj_no=init_traj_no, goal_reward=goal_reward,
+                         goal_reward_params=goal_reward_params, random_start=random_start)
 
-    def setup(self, obs):
+    def _modify_observation(self, obs, dir_arrow_from_robot_pov=False):
         """
-        Function to setup the initial state of the simulation. Initialization can be done either
-        randomly, from a certain initial, or from the default initial state of the model.
+        transform the rotation from the simulation to the observation we need for training:
+        transform rotation matrix of the direction arrow into sind and cos of the corresponding angle
 
         Args:
-            obs (np.array): Observation to initialize the environment from;
+            obs (np.ndarray): the generated observation
+            dir_arrow_from_robot_pov (Bool): if the rotation angle is from the robot pov or in absolute coordinates
+
+        Returns:
+            The environment observation.
 
         """
+        if self.use_2d_ctrl:
+            new_obs = obs[:34]
+            # transform rotation matrix into rotation angle
+            temp = np.dot(obs[34:43].reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))
+            # depending on the point of view substract the trunk rotation
+            if dir_arrow_from_robot_pov:
+                angle = (np.arctan2(temp[3], temp[0]) + np.pi) % (2 * np.pi) - np.pi
+            else:
+                angle = (np.arctan2(temp[3], temp[0]) - obs[1] + np.pi) % (2 * np.pi) - np.pi
+            # and turn angle to sin, cos (for a closed angle range)
+            new_obs = np.append(new_obs, [np.cos(angle), np.sin(angle)])
+            new_obs = np.append(new_obs, obs[43:])
+            return new_obs
+        return obs
 
-        self._reward_function.reset_state()
+    def add_dir_vector_to_xml_handle(self, xml_handle):
+        """
+        add the xml elements for the direction arrow
+        """
+        # find trunk and attach direction arrow
+        trunk = xml_handle.find("body", "trunk")
+        trunk.add("body", name="dir_arrow", pos="0 0 0.15")
+        dir_vec = xml_handle.find("body", "dir_arrow")
+        dir_vec.add("site", name="dir_arrow_ball", type="sphere", size=".03", pos="-.1 0 0")
+        dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="-.1 0 0 .1 0 0")
 
-        if obs is not None:
-            self._init_sim_from_obs(obs)
-        else:
-            if not self.trajectories and self._random_start:
-                raise ValueError("Random start not possible without trajectory data.")
-            elif not self.trajectories and self._init_step_no is not None:
-                raise ValueError("Setting an initial step is not possible without trajectory data.")
-            elif self._init_step_no is not None and self._random_start:
-                raise ValueError("Either use a random start or set an initial step, not both.")
+        return xml_handle
 
-            if self.trajectories is not None:
-                if self._random_start:
-                    sample = self.trajectories.reset_trajectory()
-                    if self.setup_random_rot:
-                        angle = np.random.uniform(0, 2 * np.pi)
-                        sample = rotate_obs(sample, angle,  *self._get_relevant_idx_rotation())
-                    self.set_sim_state(sample)
+    def save_xml_handle(self, xml_handle, tmp_dir_name):
+        """
+        same new xml file with the direction arrow in tmp_dir_name
+        """
+        # save new model and return new xml path
+        new_model_dir_name = 'new_unitree_a1_with_dir_vec_model/' + tmp_dir_name + "/"
+        cwd = Path.cwd()
+        new_model_dir_path = Path.joinpath(cwd, new_model_dir_name)
+        xml_file_name = "modified_unitree_a1.xml"
+        mjcf.export_with_assets(xml_handle, new_model_dir_path, xml_file_name)
+        new_xml_path = Path.joinpath(new_model_dir_path, xml_file_name)
 
-                elif self._init_step_no:
-                    traj_len = self.trajectories.trajectory_length
-                    n_traj = self.trajectories.nnumber_of_trajectories
-                    assert self._init_step_no <= traj_len * n_traj
-                    substep_no = int(self._init_step_no % traj_len)
-                    traj_no = int(self._init_step_no / traj_len)
-                    sample = self.trajectories.reset_trajectory(substep_no, traj_no)
-                    self.set_sim_state(sample)
+        return new_xml_path.as_posix()
 
+    def setup(self, substep_no=None):
+        """
+        sets up the initial state of the robot
+        """
 
+        self.goal_reward.reset_state()
         if self.trajectory is not None:
             if self._random_start:
                 # choose random state from trajectory
@@ -122,7 +225,7 @@ class UnitreeA1(BaseEnv):
             # if we want to set up the robot with a random rotation
             if self.setup_random_rot:
                 angle = np.random.uniform(0, 2 * np.pi)
-                sample = rotate_obs(sample, angle, *self._get_relevant_idx_rotation())
+                sample = rotate_obs(sample, angle, False)
 
             # if we use the direction arrow
             if self.use_2d_ctrl:
@@ -158,6 +261,21 @@ class UnitreeA1(BaseEnv):
                 # _goals contains two lists: first the list of goal states already represented in the observation_spec \
                 #   (direction angle), and the list of goal states that are not in obs_spec (velo)
                 self._goals = np.array([[0], [0]], dtype=float)
+
+    @staticmethod
+    def has_fallen(state):
+        """
+        return if the robot has fallen in state
+        """
+        trunk_euler = state[1:4]
+        trunk_condition = ((trunk_euler[1] < -0.2793) or (trunk_euler[1] > 0.2793)
+                           # max x-rotation 11 degree -> accepts 16 degree
+                           or (trunk_euler[2] < -0.192) or (trunk_euler[2] > 0.192)
+                           # max y-rotation 7.6 deg -> accepts 11 degree
+                           or state[0] < -.24
+                           # min height -0.197 -> accepts 0.24
+                           )
+        return trunk_condition
 
     def _simulation_post_step(self):
         """
@@ -400,260 +518,30 @@ class UnitreeA1(BaseEnv):
 
         return np.array(states_dataset, dtype=object), np.array(actions_dataset)
 
-    def _modify_observation(self, obs):
-        """
-        transform the rotation from the simulation to the observation we need for training:
-        transform rotation matrix of the direction arrow into sind and cos of the corresponding angle
 
-        Args:
-            obs (np.ndarray): the generated observation
+def rotate_obs(state, angle, modified=True):
+    """
+    rotates a set of states with angle
+    """
+    rotated_state = np.array(state).copy()
+    # different indizes for a modified obs or a normal obs
+    if modified:
+        idx_rot = 1
+        idx_xvel = 16
+        idx_yvel = 17
+    else:
+        idx_rot = 3
+        idx_xvel = 18
+        idx_yvel = 19
+    # add rotation to trunk rotation and transform to range -np.pi,np.pi
+    rotated_state[idx_rot] = (np.array(np.array(state)[idx_rot]) + angle + np.pi) % (2 * np.pi) - np.pi
+    # rotate velo x,y
+    rotated_state[idx_xvel] = np.cos(angle) * np.array(np.array(state)[idx_xvel]) - np.sin(angle) * np.array(
+        np.array(state)[idx_yvel])
+    rotated_state[idx_yvel] = np.sin(angle) * np.array(np.array(state)[idx_xvel]) + np.cos(angle) * np.array(
+        np.array(state)[idx_yvel])
+    return rotated_state
 
-        Returns:
-            The environment observation.
-
-        """
-
-        new_obs = obs[:34]
-        # transform rotation matrix into rotation angle
-        temp = np.dot(obs[34:43].reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))
-        # depending on the point of view subtract the trunk rotation
-        angle = (np.arctan2(temp[3], temp[0]) + np.pi) % (2 * np.pi) - np.pi
-        # and turn angle to sin, cos (for a closed angle range)
-        new_obs = np.append(new_obs, [np.cos(angle), np.sin(angle)])
-        new_obs = np.append(new_obs, obs[43:])
-        return new_obs
-
-    def _get_reward_function(self, reward_type, reward_params):
-        """
-        Constructs a reward function.
-
-        Args:
-            reward_type (string): Name of the reward.
-            reward_params (dict): Parameters of the reward function.
-
-        Returns:
-            Reward function.
-
-        """
-        # todo: here the correct reward needs to be specified
-        if reward_type == "multi_target_velocity":
-            x_vel_idx = self.get_obs_idx("dq_pelvis_tx")
-            assert len(x_vel_idx) == 1
-            x_vel_idx = x_vel_idx[0]
-            n_models = len(self._models)
-            env_id_len = len(self._get_env_id_map(0, n_models))
-            goal_reward_func = MultiTargetVelocityReward(x_vel_idx=x_vel_idx, scalings=self._scalings,
-                                                         env_id_len=env_id_len, **reward_params)
-        else:
-            goal_reward_func = super()._get_reward_function(reward_type, reward_params)
-
-        return goal_reward_func
-
-    def _has_fallen(self, obs):
-        """
-        Checks if a model has fallen.
-
-        Args:
-            obs (np.array): Current observation;
-
-        Returns:
-            True, if the model has fallen for the current observation, False otherwise.
-
-        """
-
-        trunk_euler = self._get_from_obs(obs, ["q_trunk_list", "q_trunk_tilt"])
-        trunk_height = self._get_from_obs(obs, ["q_trunk_tz"])
-
-        # Condition 1: max x-rotation 11 degree -> accepts 16 degree
-        # Condition 2: max y-rotation 7.6 deg -> accepts 11 degree
-        # Condition 3: min height -0.197 -> accepts 0.24
-        trunk_condition = ((trunk_euler[0] < -0.2793) or (trunk_euler[0] > 0.2793)
-                           or (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
-                           or trunk_height[0] < -.24)
-
-        return trunk_condition
-
-    def _get_relevant_idx_rotation(self):
-        """
-        Returns the indices relevant for rotating the observation space
-        around the vertical axis.
-
-        """
-
-        keys = self.obs_helper.get_all_observation_keys()
-        idx_rot = keys.index("q_trunk_rotation")
-        idx_xvel = keys.index("dq_trunk_tx")
-        idx_yvel = keys.index("dq_trunk_ty")
-        return idx_rot, idx_xvel, idx_yvel
-
-    @staticmethod
-    def _add_dir_vector_to_xml_handle(xml_handle):
-        """
-        Adds a direction vector to the Mujoco XML visualizing the goal direction.
-
-        Args:
-            xml_handle: Handle to Mujoco XML.
-
-        Returns:
-            Modified Mujoco XML handle.
-
-        """
-
-        # find trunk and attach direction arrow
-        trunk = xml_handle.find("body", "trunk")
-        trunk.add("body", name="dir_arrow", pos="0 0 0.15")
-        dir_vec = xml_handle.find("body", "dir_arrow")
-        # todo make this an actual arrow (it does not look nice right now)
-        dir_vec.add("site", name="dir_arrow_ball", type="sphere", size=".03", pos="-.1 0 0")
-        dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="-.1 0 0 .1 0 0")
-
-        return xml_handle
-
-    @staticmethod
-    def _get_observation_specification():
-        """
-        Getter for the observation space specification.
-
-        Returns:
-            A list of tuples containing the specification of each observation
-            space entry.
-
-        """
-
-        observation_spec = [
-            # ------------------- JOINT POS -------------------
-            # --- Trunk ---
-            ("q_trunk_tx", "trunk_tx", ObservationType.JOINT_POS),
-            ("q_trunk_ty", "trunk_ty", ObservationType.JOINT_POS),
-            ("q_trunk_tz", "trunk_tz", ObservationType.JOINT_POS),
-            ("q_trunk_rotation", "trunk_rotation", ObservationType.JOINT_POS),
-            ("q_trunk_list", "trunk_list", ObservationType.JOINT_POS),
-            ("q_trunk_tilt", "trunk_tilt", ObservationType.JOINT_POS),
-            # --- Front ---
-            ("q_FR_hip_joint", "FR_hip_joint", ObservationType.JOINT_POS),
-            ("q_FR_thigh_joint", "FR_thigh_joint", ObservationType.JOINT_POS),
-            ("q_FR_calf_joint", "FR_calf_joint", ObservationType.JOINT_POS),
-            ("q_FL_hip_joint", "FL_hip_joint", ObservationType.JOINT_POS),
-            ("q_FL_thigh_joint", "FL_thigh_joint", ObservationType.JOINT_POS),
-            ("q_FL_calf_joint", "FL_calf_joint", ObservationType.JOINT_POS),
-            # --- Rear ---
-            ("q_RR_hip_joint", "RR_hip_joint", ObservationType.JOINT_POS),
-            ("q_RR_thigh_joint", "RR_thigh_joint", ObservationType.JOINT_POS),
-            ("q_RR_calf_joint", "RR_calf_joint", ObservationType.JOINT_POS),
-            ("q_RL_hip_joint", "RL_hip_joint", ObservationType.JOINT_POS),
-            ("q_RL_thigh_joint", "RL_thigh_joint", ObservationType.JOINT_POS),
-            ("q_RL_calf_joint", "RL_calf_joint", ObservationType.JOINT_POS),
-            # ------------------- JOINT VEL -------------------
-            # --- Trunk ---
-            ("dq_trunk_tx", "trunk_tx", ObservationType.JOINT_VEL),
-            ("dq_trunk_ty", "trunk_ty", ObservationType.JOINT_VEL),
-            ("dq_trunk_tz", "trunk_tz", ObservationType.JOINT_VEL),
-            ("dq_trunk_rotation", "trunk_rotation", ObservationType.JOINT_VEL),
-            ("dq_trunk_list", "trunk_list", ObservationType.JOINT_VEL),
-            ("dq_trunk_tilt", "trunk_tilt", ObservationType.JOINT_VEL),
-            # --- Front ---
-            ("dq_FR_hip_joint", "FR_hip_joint", ObservationType.JOINT_VEL),
-            ("dq_FR_thigh_joint", "FR_thigh_joint", ObservationType.JOINT_VEL),
-            ("dq_FR_calf_joint", "FR_calf_joint", ObservationType.JOINT_VEL),
-            ("dq_FL_hip_joint", "FL_hip_joint", ObservationType.JOINT_VEL),
-            ("dq_FL_thigh_joint", "FL_thigh_joint", ObservationType.JOINT_VEL),
-            ("dq_FL_calf_joint", "FL_calf_joint", ObservationType.JOINT_VEL),
-            # --- Rear ---
-            ("dq_RR_hip_joint", "RR_hip_joint", ObservationType.JOINT_VEL),
-            ("dq_RR_thigh_joint", "RR_thigh_joint", ObservationType.JOINT_VEL),
-            ("dq_RR_calf_joint", "RR_calf_joint", ObservationType.JOINT_VEL),
-            ("dq_RL_hip_joint", "RL_hip_joint", ObservationType.JOINT_VEL),
-            ("dq_RL_thigh_joint", "RL_thigh_joint", ObservationType.JOINT_VEL),
-            ("dq_RL_calf_joint", "RL_calf_joint", ObservationType.JOINT_VEL)]
-
-        return observation_spec
-
-    @staticmethod
-    def _get_action_specification():
-        """
-        Getter for the action space specification.
-
-        Returns:
-            A list of tuples containing the specification of each action
-            space entry.
-
-        """
-
-        action_spec = [
-            "FR_hip", "FR_thigh", "FR_calf",
-            "FL_hip", "FL_thigh", "FL_calf",
-            "RR_hip", "RR_thigh", "RR_calf",
-            "RL_hip", "RL_thigh", "RL_calf"]
-
-        return action_spec
-
-    @staticmethod
-    def _interpolate_map(traj, **interpolate_map_params):
-        """
-        A mapping that is supposed to transform a trajectory into a space where interpolation is
-        allowed. E.g., maps a rotation matrix to a set of angles.
-
-        Args:
-            traj (list): List of np.arrays containing each observations. Each np.array
-                has the shape (n_trajectories, n_samples, (dim_observation)). If dim_observation
-                is one the shape of the array is just (n_trajectories, n_samples).
-            interpolate_map_params: Set of parameters needed to do the interpolation by the Unitree environment.
-
-        Returns:
-            A np.array with shape (n_observations, n_trajectories, n_samples). dim_observation
-            has to be one.
-
-        """
-        # todo: clean this up
-        traj_list = [list() for j in range(len(traj))]
-        for i in range(len(traj_list)):
-            # if the state is a rotation
-            if i in [3, 4, 5]:
-                # change it to the nearest rotation presentation to the previous state
-                # -> no huge jumps between -pi and pi for example
-                traj_list[i] = list(np.unwrap(traj[i]))
-            else:
-                traj_list[i] = list(traj[i])
-        # turn matrix into angle
-        traj_list[36] = np.unwrap([
-            np.arctan2(np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))[3],
-                       np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))[0])
-            for mat in traj[36]])
-        return np.array(traj_list)
-
-    @staticmethod
-    def _interpolate_remap(traj, **interpolate_remap_params):
-        """
-        The corresponding backwards transformation to _interpolation_map.
-
-        Args:
-            traj (np.array): Trajectory as np.array with shape (n_observations, n_trajectories, n_samples).
-            dim_observation is one.
-            interpolate_remap_params: Set of parameters needed to do the interpolation by the Unitree environment.
-
-        Returns:
-            List of np.arrays containing each observations. Each np.array has the shape
-            (n_trajectories, n_samples, (dim_observation)). If dim_observation
-            is one the shape of the array is just (n_trajectories, n_samples).
-
-        """
-        # todo: clean this up
-        traj_list = [list() for j in range(len(traj))]
-        for i in range(len(traj_list)):
-            # if the state is a rotation
-            if i in [3, 4, 5]:
-                # make sure it is in range -pi,pi
-                traj_list[i] = [(angle + np.pi) % (2 * np.pi) - np.pi for angle in traj[i]]
-            else:
-                traj_list[i] = list(traj[i])
-        # transforms angle into rotation matrix
-        traj_list[36] = [
-            np.dot(np.array(
-                [[np.cos((angle + np.pi) % (2 * np.pi) - np.pi), -np.sin((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-                 [np.sin((angle + np.pi) % (2 * np.pi) - np.pi), np.cos((angle + np.pi) % (2 * np.pi) - np.pi), 0],
-                 [0, 0, 1]]),
-                np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))).reshape((9,)) for angle in traj[36]]
-        return traj_list
 
 def test_rotate_data(traj_path, rotation_angle, store_path='./new_unitree_a1_with_dir_vec_model'):
     """
@@ -828,7 +716,7 @@ def interpolate_remap(traj):
              [np.sin((angle + np.pi) % (2 * np.pi) - np.pi), np.cos((angle + np.pi) % (2 * np.pi) - np.pi), 0],
              [0, 0, 1]]),
                np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))).reshape((9,)) for angle in traj[36]]
-    return traj_list
+    return np.array(traj_list, dtype=object)
 
 
 def reward_callback(state, action, next_state):
@@ -852,31 +740,33 @@ def reward_callback(state, action, next_state):
 
 if __name__ == '__main__':
 
-    #trajectory demo ---------------------------------------------------------------------------------------------------
-    #define env and data frequencies
-    env_freq = 1000  # hz, added here as a reminder
-    traj_data_freq = 500 #500 change interpolation in test_rotate too!!! # hz, added here as a reminder
-    desired_contr_freq = 100  # hz
-    n_substeps = env_freq // desired_contr_freq
-
-    traj_path =  '/home/moore/DataGeneration/data_generation/Quadruped_Unitree_A1/tim_quadruped_data/data/states_2023_02_23_19_48_33.npz' #'/home/tim/Documents/locomotion_simulation/locomotion/examples/log/2023_02_23_19_22_49/states.npz'#
-
-    rotation_angle = np.pi
-    # todo create dir if it does not exist
-    #traj_path = test_rotate_data(traj_path, rotation_angle, store_path='./new_unitree_a1_with_dir_vec_model')
-
-    # prepare trajectory params
-    traj_params = dict(traj_path=traj_path,
-                       traj_dt=(1 / traj_data_freq),
-                       control_dt=(1 / desired_contr_freq))
-    gamma = 0.99
-    horizon = 1000
-
-    env = UnitreeA1(timestep=1/env_freq, gamma=gamma, horizon=horizon, n_substeps=n_substeps, use_torque_ctrl=True,
-                    traj_params=traj_params, random_start=False, init_step_no=0, init_traj_no=0,
-                    use_2d_ctrl=True, tmp_dir_name=".",
-                    goal_reward="custom", goal_reward_params=dict(reward_callback=reward_callback))
-    exit()
+    # trajectory demo ---------------------------------------------------------------------------------------------------
+    # define env and data frequencies
+    # env_freq = 1000  # hz, added here as a reminder
+    # traj_data_freq = 500 #500 change interpolation in test_rotate too!!! # hz, added here as a reminder
+    # desired_contr_freq = 100  # hz
+    # n_substeps = env_freq // desired_contr_freq
+    #
+    # traj_path =  '/home/moore/DataGeneration/data_generation/Quadruped_Unitree_A1/tim_quadruped_data/data/states_2023_02_23_19_48_33_straight.npz' #'/home/tim/Documents/locomotion_simulation/locomotion/examples/log/2023_02_23_19_22_49/states.npz'#
+    #
+    # rotation_angle = np.pi
+    # # todo create dir if it does not exist
+    # traj_path = test_rotate_data(traj_path, rotation_angle, store_path='./new_unitree_a1_with_dir_vec_model')
+    #
+    # # prepare trajectory params
+    # traj_params = dict(traj_path=traj_path,
+    #                    traj_dt=(1 / traj_data_freq),
+    #                    control_dt=(1 / desired_contr_freq),
+    #                    interpolate_map=interpolate_map, #transforms 9dim rot matrix into one rot angle
+    #                    interpolate_remap=interpolate_remap # and back
+    #                    )
+    # gamma = 0.99
+    # horizon = 1000
+    #
+    # env = UnitreeA1(timestep=1/env_freq, gamma=gamma, horizon=horizon, n_substeps=n_substeps,use_torque_ctrl=True,
+    #                 traj_params=traj_params, random_start=False, init_step_no=0, init_traj_no=0,
+    #                 use_2d_ctrl=True, tmp_dir_name=".",
+    #                 goal_reward="custom", goal_reward_params=dict(reward_callback=reward_callback))
     # action_dim = env.info.action_space.shape[0]
     # print("Dimensionality of Obs-space:", env.info.observation_space.shape[0])
     # print("Dimensionality of Act-space:", env.info.action_space.shape[0])
@@ -913,7 +803,7 @@ if __name__ == '__main__':
 
     env = UnitreeA1(timestep=1 / env_freq, gamma=gamma, horizon=horizon, n_substeps=n_substeps, traj_params=traj_params,
                     random_start=False, init_step_no=0, init_traj_no=0,
-                    use_torque_ctrl=use_torque_ctrl, use_2d_ctrl=use_2d_ctrl)
+                    use_torque_ctrl=use_torque_ctrl, use_2d_ctrl=use_2d_ctrl, tmp_dir_name=".")
 
     dataset = env.create_dataset()
 

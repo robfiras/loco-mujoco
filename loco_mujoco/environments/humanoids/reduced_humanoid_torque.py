@@ -60,7 +60,7 @@ class ReducedHumanoidTorque(BaseEnv):
 
     def _get_xml_modifications(self):
         """
-        Function that specifies which joints, motors and equality constraints
+        Function that specifies which joints, motors and equality consints
         should be removed from the Mujoco xml. Also the required collision
         groups will be returned.
 
@@ -102,7 +102,7 @@ class ReducedHumanoidTorque(BaseEnv):
 
     def _has_fallen(self, obs):
         """
-        Checks if a model has fallen. This has to be implemented for each environment.
+        Checks if a model has fallen.
 
         Args:
             obs (np.array): Current observation;
