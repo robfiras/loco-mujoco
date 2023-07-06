@@ -20,7 +20,8 @@ class UnitreeA1(BaseEnv):
 
     """
 
-    def __init__(self, use_torque_ctrl=True, setup_random_rot=False, tmp_dir_name=None, **kwargs):
+    def __init__(self, use_torque_ctrl=True, setup_random_rot=False, tmp_dir_name=None,
+                 default_target_velocity=0.5, **kwargs):
         """
         Constructor.
 
@@ -29,6 +30,8 @@ class UnitreeA1(BaseEnv):
             setup_random_rot (bool): If True, the robot is initialized with a random rotation;
             tmp_dir_name (str): Specifies a name of a directory to which temporary files are
                 written, if created. By default, temporary directory names are created automatically.
+            default_target_velocity (float): Default target velocity set in the goal, when no trajectory
+                data is provided.
 
         """
 
@@ -61,6 +64,7 @@ class UnitreeA1(BaseEnv):
 
         # setup goal including the desired direction and velocity
         self._goal = GoalDirectionVelocity()
+        self._goal.set_goal(0.0, default_target_velocity)
 
         super().__init__(xml_path, action_spec, observation_spec,  collision_groups, **kwargs)
 
@@ -100,14 +104,13 @@ class UnitreeA1(BaseEnv):
                     substep_no = int(self._init_step_no % traj_len)
                     traj_no = int(self._init_step_no / traj_len)
                     sample = self.trajectories.reset_trajectory(substep_no, traj_no)
-                    self.set_sim_state(sample)
                 else:
                     raise ValueError("You have specified a trajectory, either choose \"random_start\" "
                                      "or set \"init_step_no\".")
 
                 # set the goal
-                rotmat = self.trajectories.get_from_sample(sample, "dir_arrow")
-                angle = mat2angle_xy(rotmat)
+                rot_mat = self.trajectories.get_from_sample(sample, "dir_arrow")
+                angle = mat2angle_xy(rot_mat)
                 desired_vel = self.trajectories.get_from_sample(sample, "goal_speed")
                 self._goal.set_goal(angle, desired_vel)
 
@@ -181,6 +184,30 @@ class UnitreeA1(BaseEnv):
 
         return dataset
 
+    def _create_observation(self, obs):
+        """
+        Creates a full vector of observations.
+
+        Args:
+            obs (np.array): Observation vector to be modified or extended;
+
+        Returns:
+            New observation vector (np.array);
+
+        """
+
+        if self._use_foot_forces:
+            obs = np.concatenate([obs[2:],
+                                  [self._goal.get_velocity()],
+                                  self.mean_grf.mean / 1000.,
+                                  ]).flatten()
+        else:
+            obs = np.concatenate([obs[2:],
+                                  [self._goal.get_velocity()]
+                                  ]).flatten()
+
+        return obs
+
     def _modify_observation(self, obs):
         """
         Transforms the rotation matrix from obs to a sin-cos feature.
@@ -244,7 +271,7 @@ class UnitreeA1(BaseEnv):
                            or (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
                            or trunk_height[0] < -.24)
 
-        return trunk_condition
+        return trunk_condition and False
 
     def _get_relevant_idx_rotation(self):
         """
@@ -324,7 +351,7 @@ class UnitreeA1(BaseEnv):
 
         """
 
-        rot_mat = obs[rot_mat_idx:rot_mat_idx+9].reshape((3, 3))
+        rot_mat = obs[rot_mat_idx].reshape((3, 3))
         # convert mat to angle
         angle = mat2angle_xy(rot_mat)
         # transform the angle to be in [-pi, pi] todo: this is not needed anymore when doing sin cos transformation.
@@ -336,7 +363,7 @@ class UnitreeA1(BaseEnv):
         goal_velocity = obs[goal_velocity_idx]
 
         # concatenate everything to new obs
-        new_obs = np.concatenate([obs[:rot_mat_idx], angle, goal_velocity])
+        new_obs = np.concatenate([obs[:rot_mat_idx[0]], angle, [goal_velocity]])
 
         return new_obs
 
@@ -357,7 +384,7 @@ class UnitreeA1(BaseEnv):
         trunk = xml_handle.find("body", "trunk")
         trunk.add("body", name="dir_arrow", pos="0 0 0.15")
         dir_vec = xml_handle.find("body", "dir_arrow")
-        # todo make this an actual arrow (it does not look nice right now)
+        # todo: once Mujoco support cones, make an actual arrow (its requested feature).
         dir_vec.add("site", name="dir_arrow_ball", type="sphere", size=".03", pos="-.1 0 0")
         dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="-.1 0 0 .1 0 0")
 

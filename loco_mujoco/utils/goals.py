@@ -20,7 +20,9 @@ class GoalDirectionVelocity:
         self._velocity = velocity
 
     def get_direction(self):
+        assert self._direction is not None
         return deepcopy(self._direction)
 
     def get_velocity(self):
+        assert self._velocity is not None
         return deepcopy(self._velocity)

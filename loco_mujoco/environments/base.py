@@ -549,7 +549,7 @@ class BaseEnv(MultiMuJoCo):
         """
         if type(keys) != list:
             assert type(keys) == str
-            keys = list(keys)
+            keys = [keys]
 
         entries = []
         for key in keys:
