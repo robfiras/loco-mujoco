@@ -5,5 +5,5 @@ logs/
 None/
 .pytest_cache/
 .DS_Store
-
+datasets/
 

@@ -335,7 +335,6 @@ class BaseEnv(MultiMuJoCo):
             elif ot == ObservationType.JOINT_VEL:
                 self._data.joint(name).qvel = value
             elif ot == ObservationType.SITE_ROT:
-                assert len(value.shape) == 2
                 self._data.site(name).xmat = value
 
     def _get_observation_space(self):

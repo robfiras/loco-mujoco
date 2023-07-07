@@ -136,11 +136,12 @@ class UnitreeA1(BaseEnv):
         rotation = np.array([[np.cos(trunk_rotation), -np.sin(trunk_rotation), 0],
                              [np.sin(trunk_rotation), np.cos(trunk_rotation), 0],
                              [0, 0, 1]])
-        dir_arrow_idx = self.obs_helper.obs_idx_map["dir_arrow"]
+        dir_arrow_idx = self.trajectories.get_idx("dir_arrow")
         current_rot_mat = sample[dir_arrow_idx]
         sample[dir_arrow_idx] = np.dot(rotation, current_rot_mat.reshape((3, 3))).reshape((9,))
 
         # set simulation state
+        sample = sample[:-1]    # remove goal velocity
         super(UnitreeA1, self).set_sim_state(sample)
 
     def _simulation_post_step(self):
@@ -468,6 +469,32 @@ class UnitreeA1(BaseEnv):
 
         return action_spec
 
+    def _get_interpolate_map_params(self):
+        """
+        Returns all parameters needed to do the interpolation mapping for the respective environment.
+
+        """
+        keys = self.get_all_observation_keys()
+        rot_mat_idx = keys.index("dir_arrow")
+        trunk_rot_idx = keys.index("q_trunk_rotation")
+        trunk_list_idx = keys.index("q_trunk_list")
+        trunk_tilt_idx = keys.index("q_trunk_tilt")
+
+        return dict(rot_mat_idx=rot_mat_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
+
+    def _get_interpolate_remap_params(self):
+        """
+        Returns all parameters needed to do the interpolation remapping for the respective environment.
+
+        """
+        keys = self.get_all_observation_keys()
+        angle_idx = keys.index("dir_arrow")
+        trunk_rot_idx = keys.index("q_trunk_rotation")
+        trunk_list_idx = keys.index("q_trunk_list")
+        trunk_tilt_idx = keys.index("q_trunk_tilt")
+
+        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
+
     @staticmethod
     def _interpolate_map(traj, **interpolate_map_params):
         """
@@ -529,5 +556,5 @@ class UnitreeA1(BaseEnv):
             else:
                 traj_list[i] = list(traj[i])
         # transforms angles into rotation matrices todo: this is slow, implement vectorized implementation
-        traj_list[angle_idx] = np.array([angle2mat_xy(angle) for angle in traj[angle_idx]])
+        traj_list[angle_idx] = np.array([angle2mat_xy(angle).reshape(9,) for angle in traj[angle_idx]])
         return traj_list
