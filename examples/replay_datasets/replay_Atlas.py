@@ -13,13 +13,11 @@ def experiment(seed=0):
     desired_contr_freq = 100     # hz
     n_substeps = env_freq//desired_contr_freq
 
-    # set a reward for logging
-    reward_callback = lambda state, action, next_state: np.exp(- np.square(state[14] - 1.25))  # x-velocity as reward
-
     # prepare trajectory params
     traj_params = dict(traj_path="../datasets/humanoids/02-constspeed_ATLAS.npz",
                        traj_dt=(1 / traj_data_freq),
-                       control_dt=(1 / desired_contr_freq))
+                       control_dt=(1 / desired_contr_freq),
+                       clip_trajectory_to_joint_ranges=True)
 
     # MDP
     gamma = 0.99

@@ -15,7 +15,8 @@ def experiment(seed=0):
     # prepare trajectory params
     traj_params = dict(traj_path="../datasets/quadrupeds/states_2023_02_23_19_48_33.npz",
                        traj_dt=(1 / traj_data_freq),
-                       control_dt=(1 / desired_contr_freq))
+                       control_dt=(1 / desired_contr_freq),
+                       clip_trajectory_to_joint_ranges=True)
 
     # MDP
     gamma = 0.99

@@ -16,7 +16,8 @@ def experiment(seed=0):
     # prepare trajectory params
     traj_params = dict(traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid.npz",
                        traj_dt=(1/traj_data_freq),
-                       control_dt=(1/desired_contr_freq))
+                       control_dt=(1/desired_contr_freq),
+                       clip_trajectory_to_joint_ranges=True)
 
     # MDP
     gamma = 0.99
