@@ -1,8 +1,8 @@
 import numpy as np
-from loco_mujoco.environments import UnitreeA1
+from loco_mujoco import LocoEnv
 
 
-env = UnitreeA1(random_start=False, use_foot_forces=False, use_torque_ctrl=True)
+env = LocoEnv.make("UnitreeA1")
 
 action_dim = env.info.action_space.shape[0]
 

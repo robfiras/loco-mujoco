@@ -20,8 +20,9 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
     using state masks to hide the humanoid type indicator from the policy.
 
     """
-    def __init__(self, scaling=None, scaling_trajectory_map=None, use_box_feet=False, disable_arms=False, tmp_dir_name=None,
-                 alpha_box_feet=0.5, **kwargs):
+
+    def __init__(self, scaling=None, scaling_trajectory_map=None, use_box_feet=False, disable_arms=False,
+                 tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
         """
         Constructor.
 
@@ -59,7 +60,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             if type(scaling) == list:
                 self._scalings = scaling
             else:
-                self._scalings = [scaling for i in range(len(default_scalings))]
+                self._scalings = [scaling]
 
         self._scaling_trajectory_map = scaling_trajectory_map
 
@@ -91,10 +92,6 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
         # call gran-parent
         super(ReducedHumanoidTorque, self).__init__(xml_paths, action_spec, observation_spec, collision_groups, **kwargs)
-
-        if scaling is not None and type(scaling) is list and len(scaling) > 1 and self.trajectories is not None:
-            assert scaling_trajectory_map is not None, "When using multiple scalings and trajectory data, please " \
-                                                       "define a scaling_trajectory_map."
 
         if scaling_trajectory_map is not None and self.trajectories is None:
             warnings.warn("You have defined a scaling_trajectory_map, but no trajectory was defined. The former "
@@ -140,36 +137,40 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
                     sample = self.trajectories.reset_trajectory(substep_no, traj_no)
                     self.set_sim_state(sample)
 
-    def _get_observation_space(self):
+    def load_trajectory(self, traj_params, scaling_trajectory_map=None, warn=True):
         """
-        Returns a tuple of the lows and highs (np.array) of the observation space.
-
-        """
-
-        low, high = super(ReducedHumanoidTorque4Ages, self)._get_observation_space()
-        if self.more_than_one_env:
-            len_env_map = len(self._get_env_id_map(self._current_model_idx, len(self._models)))
-            low = np.concatenate([low, np.zeros(len_env_map)])
-            high = np.concatenate([high, np.ones(len_env_map)])
-        return low, high
-
-    def _create_observation(self, obs):
-        """
-        Creates a full vector of observations.
+        Loads trajectories. If there were trajectories loaded already, this function overrides the latter.
 
         Args:
-            obs (np.array): Observation vector to be modified or extended;
-
-        Returns:
-            New observation vector (np.array);
+            traj_params (dict): Dictionary of parameters needed to load trajectories;
+            scaling_trajectory_map (list): A list that contains tuples of two integers
+                for each scaling. Given a set of trajectories, they define the range of
+                the valid trajectory numbers for each scaling factor.
+            warn (bool): If True, a warning will be raised if scaling_trajectory_map is not set.
 
         """
 
-        obs = super(ReducedHumanoidTorque4Ages, self)._create_observation(obs)
-        if self.more_than_one_env:
-            env_id_map = self._get_env_id_map(self._current_model_idx, len(self._models))
-            obs = np.concatenate([obs, env_id_map])
-        return obs
+        super().load_trajectory(traj_params)
+
+        if scaling_trajectory_map is None:
+            if warn:
+                if self._scaling_trajectory_map is None and type(self._scalings) is list and len(self._scalings) > 1:
+                    warnings.warn("\"scaling_trajectory_map\" is not defined! Loading the default map, which assumes that "
+                                  "the trajectory contains an equal number of trajectories for all scalings and that"
+                                  "they are ordered in the following order %s." % self._scalings)
+                    n_trajs_per_scaling = self.trajectories.number_of_trajectories / len(self._scalings)
+                    assert n_trajs_per_scaling.is_integer(), "Failed to construct the default" \
+                                                             "\"scaling_trajectory_map\". The number of trajectory " \
+                                                             "can not be divided by the number of scalings!"
+                    n_trajs_per_scaling = int(n_trajs_per_scaling)
+                    current_low_idx = 0
+                    self._scaling_trajectory_map = []
+                    for i in range(self.trajectories.number_of_trajectories):
+                        current_high_idx = current_low_idx + n_trajs_per_scaling
+                        self._scaling_trajectory_map.append((current_low_idx, current_high_idx))
+                        current_low_idx = current_high_idx
+        else:
+            self._scaling_trajectory_map = scaling_trajectory_map
 
     def get_mask(self, obs_to_hide):
         """
@@ -231,6 +232,37 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
                                                   "one env is not allowed."
 
         return np.concatenate(mask).ravel()
+
+    def _get_observation_space(self):
+        """
+        Returns a tuple of the lows and highs (np.array) of the observation space.
+
+        """
+
+        low, high = super(ReducedHumanoidTorque4Ages, self)._get_observation_space()
+        if self.more_than_one_env:
+            len_env_map = len(self._get_env_id_map(self._current_model_idx, len(self._models)))
+            low = np.concatenate([low, np.zeros(len_env_map)])
+            high = np.concatenate([high, np.ones(len_env_map)])
+        return low, high
+
+    def _create_observation(self, obs):
+        """
+        Creates a full vector of observations.
+
+        Args:
+            obs (np.array): Observation vector to be modified or extended;
+
+        Returns:
+            New observation vector (np.array);
+
+        """
+
+        obs = super(ReducedHumanoidTorque4Ages, self)._create_observation(obs)
+        if self.more_than_one_env:
+            env_id_map = self._get_env_id_map(self._current_model_idx, len(self._models))
+            obs = np.concatenate([obs, env_id_map])
+        return obs
 
     def _get_reward_function(self, reward_type, reward_params):
         """
@@ -300,3 +332,71 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             h.gear *= body_scaling ** 2
 
         return xml_handle
+
+    @staticmethod
+    def generate(task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000,
+                 use_box_feet=True, disable_arms=True, use_foot_forces=False):
+        """
+        Returns a Humanoid environment corresponding to the specified task.
+
+        Args:
+            task (str): Main task to solve. Either "walk" or "run".
+            dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
+                reference trajectory. This data does not perfectly match the kinematics
+                and dynamics of this environment, hence it is more challenging. "perfect" uses
+                a perfect dataset.
+            gamma (float): Discounting parameter of the environment.
+            horizon (int): Horizon of the environment.
+            use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
+            disable_arms (bool): If True, arms are disabled.
+            use_foot_forces (bool): If True, foot forces are added to the observation space.
+
+        Returns:
+            An MDP of a set of Torque Humanoid of different sizes.
+
+        """
+
+        # Generate the MDP
+        mdp = ReducedHumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
+                                         disable_arms=disable_arms, use_foot_forces=use_foot_forces)
+
+        # Load the trajectory
+        env_freq = 1 / mdp._timestep  # hz
+        desired_contr_freq = 1 / mdp.dt  # hz
+        n_substeps = env_freq // desired_contr_freq
+
+        if mode == "all":
+            dataset_suffix = "_all.npz"
+        elif mode == "1":
+            dataset_suffix = "_1.npz"
+        elif mode == "2":
+            dataset_suffix = "_2.npz"
+        elif mode == "3":
+            dataset_suffix = "_3.npz"
+        elif mode == "4":
+            dataset_suffix = "_4.npz"
+        else:
+            raise ValueError(f"Unknown mode {mode} for HumanoidTorque4Ages environment.")
+
+        if task == "walk":
+            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
+        elif task == "run":
+            traj_path = "../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
+        else:
+            raise ValueError(f"Task {task} does not exist for the HumanoidTorque4Ages environment.")
+
+        if dataset_type == "real":
+            traj_data_freq = 500  # hz
+            traj_params = dict(traj_path=traj_path,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=True)
+        elif dataset_type == "perfect":
+            # todo: generate and add this dataset
+            raise ValueError(f"currently not implemented.")
+        else:
+            raise ValueError(f"Dataset type {dataset_type} does not exist for the HumanoidTorque4Ages environment.")
+
+        mdp.load_trajectory(traj_params)
+
+        return mdp

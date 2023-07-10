@@ -1,8 +1,8 @@
 import numpy as np
-from loco_mujoco.environments import ReducedHumanoidTorque
+from loco_mujoco import LocoEnv
 
 
-env = ReducedHumanoidTorque(use_box_feet=False, random_start=False, disable_arms=True)
+env = LocoEnv.make("ReducedHumanoidTorque")
 
 action_dim = env.info.action_space.shape[0]
 

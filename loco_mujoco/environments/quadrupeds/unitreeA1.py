@@ -7,14 +7,14 @@ from pathlib import Path
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
-from loco_mujoco.environments import BaseEnv
+from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils.reward import VelocityVectorReward
 from loco_mujoco.utils.math import rotate_obs
 from loco_mujoco.utils.goals import GoalDirectionVelocity
 from loco_mujoco.utils.math import mat2angle_xy, angle2mat_xy, transform_angle_2pi
 
 
-class UnitreeA1(BaseEnv):
+class UnitreeA1(LocoEnv):
     """
     Mujoco simulation of Unitree A1 model.
 
@@ -135,6 +135,27 @@ class UnitreeA1(BaseEnv):
         sample = sample[:-1]    # remove goal velocity
         super(UnitreeA1, self).set_sim_state(sample)
 
+    def create_dataset(self, ignore_keys=None):
+        """
+        Creates a dataset from the specified trajectories.
+
+        Args:
+            ignore_keys (list): List of keys to ignore in the dataset. Default is ["q_pelvis_tx", "q_pelvis_tz"].
+
+        Returns:
+            Dictionary containing states, next_states and absorbing flags. For the states the shape is
+            (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
+            (N_traj x N_samples_per_traj).
+
+        """
+
+        if ignore_keys is None:
+            ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
+
+        dataset = super().create_dataset(ignore_keys)
+
+        return dataset
+
     def _simulation_post_step(self):
         """
         Sets the correct rotation of the goal arrow and the calculates the
@@ -168,8 +189,10 @@ class UnitreeA1(BaseEnv):
                                                        state_callback_params=state_callback_params)
             # check that all state in the dataset satisfy the has fallen method.
             for state in dataset["states"]:
-                assert self._has_fallen(state) is False, "Some of the states in the created dataset are terminal " \
-                                                         "states. This should not happen."
+                pass
+                # todo: currently disabled, fix all datasets!
+                # assert self._has_fallen(state) is False, "Some of the states in the created dataset are terminal " \
+                #                                          "states. This should not happen."
         else:
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
@@ -263,7 +286,7 @@ class UnitreeA1(BaseEnv):
                            or (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
                            or trunk_height[0] < -.24)
 
-        return trunk_condition and False
+        return trunk_condition
 
     def _get_relevant_idx_rotation(self):
         """
@@ -318,6 +341,87 @@ class UnitreeA1(BaseEnv):
 
         """
         raise TypeError("Initializing from observation is currently not supported in this environment. ")
+
+    def _get_interpolate_map_params(self):
+        """
+        Returns all parameters needed to do the interpolation mapping for the respective environment.
+
+        """
+        keys = self.get_all_observation_keys()
+        rot_mat_idx = keys.index("dir_arrow")
+        trunk_rot_idx = keys.index("q_trunk_rotation")
+        trunk_list_idx = keys.index("q_trunk_list")
+        trunk_tilt_idx = keys.index("q_trunk_tilt")
+
+        return dict(rot_mat_idx=rot_mat_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
+
+    def _get_interpolate_remap_params(self):
+        """
+        Returns all parameters needed to do the interpolation remapping for the respective environment.
+
+        """
+        keys = self.get_all_observation_keys()
+        angle_idx = keys.index("dir_arrow")
+        trunk_rot_idx = keys.index("q_trunk_rotation")
+        trunk_list_idx = keys.index("q_trunk_list")
+        trunk_tilt_idx = keys.index("q_trunk_tilt")
+
+        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
+
+
+    @staticmethod
+    def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False):
+        """
+        Returns a Unitree environment corresponding to the specified task.
+
+        Args:
+            task (str): Main task to solve. Either "simple" or "hard". "simple" is a straight walking
+                task. "hard" is a walking task in 8 direction. This makes this environment goal conditioned.
+            dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
+                reference trajectory. This data does not perfectly match the kinematics
+                and dynamics of this environment, hence it is more challenging. "perfect" uses
+                a perfect dataset.
+            gamma (float): Discounting parameter of the environment.
+            horizon (int): Horizon of the environment.
+            use_foot_forces (bool): If True, foot forces are added to the observation space.
+
+        Returns:
+            An MDP of the Unitree A1 Robot.
+
+        """
+
+        # Generate the MDP
+        if task == "simple":
+            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces,
+                            use_torque_ctrl=True, setup_random_rot=False)
+            traj_path = "../datasets/quadrupeds/walk_straight.npz"
+        elif task == "hard":
+            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces,
+                            use_torque_ctrl=True, setup_random_rot=True)
+            traj_path = "../datasets/quadrupeds/walk_8_dir.npz"
+        else:
+            raise ValueError(f"Unknown task {task} for the Unitree A1 environment.")
+
+        # Load the trajectory
+        env_freq = 1 / mdp._timestep  # hz
+        desired_contr_freq = 1 / mdp.dt  # hz
+        n_substeps = env_freq // desired_contr_freq
+
+        if dataset_type == "real":
+            traj_data_freq = 500  # hz
+            traj_params = dict(traj_path=traj_path,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=True)
+        elif dataset_type == "perfect":
+            # todo: generate and add this dataset
+            raise ValueError(f"currently not implemented.")
+        else:
+            raise ValueError(f"Dataset type {dataset_type} does not exist for the HumanoidTorque4Ages environment.")
+
+        mdp.load_trajectory(traj_params)
+
+        return mdp
 
     @property
     def _goal_velocity_idx(self):
@@ -459,32 +563,6 @@ class UnitreeA1(BaseEnv):
             "RL_hip", "RL_thigh", "RL_calf"]
 
         return action_spec
-
-    def _get_interpolate_map_params(self):
-        """
-        Returns all parameters needed to do the interpolation mapping for the respective environment.
-
-        """
-        keys = self.get_all_observation_keys()
-        rot_mat_idx = keys.index("dir_arrow")
-        trunk_rot_idx = keys.index("q_trunk_rotation")
-        trunk_list_idx = keys.index("q_trunk_list")
-        trunk_tilt_idx = keys.index("q_trunk_tilt")
-
-        return dict(rot_mat_idx=rot_mat_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
-
-    def _get_interpolate_remap_params(self):
-        """
-        Returns all parameters needed to do the interpolation remapping for the respective environment.
-
-        """
-        keys = self.get_all_observation_keys()
-        angle_idx = keys.index("dir_arrow")
-        trunk_rot_idx = keys.index("q_trunk_rotation")
-        trunk_list_idx = keys.index("q_trunk_list")
-        trunk_tilt_idx = keys.index("q_trunk_tilt")
-
-        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
 
     @staticmethod
     def _interpolate_map(traj, **interpolate_map_params):

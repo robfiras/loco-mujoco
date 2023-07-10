@@ -5,22 +5,15 @@ from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
-from loco_mujoco.environments import BaseEnv
+from loco_mujoco.environments import LocoEnv
 
 
-# optional imports
-try:
-    mujoco_viewer_available = True
-    import mujoco_viewer
-except ModuleNotFoundError:
-    mujoco_viewer_available = False
-
-
-class FullHumanoid(BaseEnv):
+class FullHumanoid(LocoEnv):
     """
     Mujoco simulation of full humanoid with muscle-actuated lower limb and torque-actuated upper body.
 
     """
+
     def __init__(self, use_brick_foots=False, disable_arms=False, tmp_dir_name=None, **kwargs):
         """
         Constructor.

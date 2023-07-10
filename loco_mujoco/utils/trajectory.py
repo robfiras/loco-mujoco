@@ -276,11 +276,20 @@ class Trajectory(object):
                 if self._clip_trajectory_to_joint_ranges:
                     self._trajectory_files[k] = np.clip(self._trajectory_files[k], low_i, high_i)
 
+    def get_current_sample(self):
+        """
+        Returns the current sample in the trajectory.
+
+        """
+
+        return self._get_ith_sample_from_subtraj(self.subtraj_step_no)
+
     def get_next_sample(self):
         """
         Returns the next sample in the trajectory.
 
         """
+
         self.subtraj_step_no += 1
         if self.subtraj_step_no == self.trajectory_length:
             sample = self.reset_trajectory(substep_no=0)

@@ -5,10 +5,10 @@ from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
-from loco_mujoco.environments import BaseEnv
+from loco_mujoco.environments import LocoEnv
 
 
-class ReducedHumanoidTorque(BaseEnv):
+class ReducedHumanoidTorque(LocoEnv):
     """
     MuJoCo simulation of a simplified humanoid model with torque actuation.
 
@@ -57,6 +57,27 @@ class ReducedHumanoidTorque(BaseEnv):
             xml_path = self._save_xml_handle(xml_handle, tmp_dir_name)
 
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
+
+    def create_dataset(self, ignore_keys=None):
+        """
+        Creates a dataset from the specified trajectories.
+
+        Args:
+            ignore_keys (list): List of keys to ignore in the dataset. Default is ["q_pelvis_tx", "q_pelvis_tz"].
+
+        Returns:
+            Dictionary containing states, next_states and absorbing flags. For the states the shape is
+            (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
+            (N_traj x N_samples_per_traj).
+
+        """
+
+        if ignore_keys is None:
+            ignore_keys = ["q_pelvis_tx", "q_pelvis_tz"]
+
+        dataset = super().create_dataset(ignore_keys)
+
+        return dataset
 
     def _get_xml_modifications(self):
         """
@@ -164,6 +185,61 @@ class ReducedHumanoidTorque(BaseEnv):
                                   self._get_collision_force("floor", "front_foot_l")[:3]])
 
         return grf
+
+    @staticmethod
+    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000,
+                 use_box_feet=True, disable_arms=True, use_foot_forces=False):
+        """
+        Returns a Humanoid environment and a dataset corresponding to the specified task.
+
+        Args:
+            task (str): Main task to solve. Either "walk" or "run".
+            dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
+                reference trajectory. This data does not perfectly match the kinematics
+                and dynamics of this environment, hence it is more challenging. "perfect" uses
+                a perfect dataset.
+            gamma (float): Discounting parameter of the environment.
+            horizon (int): Horizon of the environment.
+            use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
+            disable_arms (bool): If True, arms are disabled.
+            use_foot_forces (bool): If True, foot forces are added to the observation space.
+
+        Returns:
+            An MDP of a Torque Humanoid.
+
+        """
+
+        # Generate the MDP
+        mdp = ReducedHumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
+                                    disable_arms=disable_arms, use_foot_forces=use_foot_forces)
+
+        # Load the trajectory
+        env_freq = 1 / mdp._timestep  # hz
+        desired_contr_freq = 1 / mdp.dt  # hz
+        n_substeps = env_freq // desired_contr_freq
+
+        if task == "walk":
+            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
+        elif task == "run":
+            traj_path = "../datasets/humanoids/05-run_reduced_humanoid.npz"
+        else:
+            raise ValueError(f"Task {task} does not exist for the Humanoid Torque environment.")
+
+        if dataset_type == "real":
+            traj_data_freq = 500  # hz
+            traj_params = dict(traj_path=traj_path,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=True)
+        elif dataset_type == "perfect":
+            # todo: generate and add this dataset
+            raise ValueError(f"currently not implemented.")
+        else:
+            raise ValueError(f"Dataset type {dataset_type} does not exist for the Humanoid Torque environment.")
+
+        mdp.load_trajectory(traj_params)
+
+        return mdp
 
     @staticmethod
     def _get_observation_specification():

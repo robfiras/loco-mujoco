@@ -1,8 +1,9 @@
 import numpy as np
-from loco_mujoco.environments import Atlas
+from loco_mujoco import LocoEnv
 
 
-env = Atlas(random_start=False, hold_weight=False, disable_arms=True)
+env = LocoEnv.make("Atlas")
+
 action_dim = env.info.action_space.shape[0]
 
 env.reset()
