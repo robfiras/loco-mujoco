@@ -64,6 +64,8 @@ class BaseEnv(MultiMuJoCo):
                 default timestep specified in the XML will be used;
             use_foot_forces (bool): If True, foot forces are computed and added to
                 the observation space;
+            default_camera_mode (str): String defining the default camera mode. Available modes are "static",
+                "follow", and "top_static".
 
         """
 
@@ -258,7 +260,7 @@ class BaseEnv(MultiMuJoCo):
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
 
-    def play_trajectory_demo(self):
+    def play_trajectory_demo(self, n_steps_per_trajectory=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -267,22 +269,29 @@ class BaseEnv(MultiMuJoCo):
 
         assert self.trajectories is not None
 
-        sample = self.trajectories.reset_trajectory(substep_no=1)
+        sample = self.trajectories.reset_trajectory(substep_no=0)
         self.set_sim_state(sample)
+        if n_steps_per_trajectory is None:
+            n_steps_per_trajectory = self.trajectories.trajectory_length
         while True:
-            sample = self.trajectories.get_next_sample()
+            for i in range(n_steps_per_trajectory):
+                sample = self.trajectories.get_next_sample()
 
-            self.set_sim_state(sample)
+                self.set_sim_state(sample)
 
-            mujoco.mj_forward(self._model, self._data)
+                self._simulation_pre_step()
+                mujoco.mj_forward(self._model, self._data)
+                self._simulation_post_step()
 
-            obs = self._create_observation(sample)
-            if self._has_fallen(obs):
-                print("Has fallen!")
+                obs = self._create_observation(sample)
+                if self._has_fallen(obs):
+                    print("Has fallen!")
 
-            self.render()
+                self.render()
 
-    def play_trajectory_demo_from_velocity(self):
+
+
+    def play_trajectory_demo_from_velocity(self, n_steps_per_trajectory=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -291,30 +300,38 @@ class BaseEnv(MultiMuJoCo):
 
         assert self.trajectories is not None
 
-        sample = self.trajectories.reset_trajectory(substep_no=1)
+        sample = self.trajectories.reset_trajectory(substep_no=0)
         self.set_sim_state(sample)
+        if n_steps_per_trajectory is None:
+            n_steps_per_trajectory = self.trajectories.trajectory_length
         len_qpos, len_qvel = self._len_qpos_qvel()
-        # todo: adapt this to new trajectory format.
         curr_qpos = sample[0:len_qpos]
         while True:
+            for i in range(n_steps_per_trajectory):
+                sample = self.trajectories.get_next_sample()
+                qvel = sample[len_qpos:len_qpos + len_qvel]
+                qpos = [qp + self.dt * qv for qp, qv in zip(curr_qpos, qvel)]
+                sample[:len(qpos)] = qpos
 
-            sample = self.trajectories.get_next_sample()
-            qvel = sample[len_qpos:len_qpos + len_qvel]
-            qpos = curr_qpos + self.dt * qvel
-            sample[:len(qpos)] = qpos
+                self.set_sim_state(sample)
 
-            self.set_sim_state(sample)
+                self._simulation_pre_step()
+                mujoco.mj_forward(self._model, self._data)
+                self._simulation_post_step()
 
-            mujoco.mj_forward(self._model, self._data)
+                # get current qpos
+                curr_qpos = self._get_joint_pos()
 
-            # save current qpos
+                obs = self._create_observation(sample)
+                if self._has_fallen(obs):
+                    print("Has fallen!")
+
+                self.render()
+
+            self.reset()
+
+            # get current qpos
             curr_qpos = self._get_joint_pos()
-
-            obs = self._create_observation(sample)
-            if self._has_fallen(obs):
-                print("Has fallen!")
-
-            self.render()
 
     def set_sim_state(self, sample):
         """

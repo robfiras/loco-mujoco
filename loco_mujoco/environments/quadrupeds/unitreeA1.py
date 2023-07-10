@@ -21,7 +21,7 @@ class UnitreeA1(BaseEnv):
     """
 
     def __init__(self, use_torque_ctrl=True, setup_random_rot=False, tmp_dir_name=None,
-                 default_target_velocity=0.5, **kwargs):
+                 default_target_velocity=0.5, camera_params=None, **kwargs):
         """
         Constructor.
 
@@ -32,6 +32,7 @@ class UnitreeA1(BaseEnv):
                 written, if created. By default, temporary directory names are created automatically.
             default_target_velocity (float): Default target velocity set in the goal, when no trajectory
                 data is provided.
+            camera_params (dict): Dictionary defining some of the camera parameters for visualization.
 
         """
 
@@ -66,7 +67,11 @@ class UnitreeA1(BaseEnv):
         self._goal = GoalDirectionVelocity()
         self._goal.set_goal(0.0, default_target_velocity)
 
-        super().__init__(xml_path, action_spec, observation_spec,  collision_groups, **kwargs)
+        if camera_params is None:
+            # make the camera by default a bit higher
+            camera_params = dict(follow=dict(distance=3.5, elevation=-20.0, azimuth=90.0))
+        super().__init__(xml_path, action_spec, observation_spec,  collision_groups,
+                         camera_params=camera_params, **kwargs)
 
     def setup(self, obs):
         """
@@ -119,26 +124,12 @@ class UnitreeA1(BaseEnv):
 
     def set_sim_state(self, sample):
         """
-        Sets the state of the simulation according to an observation. For correct
-        visualization of the direction arrow the trunk rotation is added to the
-        arrow's rotation matrix to make sure it is from the robot's point of view.
+        Sets the state of the simulation according to an observation.
 
         Args:
             sample (list or np.array): Sample used to set the state of the simulation.
 
         """
-        # todo maybe this is not need, just call the new method for setting the goal arrow.
-        # add the trunk rotation to the direction to make sure the direction arrow matrix is interpreted from
-        # the robot's point of view. This is just for visualization
-        trunk_rotation = self.obs_helper.get_from_obs(sample, "q_trunk_rotation")
-
-        # calc rotation matrix with rotation of trunk
-        rotation = np.array([[np.cos(trunk_rotation), -np.sin(trunk_rotation), 0],
-                             [np.sin(trunk_rotation), np.cos(trunk_rotation), 0],
-                             [0, 0, 1]])
-        dir_arrow_idx = self.trajectories.get_idx("dir_arrow")
-        current_rot_mat = sample[dir_arrow_idx]
-        sample[dir_arrow_idx] = np.dot(rotation, current_rot_mat.reshape((3, 3))).reshape((9,))
 
         # set simulation state
         sample = sample[:-1]    # remove goal velocity

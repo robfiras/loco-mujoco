@@ -300,7 +300,7 @@ class Trajectory(object):
         """
         assert len(sample) == len(self.keys)
 
-        idx = self.get_index(key)
+        idx = self.get_idx(key)
 
         return sample[idx]
 
