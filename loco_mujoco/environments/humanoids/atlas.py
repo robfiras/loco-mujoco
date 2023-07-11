@@ -253,7 +253,8 @@ class Atlas(LocoEnv):
         return pelvis_condition
 
     @staticmethod
-    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, disable_arms=True, use_foot_forces=False):
+    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, disable_arms=True,
+                 use_foot_forces=False, random_start=True, init_step_no=None):
         """
         Returns an Atlas environment corresponding to the specified task.
 
@@ -268,6 +269,11 @@ class Atlas(LocoEnv):
             horizon (int): Horizon of the environment.
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
+            random_start (bool): If True, a random sample from the trajectories
+                is chosen at the beginning of each time step and initializes the
+                simulation according to that.
+            init_step_no (int): If set, the respective sample from the trajectories
+                is taken to initialize the simulation.
 
         Returns:
             An MDP of the Atlas Robot.
@@ -276,13 +282,13 @@ class Atlas(LocoEnv):
 
         # Generate the MDP
         if task == "walk":
-            mdp = Atlas(gamma=gamma, horizon=horizon,
+            mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
                         disable_arms=disable_arms, use_foot_forces=use_foot_forces)
         elif task == "carry":
-            mdp = Atlas(gamma=gamma, horizon=horizon,
+            mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
                         disable_arms=disable_arms, use_foot_forces=use_foot_forces, hold_weight=True)
         else:
-            raise ValueError(f"Task {task} does not exist for the Atlas environment.")
+            raise ValueError(f"Task \"{task}\" does not exist for the Atlas environment.")
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -299,7 +305,7 @@ class Atlas(LocoEnv):
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
         else:
-            raise ValueError(f"Dataset type {dataset_type} does not exist for the Atlas environment.")
+            raise ValueError(f"Dataset type \"{dataset_type}\" does not exist for the Atlas environment.")
 
         mdp.load_trajectory(traj_params)
 

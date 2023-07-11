@@ -292,7 +292,7 @@ class Trajectory(object):
 
         self.subtraj_step_no += 1
         if self.subtraj_step_no == self.trajectory_length:
-            sample = self.reset_trajectory(substep_no=0)
+            sample = None
         else:
             sample = self._get_ith_sample_from_subtraj(self.subtraj_step_no)
 

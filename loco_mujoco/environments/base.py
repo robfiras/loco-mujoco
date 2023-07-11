@@ -164,7 +164,6 @@ class LocoEnv(MultiMuJoCo):
             if self.trajectories is not None:
                 if self._random_start:
                     sample = self.trajectories.reset_trajectory()
-                    self.set_sim_state(sample)
                 elif self._init_step_no:
                     traj_len = self.trajectories.trajectory_length
                     n_traj = self.trajectories.nnumber_of_trajectories
@@ -172,7 +171,11 @@ class LocoEnv(MultiMuJoCo):
                     substep_no = int(self._init_step_no % traj_len)
                     traj_no = int(self._init_step_no / traj_len)
                     sample = self.trajectories.reset_trajectory(substep_no, traj_no)
-                    self.set_sim_state(sample)
+                else:
+                    # sample random trajectory and use the first sample
+                    sample = self.trajectories.reset_trajectory(substep_no=0)
+
+                self.set_sim_state(sample)
 
     def is_absorbing(self, obs):
         """
@@ -264,7 +267,7 @@ class LocoEnv(MultiMuJoCo):
 
         return dataset
 
-    def play_trajectory_demo(self, n_steps_per_trajectory=None):
+    def play_trajectory(self, n_steps_per_trajectory=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -276,17 +279,22 @@ class LocoEnv(MultiMuJoCo):
         self.reset()
         sample = self.trajectories.get_current_sample()
         self.set_sim_state(sample)
+        self.render()
         if n_steps_per_trajectory is None:
             n_steps_per_trajectory = self.trajectories.trajectory_length
         while True:
             for i in range(n_steps_per_trajectory):
-                sample = self.trajectories.get_next_sample()
 
                 self.set_sim_state(sample)
 
                 self._simulation_pre_step()
                 mujoco.mj_forward(self._model, self._data)
                 self._simulation_post_step()
+
+                sample = self.trajectories.get_next_sample()
+                if sample is None:
+                    self.reset()
+                    sample = self.trajectories.get_current_sample()
 
                 obs = self._create_observation(sample)
                 if self._has_fallen(obs):
@@ -296,24 +304,30 @@ class LocoEnv(MultiMuJoCo):
 
             self.reset()
 
-    def play_trajectory_demo_from_velocity(self, n_steps_per_trajectory=None):
+    def play_trajectory_from_velocity(self, n_steps_per_trajectory=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
-        positions to the ones in the trajectories at every step.
+        positions to the ones calculated from the joint velocities
+        in the trajectories at every step. Therefore, the joint positions
+        are set from the trajectory in the first step. Afterwards, numerical
+        integration is used to calculate the next joint positions using
+        the joint velocities in the trajectory.
 
         """
 
         assert self.trajectories is not None
 
-        sample = self.trajectories.reset_trajectory(substep_no=0)
+        self.reset()
+        sample = self.trajectories.get_current_sample()
         self.set_sim_state(sample)
+        self.render()
         if n_steps_per_trajectory is None:
             n_steps_per_trajectory = self.trajectories.trajectory_length
         len_qpos, len_qvel = self._len_qpos_qvel()
         curr_qpos = sample[0:len_qpos]
         while True:
             for i in range(n_steps_per_trajectory):
-                sample = self.trajectories.get_next_sample()
+
                 qvel = sample[len_qpos:len_qpos + len_qvel]
                 qpos = [qp + self.dt * qv for qp, qv in zip(curr_qpos, qvel)]
                 sample[:len(qpos)] = qpos
@@ -326,6 +340,14 @@ class LocoEnv(MultiMuJoCo):
 
                 # get current qpos
                 curr_qpos = self._get_joint_pos()
+
+                sample = self.trajectories.get_next_sample()
+                if sample is None:
+                    self.reset()
+                    sample = self.trajectories.get_current_sample()
+                    curr_qpos = sample[0:len_qpos]
+                else:
+                    curr_qpos = sample[0:len_qpos]
 
                 obs = self._create_observation(sample)
                 if self._has_fallen(obs):

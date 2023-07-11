@@ -376,14 +376,14 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
         elif mode == "4":
             dataset_suffix = "_4.npz"
         else:
-            raise ValueError(f"Unknown mode {mode} for HumanoidTorque4Ages environment.")
+            raise ValueError(f"Unknown mode \"{mode}\" for HumanoidTorque4Ages environment.")
 
         if task == "walk":
             traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
         elif task == "run":
             traj_path = "../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
         else:
-            raise ValueError(f"Task {task} does not exist for the HumanoidTorque4Ages environment.")
+            raise ValueError(f"Task \"{task}\" does not exist for the HumanoidTorque4Ages environment.")
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz

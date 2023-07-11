@@ -187,8 +187,8 @@ class ReducedHumanoidTorque(LocoEnv):
         return grf
 
     @staticmethod
-    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000,
-                 use_box_feet=True, disable_arms=True, use_foot_forces=False):
+    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, use_box_feet=True,
+                 disable_arms=True, use_foot_forces=False, random_start=True, init_step_no=None):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
@@ -203,6 +203,11 @@ class ReducedHumanoidTorque(LocoEnv):
             use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
+            random_start (bool): If True, a random sample from the trajectories
+                is chosen at the beginning of each time step and initializes the
+                simulation according to that.
+            init_step_no (int): If set, the respective sample from the trajectories
+                is taken to initialize the simulation.
 
         Returns:
             An MDP of a Torque Humanoid.
@@ -211,6 +216,7 @@ class ReducedHumanoidTorque(LocoEnv):
 
         # Generate the MDP
         mdp = ReducedHumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
+                                    random_start=random_start, init_step_no=init_step_no,
                                     disable_arms=disable_arms, use_foot_forces=use_foot_forces)
 
         # Load the trajectory
@@ -223,7 +229,7 @@ class ReducedHumanoidTorque(LocoEnv):
         elif task == "run":
             traj_path = "../datasets/humanoids/05-run_reduced_humanoid.npz"
         else:
-            raise ValueError(f"Task {task} does not exist for the Humanoid Torque environment.")
+            raise ValueError(f"Task \"{task}\" does not exist for the Humanoid Torque environment.")
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
@@ -235,7 +241,7 @@ class ReducedHumanoidTorque(LocoEnv):
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
         else:
-            raise ValueError(f"Dataset type {dataset_type} does not exist for the Humanoid Torque environment.")
+            raise ValueError(f"Dataset type \"{dataset_type}\" does not exist for the Humanoid Torque environment.")
 
         mdp.load_trajectory(traj_params)
 

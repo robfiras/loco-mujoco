@@ -101,7 +101,6 @@ class UnitreeA1(LocoEnv):
                     if self.setup_random_rot:
                         angle = np.random.uniform(0, 2 * np.pi)
                         sample = rotate_obs(sample, angle,  *self._get_relevant_idx_rotation())
-                    self.set_sim_state(sample)
                 elif self._init_step_no:
                     traj_len = self.trajectories.trajectory_length
                     n_traj = self.trajectories.nnumber_of_trajectories
@@ -110,8 +109,11 @@ class UnitreeA1(LocoEnv):
                     traj_no = int(self._init_step_no / traj_len)
                     sample = self.trajectories.reset_trajectory(substep_no, traj_no)
                 else:
-                    raise ValueError("You have specified a trajectory, either choose \"random_start\" "
-                                     "or set \"init_step_no\".")
+                    # sample random trajectory and use the first sample
+                    sample = self.trajectories.reset_trajectory(substep_no=0)
+                    if self.setup_random_rot:
+                        angle = np.random.uniform(0, 2 * np.pi)
+                        sample = rotate_obs(sample, angle,  *self._get_relevant_idx_rotation())
 
                 # set the goal
                 rot_mat = self.trajectories.get_from_sample(sample, "dir_arrow")
@@ -370,7 +372,8 @@ class UnitreeA1(LocoEnv):
 
 
     @staticmethod
-    def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False):
+    def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False,
+                 random_start=True, init_step_no=None):
         """
         Returns a Unitree environment corresponding to the specified task.
 
@@ -384,6 +387,11 @@ class UnitreeA1(LocoEnv):
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
+            random_start (bool): If True, a random sample from the trajectories
+                is chosen at the beginning of each time step and initializes the
+                simulation according to that.
+            init_step_no (int): If set, the respective sample from the trajectories
+                is taken to initialize the simulation.
 
         Returns:
             An MDP of the Unitree A1 Robot.
@@ -391,16 +399,17 @@ class UnitreeA1(LocoEnv):
         """
 
         # Generate the MDP
+        # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
-            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces,
-                            use_torque_ctrl=True, setup_random_rot=False)
+            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
+                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False)
             traj_path = "../datasets/quadrupeds/walk_straight.npz"
         elif task == "hard":
-            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces,
-                            use_torque_ctrl=True, setup_random_rot=True)
+            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
+                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False)
             traj_path = "../datasets/quadrupeds/walk_8_dir.npz"
         else:
-            raise ValueError(f"Unknown task {task} for the Unitree A1 environment.")
+            raise ValueError(f"Unknown task \"{task}\" for the Unitree A1 environment.")
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -417,7 +426,7 @@ class UnitreeA1(LocoEnv):
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
         else:
-            raise ValueError(f"Dataset type {dataset_type} does not exist for the HumanoidTorque4Ages environment.")
+            raise ValueError(f"Dataset type \"{dataset_type}\" does not exist for the HumanoidTorque4Ages environment.")
 
         mdp.load_trajectory(traj_params)
 
