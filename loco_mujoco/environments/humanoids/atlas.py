@@ -76,6 +76,8 @@ class Atlas(LocoEnv):
                     current_xml_handle = deepcopy(xml_handle)
                     current_xml_handle = self._add_weight(current_xml_handle, w, color)
                     xml_path.append(self._save_xml_handle(current_xml_handle, tmp_dir_name))
+            else:
+                xml_path.append(self._save_xml_handle(xml_handle, tmp_dir_name))
 
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
 
