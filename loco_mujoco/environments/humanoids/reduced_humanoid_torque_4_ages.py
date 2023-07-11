@@ -70,7 +70,6 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
         joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups = self._get_xml_modifications()
 
         xml_handle = mjcf.from_path(xml_path)
-        xml_handle = self._reorient_arms(xml_handle)
         xml_handles = [self.scale_body(deepcopy(xml_handle), scaling) for scaling in self._scalings]
 
         if use_box_feet or disable_arms:
