@@ -7,7 +7,7 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("Atlas")
+    mdp = LocoEnv.make("Atlas.carry")
 
     mdp.play_trajectory(250)
 

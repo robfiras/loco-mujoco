@@ -7,6 +7,10 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 from loco_mujoco.environments import LocoEnv
+from loco_mujoco.utils import check_validity_task_mode_dataset
+
+VALID_TASKS = ["walk", "carry"]
+VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class Atlas(LocoEnv):
@@ -305,6 +309,9 @@ class Atlas(LocoEnv):
             An MDP of the Atlas Robot.
 
         """
+        check_validity_task_mode_dataset(Atlas.__name__, task, None, dataset_type,
+                                         VALID_TASKS, None, VALID_DATASET_TYPES)
+
 
         # Generate the MDP
         if task == "walk":
@@ -313,8 +320,6 @@ class Atlas(LocoEnv):
         elif task == "carry":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
                         disable_arms=disable_arms, use_foot_forces=use_foot_forces, hold_weight=True)
-        else:
-            raise ValueError(f"Task \"{task}\" does not exist for the Atlas environment.")
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -330,8 +335,6 @@ class Atlas(LocoEnv):
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
-        else:
-            raise ValueError(f"Dataset type \"{dataset_type}\" does not exist for the Atlas environment.")
 
         mdp.load_trajectory(traj_params)
 

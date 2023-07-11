@@ -12,6 +12,10 @@ from loco_mujoco.utils.reward import VelocityVectorReward
 from loco_mujoco.utils.math import rotate_obs
 from loco_mujoco.utils.goals import GoalDirectionVelocity
 from loco_mujoco.utils.math import mat2angle_xy, angle2mat_xy, transform_angle_2pi
+from loco_mujoco.utils.checks import check_validity_task_mode_dataset
+
+VALID_TASKS = ["simple", "hard"]
+VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class UnitreeA1(LocoEnv):
@@ -397,6 +401,8 @@ class UnitreeA1(LocoEnv):
             An MDP of the Unitree A1 Robot.
 
         """
+        check_validity_task_mode_dataset(UnitreeA1.__name__, task, None, dataset_type,
+                                         VALID_TASKS, None, VALID_DATASET_TYPES)
 
         # Generate the MDP
         # todo: once the trajectory is learned without random init rotation, activate the latter.
@@ -408,8 +414,6 @@ class UnitreeA1(LocoEnv):
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
                             init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False)
             traj_path = "../datasets/quadrupeds/walk_8_dir.npz"
-        else:
-            raise ValueError(f"Unknown task \"{task}\" for the Unitree A1 environment.")
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -425,8 +429,6 @@ class UnitreeA1(LocoEnv):
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
-        else:
-            raise ValueError(f"Dataset type \"{dataset_type}\" does not exist for the HumanoidTorque4Ages environment.")
 
         mdp.load_trajectory(traj_params)
 

@@ -6,6 +6,10 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 from loco_mujoco.environments import LocoEnv
+from loco_mujoco.utils import check_validity_task_mode_dataset
+
+VALID_TASKS = ["walk", "run"]
+VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class ReducedHumanoidTorque(LocoEnv):
@@ -214,6 +218,9 @@ class ReducedHumanoidTorque(LocoEnv):
 
         """
 
+        check_validity_task_mode_dataset(ReducedHumanoidTorque.__name__, task, None, dataset_type,
+                                         VALID_TASKS, None, VALID_DATASET_TYPES)
+
         # Generate the MDP
         mdp = ReducedHumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
                                     random_start=random_start, init_step_no=init_step_no,
@@ -228,8 +235,6 @@ class ReducedHumanoidTorque(LocoEnv):
             traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
         elif task == "run":
             traj_path = "../datasets/humanoids/05-run_reduced_humanoid.npz"
-        else:
-            raise ValueError(f"Task \"{task}\" does not exist for the Humanoid Torque environment.")
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
@@ -240,8 +245,6 @@ class ReducedHumanoidTorque(LocoEnv):
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
-        else:
-            raise ValueError(f"Dataset type \"{dataset_type}\" does not exist for the Humanoid Torque environment.")
 
         mdp.load_trajectory(traj_params)
 

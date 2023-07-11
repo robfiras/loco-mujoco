@@ -7,7 +7,7 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("UnitreeA1.hard")
+    mdp = LocoEnv.make("UnitreeA1")
 
     mdp.play_trajectory(250)
 

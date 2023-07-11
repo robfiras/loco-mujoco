@@ -8,6 +8,11 @@ from mushroom_rl.utils.running_stats import *
 
 from loco_mujoco.environments.humanoids import ReducedHumanoidTorque
 from loco_mujoco.utils.reward import MultiTargetVelocityReward
+from loco_mujoco.utils import check_validity_task_mode_dataset
+
+VALID_TASKS = ["walk", "run"]
+VALID_MODES = ["all", "1", "2", "3", "4"]
+VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
@@ -358,8 +363,27 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
         """
 
+        check_validity_task_mode_dataset(ReducedHumanoidTorque4Ages.__name__, task, mode, dataset_type,
+                                         VALID_TASKS, VALID_MODES, VALID_DATASET_TYPES)
+
+        if mode == "all":
+            dataset_suffix = "_all.npz"
+            scaling = None
+        elif mode == "1":
+            dataset_suffix = "_1.npz"
+            scaling = 0.4
+        elif mode == "2":
+            dataset_suffix = "_2.npz"
+            scaling = 0.6
+        elif mode == "3":
+            dataset_suffix = "_3.npz"
+            scaling = 0.8
+        elif mode == "4":
+            dataset_suffix = "_4.npz"
+            scaling = 1.0
+
         # Generate the MDP
-        mdp = ReducedHumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
+        mdp = ReducedHumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
                                          disable_arms=disable_arms, use_foot_forces=use_foot_forces)
 
         # Load the trajectory
@@ -367,37 +391,19 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
         desired_contr_freq = 1 / mdp.dt  # hz
         n_substeps = env_freq // desired_contr_freq
 
-        if mode == "all":
-            dataset_suffix = "_all.npz"
-        elif mode == "1":
-            dataset_suffix = "_1.npz"
-        elif mode == "2":
-            dataset_suffix = "_2.npz"
-        elif mode == "3":
-            dataset_suffix = "_3.npz"
-        elif mode == "4":
-            dataset_suffix = "_4.npz"
-        else:
-            raise ValueError(f"Unknown mode \"{mode}\" for HumanoidTorque4Ages environment.")
-
         if task == "walk":
             traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
         elif task == "run":
             traj_path = "../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
-        else:
-            raise ValueError(f"Task \"{task}\" does not exist for the HumanoidTorque4Ages environment.")
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
             traj_params = dict(traj_path=traj_path,
                                traj_dt=(1 / traj_data_freq),
-                               control_dt=(1 / desired_contr_freq),
-                               clip_trajectory_to_joint_ranges=True)
+                               control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
-        else:
-            raise ValueError(f"Dataset type {dataset_type} does not exist for the HumanoidTorque4Ages environment.")
 
         mdp.load_trajectory(traj_params)
 
