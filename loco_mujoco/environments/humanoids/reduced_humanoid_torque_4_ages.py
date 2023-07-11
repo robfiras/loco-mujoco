@@ -153,22 +153,25 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
         super().load_trajectory(traj_params)
 
         if scaling_trajectory_map is None:
-            if warn:
-                if self._scaling_trajectory_map is None and type(self._scalings) is list and len(self._scalings) > 1:
+            if self._scaling_trajectory_map is None and type(self._scalings) is list and len(self._scalings) > 1:
+                if warn:
                     warnings.warn("\"scaling_trajectory_map\" is not defined! Loading the default map, which assumes that "
                                   "the trajectory contains an equal number of trajectories for all scalings and that"
                                   "they are ordered in the following order %s." % self._scalings)
-                    n_trajs_per_scaling = self.trajectories.number_of_trajectories / len(self._scalings)
-                    assert n_trajs_per_scaling.is_integer(), "Failed to construct the default" \
-                                                             "\"scaling_trajectory_map\". The number of trajectory " \
-                                                             "can not be divided by the number of scalings!"
-                    n_trajs_per_scaling = int(n_trajs_per_scaling)
-                    current_low_idx = 0
-                    self._scaling_trajectory_map = []
-                    for i in range(self.trajectories.number_of_trajectories):
-                        current_high_idx = current_low_idx + n_trajs_per_scaling
-                        self._scaling_trajectory_map.append((current_low_idx, current_high_idx))
-                        current_low_idx = current_high_idx
+                n_trajs_per_scaling = self.trajectories.number_of_trajectories / len(self._scalings)
+                assert n_trajs_per_scaling.is_integer(), "Failed to construct the default" \
+                                                         "\"scaling_trajectory_map\". The number of trajectory " \
+                                                         "can not be divided by the number of scalings!"
+                n_trajs_per_scaling = int(n_trajs_per_scaling)
+                current_low_idx = 0
+                self._scaling_trajectory_map = []
+                for i in range(self.trajectories.number_of_trajectories):
+                    current_high_idx = current_low_idx + n_trajs_per_scaling
+                    self._scaling_trajectory_map.append((current_low_idx, current_high_idx))
+                    current_low_idx = current_high_idx
+            else:
+                # only one scaling used
+                self._scaling_trajectory_map = [(0, 1),]
         else:
             self._scaling_trajectory_map = scaling_trajectory_map
 
