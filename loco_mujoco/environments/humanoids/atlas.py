@@ -61,44 +61,51 @@ class Atlas(LocoEnv):
                 xml_handle = self._delete_from_xml_handle(xml_handle, joints_to_remove,
                                                           motors_to_remove, equ_constr_to_remove)
 
-            if hold_weight:
-                xml_handle = self._add_weight(xml_handle)
-
-            xml_path = self._save_xml_handle(xml_handle, tmp_dir_name)
+            xml_path = []
+            if hold_weight and weight_mass is not None:
+                color_red = np.array([1.0, 0.0, 0.0, 1.0])
+                xml_handle = self._add_weight(xml_handle, weight_mass, color_red)
+                xml_path.append(self._save_xml_handle(xml_handle, tmp_dir_name))
+            elif hold_weight and weight_mass is None:
+                for i, w in enumerate(self._valid_weights):
+                    color = self._get_box_color(i)
+                    current_xml_handle = deepcopy(xml_handle)
+                    current_xml_handle = self._add_weight(current_xml_handle, w, color)
+                    xml_path.append(self._save_xml_handle(current_xml_handle, tmp_dir_name))
 
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
 
-    def setup(self, obs):
-        """
-        Function to setup the initial state of the simulation. Initialization can be done either
-        randomly, from a certain initial, or from the default initial state of the model.
-
-        Args:
-            obs (np.array): Observation to initialize the environment from;
-
-        """
-
-        self._reward_function.reset_state()
-
-        super().setup(obs)
-
-        if self._hold_weight:
-            if self._weight_mass is None:
-                ind = np.random.randint(0, len(self._valid_weights))
-                new_weight_mass = self._valid_weights[ind]
-                self._model.body("weight").mass = new_weight_mass
-
-                # todo: also change the inertial of the mass
-
-                # modify the color of the mass according to the mass
-                red_rgba = np.array([[1.0, 0.0, 0.0, 1.0]])
-                blue_rgba = np.array([[0.2, 0.0, 1.0, 1.0]])
-                interpolation_var = ind / (len(self._valid_weights)-1)
-                color = blue_rgba + ((red_rgba - blue_rgba) * interpolation_var)
-                geom_id = self._model.body("weight").geomadr[0]
-                self._model.geom_rgba[geom_id] = color
-            else:
-                self._model.body("weight").mass = self._weight_mass
+    # def setup(self, obs):
+    #     """
+    #     Function to setup the initial state of the simulation. Initialization can be done either
+    #     randomly, from a certain initial, or from the default initial state of the model.
+    #
+    #     Args:
+    #         obs (np.array): Observation to initialize the environment from;
+    #
+    #     """
+    #
+    #     self._reward_function.reset_state()
+    #
+    #     super().setup(obs)
+    #
+    #     if self._hold_weight:
+    #         if self._weight_mass is None:
+    #             ind = np.random.randint(0, len(self._valid_weights))
+    #             new_weight_mass = self._valid_weights[ind]
+    #             self._model.body("weight").mass = new_weight_mass
+    #
+    #             # todo: also change the inertial of the mass
+    #
+    #             # modify the color of the mass according to the mass
+    #             red_rgba = np.array([[1.0, 0.0, 0.0, 1.0]])
+    #             blue_rgba = np.array([[0.2, 0.0, 1.0, 1.0]])
+    #             interpolation_var = ind / (len(self._valid_weights)-1)
+    #             color = blue_rgba + ((red_rgba - blue_rgba) * interpolation_var)
+    #             geom_id = self._model.body("weight").geomadr[0]
+    #             self._model.geom_rgba[geom_id] = color
+    #         else:
+    #             self._model.body("weight").mass = self._weight_mass
 
     def create_dataset(self, ignore_keys=None):
         """
@@ -252,6 +259,25 @@ class Atlas(LocoEnv):
 
         return pelvis_condition
 
+    def _get_box_color(self, ind):
+        """
+        Calculates the rgba color based on the index of the environment.
+
+        Args:
+            ind (int): Current index of the environment.
+
+        Returns:
+            rgba np.array.
+
+        """
+
+        red_rgba = np.array([1.0, 0.0, 0.0, 1.0])
+        blue_rgba = np.array([0.2, 0.0, 1.0, 1.0])
+        interpolation_var = ind / (len(self._valid_weights) - 1)
+        color = blue_rgba + ((red_rgba - blue_rgba) * interpolation_var)
+
+        return color
+
     @staticmethod
     def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, disable_arms=True,
                  use_foot_forces=False, random_start=True, init_step_no=None):
@@ -312,7 +338,7 @@ class Atlas(LocoEnv):
         return mdp
 
     @staticmethod
-    def _add_weight(xml_handle):
+    def _add_weight(xml_handle, mass, color):
         """
         Adds a weight to the Mujoco XML handle. The weight will
         be hold in front of Atlas. Therefore, the arms will be
@@ -327,10 +353,10 @@ class Atlas(LocoEnv):
         """
 
         # find pelvis handle
-        pelvis = xml_handle.find("body", "pelvis")
+        pelvis = xml_handle.find("body", "utorso")
         pelvis.add("body", name="weight")
         weight = xml_handle.find("body", "weight")
-        weight.add("geom", type="box", size="0.1 0.27 0.1", pos="0.75 0 -0.02", rgba="1.0 0.0 0.0 1.0", mass="0.1")
+        weight.add("geom", type="box", size="0.1 0.27 0.1", pos="0.72 0 -0.25", rgba=color, mass=mass)
 
         # modify the arm orientation
         r_clav = xml_handle.find("body", "r_clav")
