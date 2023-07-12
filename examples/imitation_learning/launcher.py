@@ -25,7 +25,7 @@ if __name__ == '__main__':
                         )
 
     default_params = dict(n_epochs=1,
-                          n_steps_per_epoch=1000,
+                          n_steps_per_epoch=100000,
                           n_epochs_save=25,
                           info_constraint=0.1,
                           n_eval_episodes=10,

@@ -180,6 +180,15 @@ class UnitreeA1(LocoEnv):
 
         return dataset
 
+
+    def get_kinematic_obs_mask(self):
+        """
+        Returns a mask (np.array) for the observation specified in observation_spec (or part of it).
+
+        """
+
+        return np.arange(len(self.obs_helper.observation_spec)) # -2 (for x,y ) + 1 (for sin_cos_dir) + 1 (for goal_vel)
+
     def _get_observation_space(self):
         """
         Returns a tuple of the lows and highs (np.array) of the observation space.

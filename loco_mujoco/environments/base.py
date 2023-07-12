@@ -94,9 +94,6 @@ class LocoEnv(MultiMuJoCo):
         self.info.action_space.low[:] = -1.0
         self.info.action_space.high[:] = 1.0
 
-        # mask to get kinematic observations (-2 for neglecting x and z)
-        self._kinematic_obs_mask = np.arange(len(observation_spec) - 2)
-
         # setup a running average window for the mean ground forces
         self.mean_grf = self._setup_ground_force_statistics()
 
@@ -200,7 +197,7 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        return self._kinematic_obs_mask
+        return np.arange(len(self.obs_helper.observation_spec) - 2)
 
     def obs_to_kinematics_conversion(self, obs):
         """

@@ -57,7 +57,7 @@ def _create_vail_agent(mdp, expert_data, use_cuda, disc_only_state=True, info_co
                          use_cuda=use_cuda)
 
     # remove hip rotations
-    discrim_obs_mask = np.arange(mdp_info.observation_space.shape[0])
+    discrim_obs_mask = mdp.get_kinematic_obs_mask()
     discrim_act_mask = [] if disc_only_state else np.arange(mdp_info.action_space.shape[0])
     discrim_input_shape = (len(discrim_obs_mask) + len(discrim_act_mask),) if not use_next_states else \
         (2*len(discrim_obs_mask) + len(discrim_act_mask),)
