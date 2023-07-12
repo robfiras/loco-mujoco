@@ -343,7 +343,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
     @staticmethod
     def generate(task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000,
-                 use_box_feet=True, disable_arms=True, use_foot_forces=False):
+                 use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None):
         """
         Returns a Humanoid environment corresponding to the specified task.
 
@@ -383,19 +383,30 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             dataset_suffix = "_4.npz"
             scaling = 1.0
 
+        if n_models is not None:
+            assert type(scaling) is float
+            scaling = [scaling for i in range(n_models)]
+            scaling_trajectory_map = [(0, 1)]
+        else:
+            scaling_trajectory_map = None
+
+        if task == "walk":
+            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
+            reward_params = dict(target_velocity=1.25)
+        elif task == "run":
+            traj_path = "../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
+            reward_params = dict(target_velocity=2.5)
+
         # Generate the MDP
         mdp = ReducedHumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
-                                         disable_arms=disable_arms, use_foot_forces=use_foot_forces)
+                                         disable_arms=disable_arms, use_foot_forces=use_foot_forces,
+                                         reward_type="multi_target_velocity", reward_params=reward_params,
+                                         scaling_trajectory_map=scaling_trajectory_map)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
         desired_contr_freq = 1 / mdp.dt  # hz
         n_substeps = env_freq // desired_contr_freq
-
-        if task == "walk":
-            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
-        elif task == "run":
-            traj_path = "../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz

@@ -313,14 +313,17 @@ class Atlas(LocoEnv):
         check_validity_task_mode_dataset(Atlas.__name__, task, None, dataset_type,
                                          VALID_TASKS, None, VALID_DATASET_TYPES)
 
+        reward_params = dict(target_velocity=1.25)
 
         # Generate the MDP
         if task == "walk":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
-                        disable_arms=disable_arms, use_foot_forces=use_foot_forces)
+                        disable_arms=disable_arms, use_foot_forces=use_foot_forces, reward_type="target_velocity",
+                        reward_params=reward_params)
         elif task == "carry":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
-                        disable_arms=disable_arms, use_foot_forces=use_foot_forces, hold_weight=True)
+                        disable_arms=disable_arms, use_foot_forces=use_foot_forces, hold_weight=True,
+                        reward_type="target_velocity", reward_params=reward_params)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

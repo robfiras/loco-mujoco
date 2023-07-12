@@ -249,20 +249,23 @@ class ReducedHumanoidTorque(LocoEnv):
         check_validity_task_mode_dataset(ReducedHumanoidTorque.__name__, task, None, dataset_type,
                                          VALID_TASKS, None, VALID_DATASET_TYPES)
 
+        if task == "walk":
+            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
+            reward_params = dict(target_velocity=1.25)
+        elif task == "run":
+            traj_path = "../datasets/humanoids/05-run_reduced_humanoid.npz"
+            reward_params = dict(target_velocity=2.5)
+
         # Generate the MDP
         mdp = ReducedHumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
                                     random_start=random_start, init_step_no=init_step_no,
-                                    disable_arms=disable_arms, use_foot_forces=use_foot_forces)
+                                    disable_arms=disable_arms, use_foot_forces=use_foot_forces,
+                                    reward_type="target_velocity", reward_params=reward_params)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
         desired_contr_freq = 1 / mdp.dt  # hz
         n_substeps = env_freq // desired_contr_freq
-
-        if task == "walk":
-            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
-        elif task == "run":
-            traj_path = "../datasets/humanoids/05-run_reduced_humanoid.npz"
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz

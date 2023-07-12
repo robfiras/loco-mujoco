@@ -538,7 +538,7 @@ class LocoEnv(MultiMuJoCo):
         elif reward_type is None:
             reward_func = NoReward()
         else:
-            raise NotImplementedError("The specified reward has not been implemented: ", reward_type)
+            raise NotImplementedError("The specified reward has not been implemented: %s" % reward_type)
 
         return reward_func
 

@@ -243,8 +243,8 @@ class UnitreeA1(LocoEnv):
         """
 
         if reward_type == "velocity_vector":
-            x_vel_idx = self.get_obs_idx("dq_pelvis_tx")[0]
-            y_vel_idx = self.get_obs_idx("dq_pelvis_ty")[0]
+            x_vel_idx = self.get_obs_idx("dq_trunk_tx")[0]
+            y_vel_idx = self.get_obs_idx("dq_trunk_ty")[0]
             rot_mat_idx = self.get_obs_idx("dir_arrow")[0]
             goal_vel_idx = self._goal_velocity_idx
             goal_reward_func = VelocityVectorReward(x_vel_idx=x_vel_idx, y_vel_idx=y_vel_idx,
@@ -403,11 +403,13 @@ class UnitreeA1(LocoEnv):
         # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False)
+                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
+                            reward_type="velocity_vector")
             traj_path = "../datasets/quadrupeds/walk_straight.npz"
         elif task == "hard":
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False)
+                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
+                            reward_type="velocity_vector")
             traj_path = "../datasets/quadrupeds/walk_8_dir.npz"
 
         # Load the trajectory
