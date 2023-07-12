@@ -6,4 +6,4 @@ None/
 .pytest_cache/
 .DS_Store
 datasets/
-
+mushroom_rl_recordings/

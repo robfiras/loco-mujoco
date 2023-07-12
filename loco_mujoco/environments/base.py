@@ -9,6 +9,7 @@ from mushroom_rl.environments import MultiMuJoCo
 from mushroom_rl.utils import spaces
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
+from mushroom_rl.utils.record import VideoRecorder
 
 from loco_mujoco.utils import Trajectory
 from loco_mujoco.utils import NoReward, CustomReward,\
@@ -270,23 +271,39 @@ class LocoEnv(MultiMuJoCo):
 
         return dataset
 
-    def play_trajectory(self, n_steps_per_trajectory=None):
+    def play_trajectory(self, n_episodes=None, n_steps_per_episode=None, record=False, recorder_params=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
+
+        Args:
+            n_episodes (int): Number of episode to replay.
+            n_steps_per_episode (int): Number of steps to replay per episode.
+            record (bool): If True, the replay will be recorded.
+            recorder_params (dict): Dictionary containing the recorder parameters.
 
         """
 
         assert self.trajectories is not None
 
+        if record:
+            fps = 1/self.dt
+            recorder = VideoRecorder(fps=fps, **recorder_params) if recorder_params is not None else\
+                VideoRecorder(fps=fps)
+
         self.reset()
         sample = self.trajectories.get_current_sample()
         self.set_sim_state(sample)
-        self.render()
-        if n_steps_per_trajectory is None:
-            n_steps_per_trajectory = self.trajectories.trajectory_length
-        while True:
-            for i in range(n_steps_per_trajectory):
+        frame = self.render(record)
+        if record:
+            recorder(frame)
+        highest_int = np.iinfo(np.int32).max
+        if n_steps_per_episode is None:
+            n_steps_per_episode = highest_int
+        if n_episodes is None:
+            n_episodes = highest_int
+        for i in range(n_episodes):
+            for j in range(n_steps_per_episode):
 
                 self.set_sim_state(sample)
 
@@ -303,11 +320,13 @@ class LocoEnv(MultiMuJoCo):
                 if self._has_fallen(obs):
                     print("Has fallen!")
 
-                self.render()
+                frame = self.render(record)
+                if record:
+                    recorder(frame)
 
             self.reset()
 
-    def play_trajectory_from_velocity(self, n_steps_per_trajectory=None):
+    def play_trajectory_from_velocity(self, n_episodes=None, n_steps_per_episode=None, record=False, recorder_params=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones calculated from the joint velocities
@@ -316,20 +335,36 @@ class LocoEnv(MultiMuJoCo):
         integration is used to calculate the next joint positions using
         the joint velocities in the trajectory.
 
+        Args:
+            n_episodes (int): Number of episode to replay.
+            n_steps_per_episode (int): Number of steps to replay per episode.
+            record (bool): If True, the replay will be recorded.
+            recorder_params (dict): Dictionary containing the recorder parameters.
+
         """
 
         assert self.trajectories is not None
 
+        if record:
+            fps = 1/self.dt
+            recorder = VideoRecorder(fps=fps, **recorder_params) if recorder_params is not None else\
+                VideoRecorder(fps=fps)
+
         self.reset()
         sample = self.trajectories.get_current_sample()
         self.set_sim_state(sample)
-        self.render()
-        if n_steps_per_trajectory is None:
-            n_steps_per_trajectory = self.trajectories.trajectory_length
+        frame = self.render(record)
+        if record:
+            recorder(frame)
+        highest_int = np.iinfo(np.int32).max
+        if n_steps_per_episode is None:
+            n_steps_per_episode = highest_int
+        if n_episodes is None:
+            n_episodes = highest_int
         len_qpos, len_qvel = self._len_qpos_qvel()
         curr_qpos = sample[0:len_qpos]
-        while True:
-            for i in range(n_steps_per_trajectory):
+        for i in range(n_episodes):
+            for j in range(n_steps_per_episode):
 
                 qvel = sample[len_qpos:len_qpos + len_qvel]
                 qpos = [qp + self.dt * qv for qp, qv in zip(curr_qpos, qvel)]
@@ -356,7 +391,9 @@ class LocoEnv(MultiMuJoCo):
                 if self._has_fallen(obs):
                     print("Has fallen!")
 
-                self.render()
+                frame = self.render(record)
+                if record:
+                    recorder(frame)
 
             self.reset()
 
