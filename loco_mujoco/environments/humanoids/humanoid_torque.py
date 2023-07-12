@@ -250,10 +250,10 @@ class HumanoidTorque(LocoEnv):
                                          VALID_TASKS, None, VALID_DATASET_TYPES)
 
         if task == "walk":
-            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
+            traj_path="../../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            traj_path = "../datasets/humanoids/05-run_reduced_humanoid.npz"
+            traj_path = "../../datasets/humanoids/05-run_reduced_humanoid.npz"
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP

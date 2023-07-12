@@ -429,12 +429,12 @@ class UnitreeA1(LocoEnv):
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
                             init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
                             reward_type="velocity_vector")
-            traj_path = "../datasets/quadrupeds/walk_straight.npz"
+            traj_path = "../../datasets/quadrupeds/walk_straight.npz"
         elif task == "hard":
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
                             init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
                             reward_type="velocity_vector")
-            traj_path = "../datasets/quadrupeds/walk_8_dir.npz"
+            traj_path = "../../datasets/quadrupeds/walk_8_dir.npz"
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

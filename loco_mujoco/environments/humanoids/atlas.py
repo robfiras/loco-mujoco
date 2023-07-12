@@ -332,7 +332,7 @@ class Atlas(LocoEnv):
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
-            traj_params = dict(traj_path="../datasets/humanoids/02-constspeed_ATLAS.npz",
+            traj_params = dict(traj_path="../../datasets/humanoids/02-constspeed_ATLAS.npz",
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":

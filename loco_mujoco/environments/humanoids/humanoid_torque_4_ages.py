@@ -395,10 +395,10 @@ class HumanoidTorque4Ages(HumanoidTorque):
             scaling_trajectory_map = None
 
         if task == "walk":
-            traj_path="../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
+            traj_path="../../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            traj_path = "../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
+            traj_path = "../../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
