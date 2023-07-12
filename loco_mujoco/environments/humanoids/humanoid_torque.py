@@ -12,7 +12,7 @@ VALID_TASKS = ["walk", "run"]
 VALID_DATASET_TYPES = ["real", "perfect"]
 
 
-class ReducedHumanoidTorque(LocoEnv):
+class HumanoidTorque(LocoEnv):
     """
     MuJoCo simulation of a simplified humanoid model with torque actuation.
 
@@ -32,8 +32,8 @@ class ReducedHumanoidTorque(LocoEnv):
 
         """
 
-        xml_path = (Path(__file__).resolve().parent.parent / "data" / "reduced_humanoid_torque" /
-                    "reduced_humanoid_torque.xml").as_posix()
+        xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid_torque" /
+                    "humanoid_torque.xml").as_posix()
 
         action_spec = self._get_action_specification()
 
@@ -246,7 +246,7 @@ class ReducedHumanoidTorque(LocoEnv):
 
         """
 
-        check_validity_task_mode_dataset(ReducedHumanoidTorque.__name__, task, None, dataset_type,
+        check_validity_task_mode_dataset(HumanoidTorque.__name__, task, None, dataset_type,
                                          VALID_TASKS, None, VALID_DATASET_TYPES)
 
         if task == "walk":
@@ -257,7 +257,7 @@ class ReducedHumanoidTorque(LocoEnv):
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = ReducedHumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
+        mdp = HumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
                                     random_start=random_start, init_step_no=init_step_no,
                                     disable_arms=disable_arms, use_foot_forces=use_foot_forces,
                                     reward_type="target_velocity", reward_params=reward_params)

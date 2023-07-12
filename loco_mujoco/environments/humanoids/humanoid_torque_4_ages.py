@@ -6,7 +6,7 @@ from dm_control import mjcf
 
 from mushroom_rl.utils.running_stats import *
 
-from loco_mujoco.environments.humanoids import ReducedHumanoidTorque
+from loco_mujoco.environments.humanoids import HumanoidTorque
 from loco_mujoco.utils.reward import MultiTargetVelocityReward
 from loco_mujoco.utils import check_validity_task_mode_dataset
 
@@ -15,7 +15,7 @@ VALID_MODES = ["all", "1", "2", "3", "4"]
 VALID_DATASET_TYPES = ["real", "perfect"]
 
 
-class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
+class HumanoidTorque4Ages(HumanoidTorque):
     """
     MuJoCo simulation of 4 simplified humanoid models with torque actuation.
     At the beginning of each episode, one of the four humanoid models are
@@ -45,8 +45,8 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
         """
 
-        xml_path = (Path(__file__).resolve().parent.parent / "data" / "reduced_humanoid_torque" /
-                    "reduced_humanoid_torque.xml").as_posix()
+        xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid_torque" /
+                    "humanoid_torque.xml").as_posix()
 
         action_spec = self._get_action_specification()
 
@@ -95,7 +95,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
         xml_paths = [self._save_xml_handle(handle, tmp_dir_name) for handle in xml_handles]
 
         # call gran-parent
-        super(ReducedHumanoidTorque, self).__init__(xml_paths, action_spec, observation_spec, collision_groups, **kwargs)
+        super(HumanoidTorque, self).__init__(xml_paths, action_spec, observation_spec, collision_groups, **kwargs)
 
         if scaling_trajectory_map is not None and self.trajectories is None:
             warnings.warn("You have defined a scaling_trajectory_map, but no trajectory was defined. The former "
@@ -247,7 +247,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
         """
 
-        low, high = super(ReducedHumanoidTorque4Ages, self)._get_observation_space()
+        low, high = super(HumanoidTorque4Ages, self)._get_observation_space()
         if self.more_than_one_env:
             len_env_map = len(self._get_env_id_map(self._current_model_idx, len(self._models)))
             low = np.concatenate([low, np.zeros(len_env_map)])
@@ -266,7 +266,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
         """
 
-        obs = super(ReducedHumanoidTorque4Ages, self)._create_observation(obs)
+        obs = super(HumanoidTorque4Ages, self)._create_observation(obs)
         if self.more_than_one_env:
             env_id_map = self._get_env_id_map(self._current_model_idx, len(self._models))
             obs = np.concatenate([obs, env_id_map])
@@ -364,7 +364,7 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
 
         """
 
-        check_validity_task_mode_dataset(ReducedHumanoidTorque4Ages.__name__, task, mode, dataset_type,
+        check_validity_task_mode_dataset(HumanoidTorque4Ages.__name__, task, mode, dataset_type,
                                          VALID_TASKS, VALID_MODES, VALID_DATASET_TYPES)
 
         if mode == "all":
@@ -398,10 +398,10 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = ReducedHumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
-                                         disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                                         reward_type="multi_target_velocity", reward_params=reward_params,
-                                         scaling_trajectory_map=scaling_trajectory_map)
+        mdp = HumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
+                                  disable_arms=disable_arms, use_foot_forces=use_foot_forces,
+                                  reward_type="multi_target_velocity", reward_params=reward_params,
+                                  scaling_trajectory_map=scaling_trajectory_map)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

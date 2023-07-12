@@ -8,7 +8,7 @@ from mushroom_rl.utils.mujoco import *
 from loco_mujoco.environments import LocoEnv
 
 
-class FullHumanoid(LocoEnv):
+class HumanoidMuscle(LocoEnv):
     """
     Mujoco simulation of full humanoid with muscle-actuated lower limb and torque-actuated upper body.
 
@@ -274,7 +274,7 @@ class FullHumanoid(LocoEnv):
 
 if __name__ == '__main__':
 
-    env = FullHumanoid(n_substeps=10, use_brick_foots=False, disable_arms=True, random_start=False, tmp_dir_name="test")
+    env = HumanoidMuscle(n_substeps=10, use_brick_foots=False, disable_arms=True, random_start=False, tmp_dir_name="test")
 
     env_freq = 1000  # hz, added here as a reminder
     traj_data_freq = 500    # hz, added here as a reminder

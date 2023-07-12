@@ -1,9 +1,9 @@
 from .atlas import Atlas
-from .full_humanoid_muscle import FullHumanoid
-from .reduced_humanoid_torque import ReducedHumanoidTorque
-from .reduced_humanoid_torque_4_ages import ReducedHumanoidTorque4Ages
+from .humanoid_muscle import HumanoidMuscle
+from .humanoid_torque import HumanoidTorque
+from .humanoid_torque_4_ages import HumanoidTorque4Ages
 
 # register environments
 Atlas.register()
-ReducedHumanoidTorque.register()
-ReducedHumanoidTorque4Ages.register()
+HumanoidTorque.register()
+HumanoidTorque4Ages.register()
