@@ -5,6 +5,7 @@ from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
+import loco_mujoco
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils import check_validity_task_mode_dataset
 
@@ -250,10 +251,12 @@ class HumanoidTorque(LocoEnv):
                                          VALID_TASKS, None, VALID_DATASET_TYPES)
 
         if task == "walk":
-            traj_path="../../datasets/humanoids/02-constspeed_reduced_humanoid.npz"
+            traj_path= Path(loco_mujoco.__file__).resolve().parent.parent / \
+                      "datasets/humanoids/02-constspeed_reduced_humanoid.npz"
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            traj_path = "../../datasets/humanoids/05-run_reduced_humanoid.npz"
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent /\
+                        "datasets/humanoids/05-run_reduced_humanoid.npz"
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP

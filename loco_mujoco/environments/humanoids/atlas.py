@@ -6,6 +6,7 @@ from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
+import loco_mujoco
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils import check_validity_task_mode_dataset
 
@@ -332,7 +333,8 @@ class Atlas(LocoEnv):
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
-            traj_params = dict(traj_path="../../datasets/humanoids/02-constspeed_ATLAS.npz",
+            traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent /
+                                         "datasets/humanoids/02-constspeed_ATLAS.npz",
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":

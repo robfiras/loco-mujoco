@@ -6,6 +6,7 @@ from dm_control import mjcf
 
 from mushroom_rl.utils.running_stats import *
 
+import loco_mujoco
 from loco_mujoco.environments.humanoids import HumanoidTorque
 from loco_mujoco.utils.reward import MultiTargetVelocityReward
 from loco_mujoco.utils import check_validity_task_mode_dataset
@@ -395,10 +396,12 @@ class HumanoidTorque4Ages(HumanoidTorque):
             scaling_trajectory_map = None
 
         if task == "walk":
-            traj_path="../../datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
+            local_path = "datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
+            traj_path= Path(loco_mujoco.__file__).resolve().parent.parent / local_path
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            traj_path = "../../datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
+            local_path = "datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / local_path
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
