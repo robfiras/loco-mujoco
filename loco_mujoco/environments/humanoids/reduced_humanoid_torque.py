@@ -125,30 +125,58 @@ class ReducedHumanoidTorque(LocoEnv):
 
         return joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups
 
-    def _has_fallen(self, obs):
+    def _has_fallen(self, obs, return_err_msg=False):
         """
         Checks if a model has fallen.
 
         Args:
-            obs (np.array): Current observation;
+            obs (np.array): Current observation.
+            return_err_msg (bool): If True, an error message with violations is returned.
 
         Returns:
             True, if the model has fallen for the current observation, False otherwise.
+            Optionally an error message is returned.
 
         """
 
         pelvis_euler = self._get_from_obs(obs, ["q_pelvis_tilt", "q_pelvis_list", "q_pelvis_rotation"])
-        pelvis_condition = ((obs[0] < -0.46) or (obs[0] > 0.0)
-                            or (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
-                            or (pelvis_euler[1] < -np.pi / 12) or (pelvis_euler[1] > np.pi / 8)
-                            or (pelvis_euler[2] < (-np.pi / 10)) or (pelvis_euler[2] > (np.pi / 10)))
+
+        pelvis_height_condition = (obs[0] < -0.46) or (obs[0] > 0.1)
+        pelvis_tilt_condition = (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
+        pelvis_list_condition = (pelvis_euler[1] < -np.pi / 12) or (pelvis_euler[1] > np.pi / 8)
+        pelvis_rotation_condition = (pelvis_euler[2] < (-np.pi / 9)) or (pelvis_euler[2] > (np.pi / 9))
+
+        pelvis_condition = (pelvis_height_condition or pelvis_tilt_condition
+                            or pelvis_list_condition or pelvis_rotation_condition)
 
         lumbar_euler = self._get_from_obs(obs, ["q_lumbar_extension", "q_lumbar_bending", "q_lumbar_rotation"])
-        lumbar_condition = ((lumbar_euler[0] < (-np.pi / 6)) or (lumbar_euler[0] > (np.pi / 10))
-                            or (lumbar_euler[1] < -np.pi / 10) or (lumbar_euler[1] > np.pi / 10)
-                            or (lumbar_euler[2] < (-np.pi / 4.5)) or (lumbar_euler[2] > (np.pi / 4.5)))
 
-        return pelvis_condition or lumbar_condition
+        lumbar_extension_condition = (lumbar_euler[0] < (-np.pi / 4)) or (lumbar_euler[0] > (np.pi / 10))
+        lumbar_bending_condition = (lumbar_euler[1] < -np.pi / 10) or (lumbar_euler[1] > np.pi / 10)
+        lumbar_rotation_condition = (lumbar_euler[2] < (-np.pi / 4.5)) or (lumbar_euler[2] > (np.pi / 4.5))
+
+        lumbar_condition = (lumbar_extension_condition or lumbar_bending_condition or lumbar_rotation_condition)
+
+        if return_err_msg:
+            error_msg = ""
+            if pelvis_height_condition:
+                error_msg += "pelvis_height_condition violated.\n"
+            elif pelvis_tilt_condition:
+                error_msg += "pelvis_tilt_condition violated.\n"
+            elif pelvis_list_condition:
+                error_msg += "pelvis_list_condition violated.\n"
+            elif pelvis_rotation_condition:
+                error_msg += "pelvis_rotation_condition violated.\n"
+            elif lumbar_extension_condition:
+                error_msg += "lumbar_extension_condition violated.\n"
+            elif lumbar_bending_condition:
+                error_msg += "lumbar_bending_condition violated.\n"
+            elif lumbar_rotation_condition:
+                error_msg += "lumbar_rotation_condition violated.\n"
+
+            return pelvis_condition or lumbar_condition, error_msg
+        else:
+            return pelvis_condition or lumbar_condition
 
     def _setup_ground_force_statistics(self):
         """
@@ -240,13 +268,12 @@ class ReducedHumanoidTorque(LocoEnv):
             traj_data_freq = 500  # hz
             traj_params = dict(traj_path=traj_path,
                                traj_dt=(1 / traj_data_freq),
-                               control_dt=(1 / desired_contr_freq),
-                               clip_trajectory_to_joint_ranges=True)
+                               control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
 
-        mdp.load_trajectory(traj_params)
+        mdp.load_trajectory(traj_params, warn=False)
 
         return mdp
 

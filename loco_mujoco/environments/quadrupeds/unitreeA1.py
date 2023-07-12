@@ -146,7 +146,7 @@ class UnitreeA1(LocoEnv):
         Creates a dataset from the specified trajectories.
 
         Args:
-            ignore_keys (list): List of keys to ignore in the dataset. Default is ["q_pelvis_tx", "q_pelvis_tz"].
+            ignore_keys (list): List of keys to ignore in the dataset.
 
         Returns:
             Dictionary containing states, next_states and absorbing flags. For the states the shape is
@@ -158,7 +158,23 @@ class UnitreeA1(LocoEnv):
         if ignore_keys is None:
             ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
 
-        dataset = super().create_dataset(ignore_keys)
+        if self.trajectories is not None:
+            rot_mat_idx = self._get_idx("dir_arrow")
+            state_callback_params = dict(rot_mat_idx=rot_mat_idx, goal_velocity_idx=self._goal_velocity_idx)
+            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
+                                                       state_callback=self._modify_observation_callback,
+                                                       state_callback_params=state_callback_params)
+            # check that all state in the dataset satisfy the has fallen method.
+            for state in dataset["states"]:
+                has_fallen, msg = self._has_fallen(state, return_err_msg=True)
+                if has_fallen:
+                    err_msg = "Some of the states in the created dataset are terminal states. " \
+                              "This should not happen.\n\nViolations:\n"
+                    err_msg += msg
+                    raise ValueError(err_msg)
+        else:
+            raise ValueError("No trajectory was passed to the environment. "
+                             "To create a dataset pass a trajectory first.")
 
         return dataset
 
@@ -172,38 +188,6 @@ class UnitreeA1(LocoEnv):
 
         self._set_goal_arrow()
         super()._simulation_post_step()
-
-    def create_dataset(self, ignore_keys=None):
-        """
-        Creates a dataset from the specified trajectories.
-
-        Args:
-            ignore_keys (list): List of keys to ignore in the dataset.
-
-        Returns:
-            Dictionary containing states, next_states and absorbing flags. For the states the shape is
-            (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
-            (N_traj x N_samples_per_traj).
-
-        """
-
-        if self.trajectories is not None:
-            rot_mat_idx = self._get_idx("dir_arrow") + 2  # account for x, y missing
-            state_callback_params = dict(rot_mat_idx=rot_mat_idx, goal_velocity_idx=self._goal_velocity_idx)
-            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
-                                                       state_callback=self._modify_observation_callback,
-                                                       state_callback_params=state_callback_params)
-            # check that all state in the dataset satisfy the has fallen method.
-            for state in dataset["states"]:
-                pass
-                # todo: currently disabled, fix all datasets!
-                # assert self._has_fallen(state) is False, "Some of the states in the created dataset are terminal " \
-                #                                          "states. This should not happen."
-        else:
-            raise ValueError("No trajectory was passed to the environment. "
-                             "To create a dataset pass a trajectory first.")
-
-        return dataset
 
     def _create_observation(self, obs):
         """
@@ -270,29 +254,40 @@ class UnitreeA1(LocoEnv):
 
         return goal_reward_func
 
-    def _has_fallen(self, obs):
+    def _has_fallen(self, obs, return_err_msg=False):
         """
         Checks if a model has fallen.
 
         Args:
-            obs (np.array): Current observation;
+            obs (np.array): Current observation.
+            return_err_msg (bool): If True, an error message with violations is returned.
 
         Returns:
             True, if the model has fallen for the current observation, False otherwise.
+            Optionally an error message is returned.
 
         """
 
         trunk_euler = self._get_from_obs(obs, ["q_trunk_list", "q_trunk_tilt"])
         trunk_height = self._get_from_obs(obs, ["q_trunk_tz"])
 
-        # Condition 1: max x-rotation 11 degree -> accepts 16 degree
-        # Condition 2: max y-rotation 7.6 deg -> accepts 11 degree
-        # Condition 3: min height -0.197 -> accepts 0.24
-        trunk_condition = ((trunk_euler[0] < -0.2793) or (trunk_euler[0] > 0.2793)
-                           or (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
-                           or trunk_height[0] < -.24)
+        trunk_list_condition = (trunk_euler[0] < -0.2793) or (trunk_euler[0] > 0.2793)
+        trunk_tilt_condition = (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
+        trunk_height_condition = trunk_height[0] < -.24
+        trunk_condition = (trunk_list_condition or trunk_tilt_condition or trunk_height_condition)
 
-        return trunk_condition
+        if return_err_msg:
+            error_msg = ""
+            if trunk_list_condition:
+                error_msg += "trunk_list_condition violated.\n"
+            elif trunk_tilt_condition:
+                error_msg += "trunk_tilt_condition violated.\n"
+            elif trunk_height_condition:
+                error_msg += "trunk_height_condition violated. %f \n" % trunk_height
+
+            return trunk_condition, error_msg
+        else:
+            return trunk_condition
 
     def _get_relevant_idx_rotation(self):
         """
@@ -424,8 +419,7 @@ class UnitreeA1(LocoEnv):
             traj_data_freq = 500  # hz
             traj_params = dict(traj_path=traj_path,
                                traj_dt=(1 / traj_data_freq),
-                               control_dt=(1 / desired_contr_freq),
-                               clip_trajectory_to_joint_ranges=True)
+                               control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")

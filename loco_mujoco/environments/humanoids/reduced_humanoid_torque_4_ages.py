@@ -150,11 +150,12 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             scaling_trajectory_map (list): A list that contains tuples of two integers
                 for each scaling. Given a set of trajectories, they define the range of
                 the valid trajectory numbers for each scaling factor.
-            warn (bool): If True, a warning will be raised if scaling_trajectory_map is not set.
+            warn (bool): If True, a warning will be raised if scaling_trajectory_map is not set
+                or the trajectory ranges are violated.
 
         """
 
-        super().load_trajectory(traj_params)
+        super().load_trajectory(traj_params, warn)
 
         if scaling_trajectory_map is None:
             if self._scaling_trajectory_map is None and type(self._scalings) is list and len(self._scalings) > 1:
@@ -405,6 +406,6 @@ class ReducedHumanoidTorque4Ages(ReducedHumanoidTorque):
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
 
-        mdp.load_trajectory(traj_params)
+        mdp.load_trajectory(traj_params, warn=False)
 
         return mdp

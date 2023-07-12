@@ -231,9 +231,10 @@ class Atlas(LocoEnv):
 
         Args:
             obs (np.array): Observation vector to be modified or extended;
+            return_err_msg (bool): If True, an error message with violations is returned.
 
         Returns:
-            New observation vector (np.array);
+            New observation vector (np.array).
 
         """
 
@@ -244,26 +245,56 @@ class Atlas(LocoEnv):
 
         return obs
 
-    def _has_fallen(self, obs):
+    def _has_fallen(self, obs, return_err_msg=False):
         """
-        Checks if a model has fallen. This has to be implemented for each environment.
+        Checks if a model has fallen.
 
         Args:
-            obs (np.array): Current observation;
+            obs (np.array): Current observation.
+            return_err_msg (bool): If True, an error message with violations is returned.
 
         Returns:
             True, if the model has fallen for the current observation, False otherwise.
+            Optionally an error message is returned.
 
         """
 
         pelvis_euler = self._get_from_obs(obs, ["q_pelvis_tilt", "q_pelvis_list", "q_pelvis_rotation"])
-        pelvis_y_cond = (obs[0] < -0.3) or (obs[0] > 0.1)
-        pelvis_tilt_cond = (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
-        pelvis_list_cond = (pelvis_euler[1] < -np.pi / 12) or (pelvis_euler[1] > np.pi / 8)
-        pelvis_rot_cond = (pelvis_euler[2] < (-np.pi / 10)) or (pelvis_euler[2] > (np.pi / 10))
-        pelvis_condition = (pelvis_y_cond or pelvis_tilt_cond or pelvis_list_cond or pelvis_rot_cond)
+        pelvis_y_condition = (obs[0] < -0.3) or (obs[0] > 0.1)
+        pelvis_tilt_condition = (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
+        pelvis_list_condition = (pelvis_euler[1] < -np.pi / 12) or (pelvis_euler[1] > np.pi / 8)
+        pelvis_rotation_condition = (pelvis_euler[2] < (-np.pi / 10)) or (pelvis_euler[2] > (np.pi / 10))
+        pelvis_condition = (pelvis_y_condition or pelvis_tilt_condition or
+                            pelvis_list_condition or pelvis_rotation_condition)
 
-        return pelvis_condition
+        back_euler = self._get_from_obs(obs, ["q_back_bky", "q_back_bkx", "q_back_bkz"])
+
+        back_extension_condition = (back_euler[0] < (-np.pi / 4)) or (back_euler[0] > (np.pi / 10))
+        back_bending_condition = (back_euler[1] < -np.pi / 10) or (back_euler[1] > np.pi / 10)
+        back_rotation_condition = (back_euler[2] < (-np.pi / 4.5)) or (back_euler[2] > (np.pi / 4.5))
+        back_condition = (back_extension_condition or back_bending_condition or back_rotation_condition)
+
+        if return_err_msg:
+            error_msg = ""
+            if pelvis_y_condition:
+                error_msg += "pelvis_y_condition violated.\n"
+            elif pelvis_tilt_condition:
+                error_msg += "pelvis_tilt_condition violated.\n"
+            elif pelvis_list_condition:
+                error_msg += "pelvis_list_condition violated.\n"
+            elif pelvis_rotation_condition:
+                error_msg += "pelvis_rotation_condition violated.\n"
+            elif back_extension_condition:
+                error_msg += "back_extension_condition violated.\n"
+            elif back_bending_condition:
+                error_msg += "back_bending_condition violated.\n"
+            elif back_rotation_condition:
+                error_msg += "back_rotation_condition violated.\n"
+
+            return pelvis_condition or back_condition, error_msg
+        else:
+
+            return pelvis_condition or back_condition
 
     def _get_box_color(self, ind):
         """
@@ -332,13 +363,12 @@ class Atlas(LocoEnv):
             traj_data_freq = 500  # hz
             traj_params = dict(traj_path="../datasets/humanoids/02-constspeed_ATLAS.npz",
                                traj_dt=(1 / traj_data_freq),
-                               control_dt=(1 / desired_contr_freq),
-                               clip_trajectory_to_joint_ranges=True)
+                               control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
 
-        mdp.load_trajectory(traj_params)
+        mdp.load_trajectory(traj_params, warn=False)
 
         return mdp
 

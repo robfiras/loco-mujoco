@@ -109,12 +109,14 @@ class LocoEnv(MultiMuJoCo):
         self._random_start = random_start
         self._init_step_no = init_step_no
 
-    def load_trajectory(self, traj_params):
+    def load_trajectory(self, traj_params, warn=True):
         """
         Loads trajectories. If there were trajectories loaded already, this function overrides the latter.
 
         Args:
-            traj_params (dict): Dictionary of parameters needed to load trajectories;
+            traj_params (dict): Dictionary of parameters needed to load trajectories.
+            warn (bool): If True, a warning will be raised if the
+                trajectory ranges are violated.
 
         """
 
@@ -129,6 +131,7 @@ class LocoEnv(MultiMuJoCo):
                                        interpolate_remap=self._interpolate_remap,
                                        interpolate_map_params=self._get_interpolate_map_params(),
                                        interpolate_remap_params=self._get_interpolate_remap_params(),
+                                       warn=warn,
                                        **traj_params)
 
     def reward(self, state, action, next_state, absorbing):
@@ -257,10 +260,13 @@ class LocoEnv(MultiMuJoCo):
             dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys)
             # check that all state in the dataset satisfy the has fallen method.
             for state in dataset["states"]:
-                # todo: currently disabled, fix all datasets!
-                pass
-                # assert self._has_fallen(state) is False, "Some of the states in the created dataset are terminal " \
-                #                                          "states. This should not happen."
+                has_fallen, msg = self._has_fallen(state, return_err_msg=True)
+                if has_fallen:
+                    err_msg = "Some of the states in the created dataset are terminal states. " \
+                              "This should not happen.\n\nViolations:\n"
+                    err_msg += msg
+                    raise ValueError(err_msg)
+
         else:
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
@@ -296,7 +302,7 @@ class LocoEnv(MultiMuJoCo):
                     self.reset()
                     sample = self.trajectories.get_current_sample()
 
-                obs = self._create_observation(sample)
+                obs = self._create_observation(np.concatenate(sample))
                 if self._has_fallen(obs):
                     print("Has fallen!")
 
@@ -612,12 +618,13 @@ class LocoEnv(MultiMuJoCo):
 
         return len_qpos, len_qvel
 
-    def _has_fallen(self, obs):
+    def _has_fallen(self, obs, return_err_msg=False):
         """
         Checks if a model has fallen. This has to be implemented for each environment.
         
         Args:
-            obs (np.array): Current observation; 
+            obs (np.array): Current observation.
+            return_err_msg (bool): If True, an error message with violations is returned.
 
         Returns:
             True, if the model has fallen for the current observation, False otherwise.

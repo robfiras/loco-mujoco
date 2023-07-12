@@ -16,7 +16,7 @@ class Trajectory(object):
     """
     def __init__(self, keys, traj_path, low, high, joint_pos_idx, interpolate_map, interpolate_remap,
                  interpolate_map_params=None, interpolate_remap_params=None,  traj_dt=0.002, control_dt=0.01,
-                 ignore_keys=None, clip_trajectory_to_joint_ranges=True):
+                 ignore_keys=None, clip_trajectory_to_joint_ranges=False, warn=True):
         """
         Constructor.
 
@@ -40,6 +40,7 @@ class Trajectory(object):
             ignore_keys (list): List of keys to ignore in the dataset.
             clip_trajectory_to_joint_ranges (bool): If True, the joint positions in the trajectory are clipped
                 between the low and high values in the trajectory.
+            warn (bool): If True, a warning will be raised, if some trajectory ranges are violated.
 
         """
 
@@ -49,7 +50,8 @@ class Trajectory(object):
         # convert to dict to be mutable
         self._trajectory_files = {k: d for k, d in self._trajectory_files.items()}
         self._clip_trajectory_to_joint_ranges = clip_trajectory_to_joint_ranges
-        self.check_if_trajectory_is_in_range(low, high, keys, joint_pos_idx)
+        if warn or clip_trajectory_to_joint_ranges:
+            self.check_if_trajectory_is_in_range(low, high, keys, joint_pos_idx)
 
         # add all goals to keys (goals have to start with 'goal' if not in keys)
         keys += [key for key in self._trajectory_files.keys() if key.startswith('goal') and key not in keys]
@@ -367,7 +369,7 @@ class Trajectory(object):
 
         """
 
-        return [obs[i].copy() for obs in self.subtraj]
+        return [np.array(obs[i].copy()).flatten() for obs in self.subtraj]
 
     @property
     def number_obs_trajectory(self):
