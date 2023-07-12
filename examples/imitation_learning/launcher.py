@@ -9,7 +9,7 @@ if __name__ == '__main__':
     TEST = False
     USE_CUDA = False
 
-    N_SEEDS = 5
+    N_SEEDS = 1
 
     launcher = Launcher(exp_name='loco_mujoco_evalution',
                         python_file='experiment',
@@ -24,8 +24,8 @@ if __name__ == '__main__':
                         use_timestamp=True,
                         )
 
-    default_params = dict(n_epochs=300,
-                          n_steps_per_epoch=100000,
+    default_params = dict(n_epochs=1,
+                          n_steps_per_epoch=1000,
                           n_epochs_save=25,
                           info_constraint=0.1,
                           n_eval_episodes=10,
@@ -33,20 +33,19 @@ if __name__ == '__main__':
                           discr_only_state=True,
                           use_cuda=USE_CUDA)
 
-
     envs = ["Atlas.walk", "Atlas.carry",
-            ""]
-    lrs = [(1e-4, 5e-5)]
-    use_next_states = [0, 1]
+            "HumanoidTorque.walk", "HumanoidTorque.run",
+            "HumanoidTorque4Ages.walk.1", "HumanoidTorque4Ages.walk.2",
+            "HumanoidTorque4Ages.walk.2", "HumanoidTorque4Ages.walk.4", "HumanoidTorque4Ages.walk.all",
+            "HumanoidTorque4Ages.run.1", "HumanoidTorque4Ages.run.2",
+            "HumanoidTorque4Ages.run.2", "HumanoidTorque4Ages.run.4", "HumanoidTorque4Ages.run.all",
+            "UnitreeA1.simple", "UnitreeA1.hard"]
 
+    lrs = [(1e-4, 5e-5), ]
+    use_next_statess = [False]
 
-    for lr, d, p_ent_coef, use_nt, last_pa, horizon, gamma, dataset_scaling in product(lrs, d_delays, plcy_ent_coefs,
-                                                                                       use_noisy_targets, lpa, horizons,
-                                                                                       gammas, datasets_scalings):
+    for env, lr, use_nt in product(envs, lrs, use_next_statess):
         lrc, lrD = lr
-        expert_data_path, scaling = dataset_scaling
-        launcher.add_experiment( last_policy_activation=last_pa, lrc=lrc, lrD__=lrD,
-                                use_noisy_targets__=use_nt, horizon__=horizon, gamma__=gamma,
-                                expert_data_path=expert_data_path, scaling__=scaling, **default_params)
+        launcher.add_experiment( env__=env, lrc=lrc, lrD__=lrD, use_next_states__=use_nt, **default_params)
 
     launcher.run(LOCAL, TEST)

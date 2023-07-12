@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 from dm_control import mjcf
 
 from pathlib import Path
@@ -178,6 +179,29 @@ class UnitreeA1(LocoEnv):
 
         return dataset
 
+    def _get_observation_space(self):
+        """
+        Returns a tuple of the lows and highs (np.array) of the observation space.
+
+        """
+        dir_arrow_idx = self._get_idx("dir_arrow")
+        sim_low, sim_high = (self.info.observation_space.low[2:],
+                             self.info.observation_space.high[2:])
+        sin_cos_angle_low = [-1, -1]
+        sin_cos_angle_high = [1, 1]
+        goal_vel_low = -np.inf
+        goal_vel_high = np.inf
+        sim_low = np.concatenate([sim_low[:dir_arrow_idx[0]], sin_cos_angle_low, [goal_vel_low]])
+        sim_high = np.concatenate([sim_high[:dir_arrow_idx[0]], sin_cos_angle_high, [goal_vel_high]])
+
+        if self._use_foot_forces:
+            grf_low, grf_high = (-np.ones((12,)) * np.inf,
+                                 np.ones((12,)) * np.inf)
+            return (np.concatenate([sim_low, grf_low]),
+                    np.concatenate([sim_high, grf_high]))
+        else:
+            return sim_low, sim_high
+
     def _simulation_post_step(self):
         """
         Sets the correct rotation of the goal arrow and the calculates the
@@ -245,7 +269,7 @@ class UnitreeA1(LocoEnv):
         if reward_type == "velocity_vector":
             x_vel_idx = self.get_obs_idx("dq_trunk_tx")[0]
             y_vel_idx = self.get_obs_idx("dq_trunk_ty")[0]
-            rot_mat_idx = self.get_obs_idx("dir_arrow")[0]
+            rot_mat_idx = self.get_obs_idx("dir_arrow")
             goal_vel_idx = self._goal_velocity_idx
             goal_reward_func = VelocityVectorReward(x_vel_idx=x_vel_idx, y_vel_idx=y_vel_idx,
                                                     rot_mat_idx=rot_mat_idx, goal_vel_idx=goal_vel_idx)

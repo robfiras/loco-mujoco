@@ -11,7 +11,6 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from mushroom_rl.core import Core
-from mushroom_rl.environments.mujoco_envs.humanoids import ReducedHumanoidTorquePOMDP
 from mushroom_rl.policy import GaussianTorchPolicy
 from mushroom_rl.utils.dataset import compute_J, compute_episodes_length
 from mushroom_rl.core.logger.logger import Logger
@@ -19,6 +18,8 @@ from mushroom_rl.core.logger.logger import Logger
 from imitation_lib.imitation import VAIL_TRPO
 from imitation_lib.utils import FullyConnectedNetwork, NormcInitializer, Standardizer, VariationalNet, VDBLoss
 from imitation_lib.utils import BestAgentSaver, prepare_expert_data
+
+from loco_mujoco import LocoEnv
 
 from experiment_launcher import run_experiment
 
@@ -56,7 +57,7 @@ def _create_vail_agent(mdp, expert_data, use_cuda, disc_only_state=True, info_co
                          use_cuda=use_cuda)
 
     # remove hip rotations
-    discrim_obs_mask = np.arange(mdp_info.observation_space.shape[0] - 1)   # -1 to not include the carried weight in the discriminator.
+    discrim_obs_mask = np.arange(mdp_info.observation_space.shape[0])
     discrim_act_mask = [] if disc_only_state else np.arange(mdp_info.action_space.shape[0])
     discrim_input_shape = (len(discrim_obs_mask) + len(discrim_act_mask),) if not use_next_states else \
         (2*len(discrim_obs_mask) + len(discrim_act_mask),)
@@ -104,7 +105,8 @@ def _create_vail_agent(mdp, expert_data, use_cuda, disc_only_state=True, info_co
     return agent
 
 
-def experiment(n_epochs: int = 500,
+def experiment(env: str = None,
+               n_epochs: int = 500,
                n_steps_per_epoch: int = 10000,
                n_steps_per_fit: int = 1024,
                n_eval_episodes: int = 50,
@@ -135,25 +137,11 @@ def experiment(n_epochs: int = 500,
     logger_stoch = Logger(results_dir=results_dir, log_name="stochastic_logging", seed=seed, append=True)
     logger_deter = Logger(results_dir=results_dir, log_name="deterministic_logging", seed=seed, append=True)
 
-    # define env and data frequencies
-    env_freq = 1000  # hz, added here as a reminder
-    traj_data_freq = 500    # hz, added here as a reminder
-    desired_contr_freq = 100     # hz
-    n_substeps = env_freq // desired_contr_freq    # env_freq / desired_contr_freq
-
-    # prepare trajectory params
-    traj_params = dict(traj_path=expert_data_path,
-                       traj_dt=(1 / traj_data_freq),
-                       control_dt=(1 / desired_contr_freq))
-
-    # create the environment
-    mdp = ReducedHumanoidTorquePOMDP(gamma=gamma, horizon=horizon, n_substeps=n_substeps, traj_params=traj_params,
-                                     scaling=scaling, use_brick_foots=True, disable_arms=True,
-                                     timestep=1 / env_freq, goal_reward="target_velocity", use_foot_forces=False,
-                                     goal_reward_params=dict(target_velocity=1.25*scaling))
+    print(f"Starting training {env}...")
+    mdp = LocoEnv.make(env)
 
     # create expert dataset
-    expert_data = mdp.create_dataset(ignore_keys=["q_pelvis_tx", "q_pelvis_tz"])
+    expert_data = mdp.create_dataset()
 
     # logging stuff
     tb_writer = SummaryWriter(log_dir=results_dir)

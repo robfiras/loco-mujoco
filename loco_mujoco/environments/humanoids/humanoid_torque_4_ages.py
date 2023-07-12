@@ -373,20 +373,24 @@ class HumanoidTorque4Ages(HumanoidTorque):
         elif mode == "1":
             dataset_suffix = "_1.npz"
             scaling = 0.4
+            n_models = 4
         elif mode == "2":
             dataset_suffix = "_2.npz"
             scaling = 0.6
+            n_models = 4
         elif mode == "3":
             dataset_suffix = "_3.npz"
             scaling = 0.8
+            n_models = 4
         elif mode == "4":
             dataset_suffix = "_4.npz"
             scaling = 1.0
+            n_models = 4
 
         if n_models is not None:
             assert type(scaling) is float
             scaling = [scaling for i in range(n_models)]
-            scaling_trajectory_map = [(0, 1)]
+            scaling_trajectory_map = [(0, 1) for i in range(n_models)]
         else:
             scaling_trajectory_map = None
 
@@ -400,8 +404,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
         # Generate the MDP
         mdp = HumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
                                   disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                                  reward_type="multi_target_velocity", reward_params=reward_params,
-                                  scaling_trajectory_map=scaling_trajectory_map)
+                                  reward_type="multi_target_velocity", reward_params=reward_params)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -417,6 +420,6 @@ class HumanoidTorque4Ages(HumanoidTorque):
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
 
-        mdp.load_trajectory(traj_params, warn=False)
+        mdp.load_trajectory(traj_params, scaling_trajectory_map, warn=False)
 
         return mdp

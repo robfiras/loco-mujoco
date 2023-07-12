@@ -7,7 +7,7 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("HumanoidTorque4Ages.walk.1", disable_arms=False)
+    mdp = LocoEnv.make("HumanoidTorque4Ages.walk.1")
 
     mdp.play_trajectory()
 
