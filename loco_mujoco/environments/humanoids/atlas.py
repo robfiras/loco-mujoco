@@ -81,38 +81,6 @@ class Atlas(LocoEnv):
 
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
 
-    # def setup(self, obs):
-    #     """
-    #     Function to setup the initial state of the simulation. Initialization can be done either
-    #     randomly, from a certain initial, or from the default initial state of the model.
-    #
-    #     Args:
-    #         obs (np.array): Observation to initialize the environment from;
-    #
-    #     """
-    #
-    #     self._reward_function.reset_state()
-    #
-    #     super().setup(obs)
-    #
-    #     if self._hold_weight:
-    #         if self._weight_mass is None:
-    #             ind = np.random.randint(0, len(self._valid_weights))
-    #             new_weight_mass = self._valid_weights[ind]
-    #             self._model.body("weight").mass = new_weight_mass
-    #
-    #             # todo: also change the inertial of the mass
-    #
-    #             # modify the color of the mass according to the mass
-    #             red_rgba = np.array([[1.0, 0.0, 0.0, 1.0]])
-    #             blue_rgba = np.array([[0.2, 0.0, 1.0, 1.0]])
-    #             interpolation_var = ind / (len(self._valid_weights)-1)
-    #             color = blue_rgba + ((red_rgba - blue_rgba) * interpolation_var)
-    #             geom_id = self._model.body("weight").geomadr[0]
-    #             self._model.geom_rgba[geom_id] = color
-    #         else:
-    #             self._model.body("weight").mass = self._weight_mass
-
     def create_dataset(self, ignore_keys=None):
         """
         Creates a dataset from the specified trajectories.
