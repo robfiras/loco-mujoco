@@ -9,6 +9,7 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 import loco_mujoco
+from loco_mujoco.environments import ValidTaskConf
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils.reward import VelocityVectorReward
 from loco_mujoco.utils.math import rotate_obs
@@ -16,15 +17,15 @@ from loco_mujoco.utils.goals import GoalDirectionVelocity
 from loco_mujoco.utils.math import mat2angle_xy, angle2mat_xy, transform_angle_2pi
 from loco_mujoco.utils.checks import check_validity_task_mode_dataset
 
-VALID_TASKS = ["simple", "hard"]
-VALID_DATASET_TYPES = ["real", "perfect"]
-
 
 class UnitreeA1(LocoEnv):
     """
     Mujoco simulation of Unitree A1 model.
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["simple", "hard"],
+                                     data_types=["real"])
 
     def __init__(self, use_torque_ctrl=True, setup_random_rot=False, tmp_dir_name=None,
                  default_target_velocity=0.5, camera_params=None, **kwargs):
@@ -46,11 +47,9 @@ class UnitreeA1(LocoEnv):
         if use_torque_ctrl:
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_torque.xml").as_posix()
-            print("Using torque-control for Unitree A1.")
         else:
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_position.xml").as_posix()
-            print("Using position-control for Unitree A1.")
 
         action_spec = self._get_action_specification()
 
@@ -431,7 +430,7 @@ class UnitreeA1(LocoEnv):
 
         """
         check_validity_task_mode_dataset(UnitreeA1.__name__, task, None, dataset_type,
-                                         VALID_TASKS, None, VALID_DATASET_TYPES)
+                                         *UnitreeA1.valid_task_confs.get_all())
 
         # Generate the MDP
         # todo: once the trajectory is learned without random init rotation, activate the latter.

@@ -7,11 +7,9 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 import loco_mujoco
+from loco_mujoco.environments import ValidTaskConf
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils import check_validity_task_mode_dataset
-
-VALID_TASKS = ["walk", "carry"]
-VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class Atlas(LocoEnv):
@@ -23,6 +21,9 @@ class Atlas(LocoEnv):
     or "weight".
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
+                                     data_types=["real"])
 
     def __init__(self, disable_arms=False, hold_weight=False, weight_mass=None, tmp_dir_name=None, **kwargs):
         """
@@ -312,7 +313,7 @@ class Atlas(LocoEnv):
 
         """
         check_validity_task_mode_dataset(Atlas.__name__, task, None, dataset_type,
-                                         VALID_TASKS, None, VALID_DATASET_TYPES)
+                                         *Atlas.valid_task_confs.get_all())
 
         reward_params = dict(target_velocity=1.25)
 

@@ -6,11 +6,9 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 import loco_mujoco
+from loco_mujoco.environments import ValidTaskConf
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils import check_validity_task_mode_dataset
-
-VALID_TASKS = ["walk", "run"]
-VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class HumanoidTorque(LocoEnv):
@@ -18,6 +16,9 @@ class HumanoidTorque(LocoEnv):
     MuJoCo simulation of a simplified humanoid model with torque actuation.
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
+                                     data_types=["real"])
 
     def __init__(self, use_box_feet=False, disable_arms=False, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
         """
@@ -248,7 +249,7 @@ class HumanoidTorque(LocoEnv):
         """
 
         check_validity_task_mode_dataset(HumanoidTorque.__name__, task, None, dataset_type,
-                                         VALID_TASKS, None, VALID_DATASET_TYPES)
+                                         *HumanoidTorque.valid_task_confs.get_all())
 
         if task == "walk":
             traj_path= Path(loco_mujoco.__file__).resolve().parent.parent / \

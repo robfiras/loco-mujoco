@@ -1,10 +1,13 @@
 import os
 import warnings
+from copy import deepcopy
 from tempfile import mkdtemp
+from itertools import product
 
 import mujoco
 from dm_control import mjcf
 
+from mushroom_rl.core import Environment
 from mushroom_rl.environments import MultiMuJoCo
 from mushroom_rl.utils import spaces
 from mushroom_rl.utils.running_stats import *
@@ -271,7 +274,8 @@ class LocoEnv(MultiMuJoCo):
 
         return dataset
 
-    def play_trajectory(self, n_episodes=None, n_steps_per_episode=None, record=False, recorder_params=None):
+    def play_trajectory(self, n_episodes=None, n_steps_per_episode=None, render=True,
+                        record=False, recorder_params=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -287,16 +291,25 @@ class LocoEnv(MultiMuJoCo):
         assert self.trajectories is not None
 
         if record:
+            assert render
             fps = 1/self.dt
             recorder = VideoRecorder(fps=fps, **recorder_params) if recorder_params is not None else\
                 VideoRecorder(fps=fps)
+        else:
+            recorder = None
 
         self.reset()
         sample = self.trajectories.get_current_sample()
         self.set_sim_state(sample)
-        frame = self.render(record)
+
+        if render:
+            frame = self.render(record)
+        else:
+            frame = None
+
         if record:
             recorder(frame)
+
         highest_int = np.iinfo(np.int32).max
         if n_steps_per_episode is None:
             n_steps_per_episode = highest_int
@@ -320,16 +333,22 @@ class LocoEnv(MultiMuJoCo):
                 if self._has_fallen(obs):
                     print("Has fallen!")
 
-                frame = self.render(record)
+                if render:
+                    frame = self.render(record)
+                else:
+                    frame = None
+
                 if record:
                     recorder(frame)
 
             self.reset()
 
         self.stop()
-        recorder.stop()
+        if record:
+            recorder.stop()
 
-    def play_trajectory_from_velocity(self, n_episodes=None, n_steps_per_episode=None, record=False, recorder_params=None):
+    def play_trajectory_from_velocity(self, n_episodes=None, n_steps_per_episode=None, render=True,
+                                      record=False, recorder_params=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones calculated from the joint velocities
@@ -349,16 +368,24 @@ class LocoEnv(MultiMuJoCo):
         assert self.trajectories is not None
 
         if record:
+            assert render
             fps = 1/self.dt
             recorder = VideoRecorder(fps=fps, **recorder_params) if recorder_params is not None else\
                 VideoRecorder(fps=fps)
+        else:
+            recorder = None
 
         self.reset()
         sample = self.trajectories.get_current_sample()
         self.set_sim_state(sample)
-        frame = self.render(record)
+        if render:
+            frame = self.render(record)
+        else:
+            frame = None
+
         if record:
             recorder(frame)
+
         highest_int = np.iinfo(np.int32).max
         if n_steps_per_episode is None:
             n_steps_per_episode = highest_int
@@ -394,7 +421,11 @@ class LocoEnv(MultiMuJoCo):
                 if self._has_fallen(obs):
                     print("Has fallen!")
 
-                frame = self.render(record)
+                if render:
+                    frame = self.render(record)
+                else:
+                    frame = None
+
                 if record:
                     recorder(frame)
 
@@ -404,7 +435,8 @@ class LocoEnv(MultiMuJoCo):
             curr_qpos = self._get_joint_pos()
 
         self.stop()
-        recorder.stop()
+        if record:
+            recorder.stop()
 
     def set_sim_state(self, sample):
         """
@@ -689,6 +721,31 @@ class LocoEnv(MultiMuJoCo):
 
         pass
 
+    @classmethod
+    def register(cls):
+        """
+        Register an environment in the environment list and in the loco_mujoco env list.
+
+        """
+        env_name = cls.__name__
+
+        if env_name not in Environment._registered_envs:
+            Environment._registered_envs[env_name] = cls
+
+        if env_name not in LocoEnv._registered_envs:
+            LocoEnv._registered_envs[env_name] = cls
+
+    @staticmethod
+    def list_registered_loco_mujoco():
+        """
+        List registered loco_mujoco environments.
+
+        Returns:
+             The list of the registered loco_mujoco environments.
+
+        """
+        return list(LocoEnv._registered_envs.keys())
+
     @staticmethod
     def _interpolate_map(traj, **interpolate_map_params):
         """
@@ -784,3 +841,71 @@ class LocoEnv(MultiMuJoCo):
         mjcf.export_with_assets(xml_handle, dir, file_name)
 
         return file_path
+
+    @classmethod
+    def get_all_task_names(cls):
+        """
+        Returns a list of all available tasks in LocoMujoco.
+
+        """
+
+        task_names = []
+        for e in cls.list_registered_loco_mujoco():
+            env = cls._registered_envs[e]
+            confs = env.valid_task_confs.get_all_combinations()
+            for conf in confs:
+                task_name = list(conf.values())
+                task_name.insert(0, env.__name__, )
+                task_name = ".".join(task_name)
+                task_names.append(task_name)
+
+        return task_names
+
+    _registered_envs = dict()
+
+
+class ValidTaskConf:
+
+    """ Simple class that holds all valid configurations of an environments. """
+
+    def __init__(self, tasks=None, modes=None, data_types=None):
+
+        self.tasks = tasks
+        self.modes = modes
+        self.data_types = data_types
+
+    def get_all(self):
+        return deepcopy(self.tasks), deepcopy(self.modes), deepcopy(self.data_types)
+
+    def get_all_combinations(self):
+        """
+        Returns all possible combinations of configurations.
+
+        """
+
+        confs = []
+
+        if self.tasks is not None:
+            tasks = self.tasks
+        else:
+            tasks = [None]
+        if self.modes is not None:
+            modes = self.modes
+        else:
+            modes = [None]
+        if self.data_types is not None:
+            data_types = self.data_types
+        else:
+            data_types = [None]
+
+        for t, m, dt in product(tasks, modes, data_types):
+            conf = dict()
+            if t is not None:
+                conf["task"] = t
+            if m is not None:
+                conf["mode"] = m
+            if dt is not None:
+                conf["data_type"] = dt
+            confs.append(conf)
+
+        return confs

@@ -7,13 +7,10 @@ from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 
 import loco_mujoco
+from loco_mujoco.environments import ValidTaskConf
 from loco_mujoco.environments.humanoids import HumanoidTorque
 from loco_mujoco.utils.reward import MultiTargetVelocityReward
 from loco_mujoco.utils import check_validity_task_mode_dataset
-
-VALID_TASKS = ["walk", "run"]
-VALID_MODES = ["all", "1", "2", "3", "4"]
-VALID_DATASET_TYPES = ["real", "perfect"]
 
 
 class HumanoidTorque4Ages(HumanoidTorque):
@@ -26,6 +23,10 @@ class HumanoidTorque4Ages(HumanoidTorque):
     using state masks to hide the humanoid type indicator from the policy.
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
+                                     modes=["all", "1", "2", "3", "4"],
+                                     data_types=["real"])
 
     def __init__(self, scaling=None, scaling_trajectory_map=None, use_box_feet=False, disable_arms=False,
                  tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
@@ -366,7 +367,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
         """
 
         check_validity_task_mode_dataset(HumanoidTorque4Ages.__name__, task, mode, dataset_type,
-                                         VALID_TASKS, VALID_MODES, VALID_DATASET_TYPES)
+                                         *HumanoidTorque4Ages.valid_task_confs.get_all())
 
         if mode == "all":
             dataset_suffix = "_all.npz"
