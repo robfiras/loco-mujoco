@@ -7,3 +7,4 @@ None/
 .DS_Store
 datasets/
 mushroom_rl_recordings/
+record_all/

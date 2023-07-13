@@ -326,6 +326,9 @@ class LocoEnv(MultiMuJoCo):
 
             self.reset()
 
+        self.stop()
+        recorder.stop()
+
     def play_trajectory_from_velocity(self, n_episodes=None, n_steps_per_episode=None, record=False, recorder_params=None):
         """
         Plays a demo of the loaded trajectory by forcing the model
@@ -399,6 +402,9 @@ class LocoEnv(MultiMuJoCo):
 
             # get current qpos
             curr_qpos = self._get_joint_pos()
+
+        self.stop()
+        recorder.stop()
 
     def set_sim_state(self, sample):
         """
