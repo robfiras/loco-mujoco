@@ -1,10 +1,6 @@
-import os
-
-import numpy as np
-from dm_control import mjcf
-
 from pathlib import Path
 
+from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
