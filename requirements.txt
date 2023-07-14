@@ -1,4 +1,4 @@
-mushroom_rl
+git+https://github.com/MushroomRL/mushroom-rl
 numpy
 scipy
 mujoco
