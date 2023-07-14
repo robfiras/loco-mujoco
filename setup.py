@@ -1,6 +1,11 @@
 from setuptools import setup, find_packages
+from os import path
 
 requires_list = ["mushroom_rl>=1.9.0"]
+here = path.abspath(path.dirname(__file__))
+with open(path.join(here, 'requirements.txt'), encoding='utf-8') as f:
+    for line in f:
+        requires_list.append(str(line))
 
 setup(name='loco_mujoco',
       version='0.1',

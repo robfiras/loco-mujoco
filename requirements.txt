@@ -1,3 +1,4 @@
+mushroom_rl
 numpy
 scipy
 mujoco
