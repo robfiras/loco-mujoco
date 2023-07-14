@@ -19,7 +19,7 @@ def experiment(seed=0):
             else LocoEnv.make(env)
 
         save_path_video = "./record_all"
-        mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
+        #mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
 
         path_video = save_path_video + "/" + env + "/recording.mp4"
 
