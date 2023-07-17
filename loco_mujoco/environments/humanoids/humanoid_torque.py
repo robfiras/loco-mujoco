@@ -89,7 +89,7 @@ class HumanoidTorque(LocoEnv):
 
     def _get_xml_modifications(self):
         """
-        Function that specifies which joints, motors and equality consints
+        Function that specifies which joints, motors and equality constraints
         should be removed from the Mujoco xml. Also the required collision
         groups will be returned.
 

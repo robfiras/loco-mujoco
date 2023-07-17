@@ -18,7 +18,7 @@
   <option integrator="RK4" iterations="50" timestep="0.001"></option>
   <size njmax="1000" nconmax="400" nuser_jnt="1"></size>
   <worldbody>
-    <geom name="floor" pos="0 0 0" size="100 100 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1" friction="1 .1 .1"></geom>
+    <geom name="floor" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"></geom>
     <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
     <body name="pelvis" pos="       0 6.73556e-17      0.975" quat="0.7071067811865475 0.7071067811865475 0.0 0.0">
       <geom name="sacrum" type="mesh" mesh="sacrum"></geom>
@@ -279,8 +279,8 @@
     <mesh name="thumb_proximal_lvs" file="meshes/thumb_proximal_lvs.stl" scale="0.905691 0.905691 0.905691"></mesh>
     <mesh name="thumb_distal_lvs" file="meshes/thumb_distal_lvs.stl" scale="0.905691 0.905691 0.905691"></mesh>
     <texture builtin="gradient" height="100" rgb1=".4 .5 .6" rgb2="0 0 0" type="skybox" width="100"/>
-    <texture name="texplane" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" width="100" height="100"></texture>
     <texture name="texgeom" type="cube" builtin="flat" mark="cross" width="127" height="1278" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"></texture>
+    <texture name="texplane" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" width="100" height="100"></texture>
     <material name="MatPlane" reflectance="0.5" texture="texplane" texrepeat="1 1" texuniform="true"></material>
     <material name="geom" texture="texgeom" texuniform="true"></material> </asset>
   <tendon>
