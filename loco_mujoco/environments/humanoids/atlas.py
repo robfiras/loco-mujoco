@@ -37,7 +37,7 @@ class Atlas(LocoEnv):
             assert disable_arms is True, "If you want Atlas to carry a weight, please disable the arms. " \
                                          "They will be kept fixed."
 
-        xml_path = (Path(__file__).resolve().parent.parent / "data" / "atlas" / "model.xml").as_posix()
+        xml_path = (Path(__file__).resolve().parent.parent / "data" / "atlas" / "atlas.xml").as_posix()
 
         action_spec = self._get_action_specification()
 
