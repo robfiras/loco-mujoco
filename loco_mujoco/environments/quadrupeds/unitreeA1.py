@@ -401,7 +401,7 @@ class UnitreeA1(LocoEnv):
 
     @staticmethod
     def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False,
-                 random_start=True, init_step_no=None):
+                 random_start=True, init_step_no=None, debug=False):
         """
         Returns a Unitree environment corresponding to the specified task.
 
@@ -431,17 +431,25 @@ class UnitreeA1(LocoEnv):
         # Generate the MDP
         # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
+            path = "datasets/quadrupeds/walk_straight.npz"
+            if debug:
+                path = path.split("/")
+                path.insert(2, "mini_datasets")
+                path = "/".join(path)
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
                             init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
                             reward_type="velocity_vector")
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent /\
-                        "datasets/quadrupeds/walk_straight.npz"
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
         elif task == "hard":
+            path = "datasets/quadrupeds/walk_8_dir.npz"
+            if debug:
+                path = path.split("/")
+                path.insert(2, "mini_datasets")
+                path = "/".join(path)
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
                             init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
                             reward_type="velocity_vector")
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent /\
-                        "datasets/quadrupeds/walk_8_dir.npz"
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

@@ -287,7 +287,7 @@ class Atlas(LocoEnv):
 
     @staticmethod
     def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, disable_arms=True,
-                 use_foot_forces=False, random_start=True, init_step_no=None):
+                 use_foot_forces=False, random_start=True, init_step_no=None, debug=False):
         """
         Returns an Atlas environment corresponding to the specified task.
 
@@ -334,8 +334,12 @@ class Atlas(LocoEnv):
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
-            traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent /
-                                         "datasets/humanoids/02-constspeed_ATLAS.npz",
+            path = "datasets/humanoids/02-constspeed_ATLAS.npz"
+            if debug:
+                path = path.split("/")
+                path.insert(2, "mini_datasets")
+                path = "/".join(path)
+            traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent / path,
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":

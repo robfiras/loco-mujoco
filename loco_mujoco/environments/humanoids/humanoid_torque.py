@@ -222,7 +222,7 @@ class HumanoidTorque(LocoEnv):
 
     @staticmethod
     def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, use_box_feet=True,
-                 disable_arms=True, use_foot_forces=False, random_start=True, init_step_no=None):
+                 disable_arms=True, use_foot_forces=False, random_start=True, init_step_no=None, debug=False):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
@@ -252,19 +252,27 @@ class HumanoidTorque(LocoEnv):
                                          *HumanoidTorque.valid_task_confs.get_all())
 
         if task == "walk":
-            traj_path= Path(loco_mujoco.__file__).resolve().parent.parent / \
-                      "datasets/humanoids/02-constspeed_reduced_humanoid.npz"
+            path = "datasets/humanoids/02-constspeed_ATLAS.npz"
+            if debug:
+                path = path.split("/")
+                path.insert(2, "mini_datasets")
+                path = "/".join(path)
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent /\
-                        "datasets/humanoids/05-run_reduced_humanoid.npz"
+            path = "datasets/humanoids/05-run_reduced_humanoid.npz"
+            if debug:
+                path = path.split("/")
+                path.insert(2, "mini_datasets")
+                path = "/".join(path)
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
         mdp = HumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
-                                    random_start=random_start, init_step_no=init_step_no,
-                                    disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                                    reward_type="target_velocity", reward_params=reward_params)
+                             random_start=random_start, init_step_no=init_step_no,
+                             disable_arms=disable_arms, use_foot_forces=use_foot_forces,
+                             reward_type="target_velocity", reward_params=reward_params)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

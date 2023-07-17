@@ -345,7 +345,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
     @staticmethod
     def generate(task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000,
-                 use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None):
+                 use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None, debug=False):
         """
         Returns a Humanoid environment corresponding to the specified task.
 
@@ -398,10 +398,18 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
         if task == "walk":
             local_path = "datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
-            traj_path= Path(loco_mujoco.__file__).resolve().parent.parent / local_path
+            if debug:
+                local_path = local_path.split("/")
+                local_path.insert(2, "mini_datasets")
+                local_path = "/".join(local_path)
+            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / local_path
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
             local_path = "datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
+            if debug:
+                local_path = local_path.split("/")
+                local_path.insert(2, "mini_datasets")
+                local_path = "/".join(local_path)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / local_path
             reward_params = dict(target_velocity=2.5)
 

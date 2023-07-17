@@ -868,11 +868,12 @@ class ValidTaskConf:
 
     """ Simple class that holds all valid configurations of an environments. """
 
-    def __init__(self, tasks=None, modes=None, data_types=None):
+    def __init__(self, tasks=None, modes=None, data_types=None, non_combinable=None):
 
         self.tasks = tasks
         self.modes = modes
         self.data_types = data_types
+        self._non_combinable = non_combinable
 
     def get_all(self):
         return deepcopy(self.tasks), deepcopy(self.modes), deepcopy(self.data_types)
@@ -906,6 +907,7 @@ class ValidTaskConf:
                 conf["mode"] = m
             if dt is not None:
                 conf["data_type"] = dt
+
             confs.append(conf)
 
         return confs
