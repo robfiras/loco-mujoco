@@ -9,7 +9,7 @@ def experiment(seed=0):
 
     mdp = LocoEnv.make("Atlas.carry")
 
-    mdp.play_trajectory(n_steps_per_trajectory=250)
+    mdp.play_trajectory(n_steps_per_episode=250)
 
 
 if __name__ == '__main__':
