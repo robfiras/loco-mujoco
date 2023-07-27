@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 
 import loco_mujoco
@@ -65,7 +66,7 @@ def run_environment_gymnasium(env, n_episodes, n_steps):
 
 def test_all_environments():
 
-    path = "./test_datasets"
+    path = Path("./test_datasets")
     task_names = loco_mujoco.get_all_task_names()
 
     for task_name in task_names:
@@ -82,7 +83,8 @@ def test_all_environments():
         task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
         dataset_gym = run_environment_gymnasium(task_env, N_EPISODES, N_STEPS)
 
-        dataset_path = path + "/" + task_name + ".npy"
+        file_name = task_name + ".npy"
+        dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "tests" / path / file_name
 
         test_dataset = np.load(dataset_path)
 
