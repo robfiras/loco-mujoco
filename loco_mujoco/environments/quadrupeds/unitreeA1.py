@@ -1,3 +1,5 @@
+import os
+import warnings
 from pathlib import Path
 
 from dm_control import mjcf
@@ -432,7 +434,11 @@ class UnitreeA1(LocoEnv):
         # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
             path = "datasets/quadrupeds/walk_straight.npz"
-            if debug:
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if debug or use_mini_dataset:
+                if use_mini_dataset:
+                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
+                                  "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
@@ -442,7 +448,11 @@ class UnitreeA1(LocoEnv):
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
         elif task == "hard":
             path = "datasets/quadrupeds/walk_8_dir.npz"
-            if debug:
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if debug or use_mini_dataset:
+                if use_mini_dataset:
+                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
+                                  "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)

@@ -1,3 +1,5 @@
+import os.path
+import warnings
 from pathlib import Path
 from copy import deepcopy
 import numpy as np
@@ -335,10 +337,15 @@ class Atlas(LocoEnv):
         if dataset_type == "real":
             traj_data_freq = 500  # hz
             path = "datasets/humanoids/02-constspeed_ATLAS.npz"
-            if debug:
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if debug or use_mini_dataset:
+                if use_mini_dataset:
+                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
+                                  "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
+
             traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent / path,
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))

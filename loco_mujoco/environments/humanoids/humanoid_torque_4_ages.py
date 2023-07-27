@@ -1,3 +1,4 @@
+import os
 import warnings
 from pathlib import Path
 from copy import deepcopy
@@ -398,7 +399,11 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
         if task == "walk":
             local_path = "datasets/humanoids/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
-            if debug:
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / local_path)
+            if debug or use_mini_dataset:
+                if use_mini_dataset:
+                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
+                                  "the datasets to use this environment for imitation learning!")
                 local_path = local_path.split("/")
                 local_path.insert(2, "mini_datasets")
                 local_path = "/".join(local_path)
@@ -406,7 +411,11 @@ class HumanoidTorque4Ages(HumanoidTorque):
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
             local_path = "datasets/humanoids/05-run_reduced_humanoid_POMDP" + dataset_suffix
-            if debug:
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / local_path)
+            if debug or use_mini_dataset:
+                if use_mini_dataset:
+                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
+                                  "the datasets to use this environment for imitation learning!")
                 local_path = local_path.split("/")
                 local_path.insert(2, "mini_datasets")
                 local_path = "/".join(local_path)
