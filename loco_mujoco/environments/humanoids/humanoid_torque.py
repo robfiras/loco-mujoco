@@ -252,7 +252,7 @@ class HumanoidTorque(LocoEnv):
                                          *HumanoidTorque.valid_task_confs.get_all())
 
         if task == "walk":
-            path = "datasets/humanoids/02-constspeed_ATLAS.npz"
+            path = "datasets/humanoids/02-constspeed_reduced_humanoid.npz"
             if debug:
                 path = path.split("/")
                 path.insert(2, "mini_datasets")

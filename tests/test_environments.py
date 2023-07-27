@@ -79,49 +79,47 @@ def test_all_environments():
 
         np.random.seed(0)
         # --- run gymnasium environment ---
-        task_env = gym.make("LocoMujoco", env_name=task_name)
+        task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
         dataset_gym = run_environment_gymnasium(task_env, N_EPISODES, N_STEPS)
 
         dataset_path = path + "/" + task_name + ".npy"
 
         np.save(dataset_path, dataset)
 
-    #     test_dataset = np.load(dataset_path)
-    #
-    #     if not np.allclose(dataset, test_dataset):
-    #         return False
-    #     if not np.allclose(dataset_gym, test_dataset):
-    #         return False
-    #
-    # return True
+        test_dataset = np.load(dataset_path)
 
-if __name__=="__main__":
-    test_all_environments()
+        if not np.allclose(dataset, test_dataset):
+            return False
+        if not np.allclose(dataset_gym, test_dataset):
+            return False
 
-# def test_replays():
-#
-#     task_names = loco_mujoco.get_all_task_names()
-#
-#     for task_name in task_names:
-#
-#         np.random.seed(0)
-#
-#         print(f"Testing Replay {task_name}...")
-#
-#         # --- native environment ---
-#         task_env = LocoEnv.make(task_name)
-#
-#         task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
-#
-#         task_env = LocoEnv.make(task_name)
-#         task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
-#
-#         # --- gymnasium environment ---
-#         task_env = gym.make("LocoMujoco", env_name=task_name)
-#
-#         task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP,  render=False)
-#
-#         task_env = gym.make("LocoMujoco", env_name=task_name)
-#         task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
-#
-#     return True
+    return True
+
+
+def test_replays():
+
+    task_names = loco_mujoco.get_all_task_names()
+
+    for task_name in task_names:
+
+        np.random.seed(0)
+
+        print(f"Testing Replay {task_name}...")
+
+        # --- native environment ---
+        task_env = LocoEnv.make(task_name, debug=True)
+
+        task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
+
+        task_env = LocoEnv.make(task_name, debug=True)
+        task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
+
+        # --- gymnasium environment ---
+        task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
+
+        task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP,  render=False)
+
+        task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
+        task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
+
+    return True
