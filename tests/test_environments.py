@@ -84,8 +84,6 @@ def test_all_environments():
 
         dataset_path = path + "/" + task_name + ".npy"
 
-        np.save(dataset_path, dataset)
-
         test_dataset = np.load(dataset_path)
 
         if not np.allclose(dataset, test_dataset):
