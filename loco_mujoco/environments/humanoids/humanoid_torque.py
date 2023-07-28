@@ -224,7 +224,8 @@ class HumanoidTorque(LocoEnv):
 
     @staticmethod
     def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, use_box_feet=True,
-                 disable_arms=True, use_foot_forces=False, random_start=True, init_step_no=None, debug=False):
+                 disable_arms=True, use_foot_forces=False, random_start=True,
+                 init_step_no=None, debug=False, hide_menu_on_startup=False):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
@@ -244,6 +245,7 @@ class HumanoidTorque(LocoEnv):
                 simulation according to that.
             init_step_no (int): If set, the respective sample from the trajectories
                 is taken to initialize the simulation.
+            hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
 
         Returns:
             An MDP of a Torque Humanoid.
@@ -282,7 +284,8 @@ class HumanoidTorque(LocoEnv):
         mdp = HumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
                              random_start=random_start, init_step_no=init_step_no,
                              disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                             reward_type="target_velocity", reward_params=reward_params)
+                             reward_type="target_velocity", reward_params=reward_params,
+                             hide_menu_on_startup=hide_menu_on_startup)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

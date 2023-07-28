@@ -15,11 +15,18 @@ def experiment(seed=0):
                                                                                      ".all" in env or ".carry" in env \
             else dict(n_episodes=3, n_steps_per_episode=500, record=True)
 
-        mdp = LocoEnv.make(env, disable_arms=False) if "Humanoid" in env or "Atlas.walk" in env \
-            else LocoEnv.make(env)
+        if "Humanoid" in env or "Atlas.walk" in env:
+            env_params = dict(disable_arms=False)
+        else:
+            env_params = dict()
+
+        if "4Ages" in env or "carry" in env:
+            env_params["random_env_reset"] = False
+
+        mdp = LocoEnv.make(env, hide_menu_on_startup=True, **env_params)
 
         save_path_video = "./record_all"
-        #mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
+        mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
 
         path_video = save_path_video + "/" + env + "/recording.mp4"
 
