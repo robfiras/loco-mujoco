@@ -9,7 +9,7 @@ def experiment(seed=0):
 
     mdp = LocoEnv.make("HumanoidTorque.run")
 
-    mdp.play_trajectory(n_steps_per_episode=250)
+    mdp.play_trajectory(n_steps_per_episode=500)
 
 
 if __name__ == '__main__':

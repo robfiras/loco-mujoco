@@ -29,9 +29,9 @@
 		<default class="viz">
 			<geom contype="0" conaffinity="0" group="1" type="mesh" rgba=".6 .6 .7 1"/>
 		</default>
-        <default class="ground">
-			<geom contype="0" conaffinity="0" group="2" type="mesh" rgba="0.5 0.6 0.7 1"/>
-		</default>
+<!--        <default class="ground">-->
+<!--			<geom contype="0" conaffinity="0" group="2" type="mesh" rgba="0.5 0.6 0.7 1"/>-->
+<!--		</default>-->
 	</default>
 
 	<asset>
@@ -58,8 +58,9 @@
 		<mesh name="r_talus"        file="r_talus.stl"/>
 		<mesh name="r_foot"         file="r_foot.stl"/>
 
-		<texture name="texplane" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" width="100" height="100"/>
-        <material name="MatPlane" reflectance="0.5" texture="texplane" texrepeat="1 1" texuniform="true"/>
+        <texture builtin="gradient" height="100" rgb1=".4 .5 .6" rgb2="0 0 0" type="skybox" width="100"/>
+        <texture name="texplane" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" width="100" height="100"></texture>
+        <material name="MatPlane" reflectance="0.5" texture="texplane" texrepeat="1 1" texuniform="true"></material>
 	</asset>
 	<option integrator="RK4" iterations="50" solver="Newton"  timestep="0.001"/>
 	<visual>
@@ -69,10 +70,11 @@
     <worldbody>
 
 		<!-- GROUND -->
-		<geom class="ground" friction="1 .1 .1" name="ground" type="plane" pos="0 0 0" size="50 50 1" conaffinity="1" contype="1" material="MatPlane"/>
-		<light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1"/>
+        <geom name="floor" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"></geom>
+        <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
         <body name="pelvis" pos="0 0 0.94">
             <inertial pos="0.0111 0 0.0271" quat="0.698584 0.713914 0.0424837 -0.0224092" mass="9.509" diaginertia="0.124488 0.116646 0.0957666" />
+            <light name="spotlight" mode="trackcom" pos="0 -2 10" dir="0 0 -1"/>
             <camera name="track" mode="trackcom" pos="0 -4 0" xyaxes="1 0 0 0 0 1"/>
             <geom class="viz" mesh="pelvis"/>
             <geom type="cylinder" size="0.11 0.03" pos="0.046 0 0.01" quat="0.707107 0.707107 0 0" />
