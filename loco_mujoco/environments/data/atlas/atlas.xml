@@ -70,7 +70,7 @@
     <worldbody>
 
 		<!-- GROUND -->
-        <geom name="floor" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"></geom>
+        <geom name="floor" friction="1 .1 .1" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" conaffinity="1" contype="1" group="2" rgba="0.8 0.9 0.8 1"></geom>
         <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
         <body name="pelvis" pos="0 0 0.94">
             <inertial pos="0.0111 0 0.0271" quat="0.698584 0.713914 0.0424837 -0.0224092" mass="9.509" diaginertia="0.124488 0.116646 0.0957666" />
