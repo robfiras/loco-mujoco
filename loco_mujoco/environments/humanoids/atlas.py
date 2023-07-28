@@ -288,7 +288,7 @@ class Atlas(LocoEnv):
         return color
 
     @staticmethod
-    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, disable_arms=True,
+    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True, disable_arms=True,
                  use_foot_forces=False, random_start=True, init_step_no=None, debug=False):
         """
         Returns an Atlas environment corresponding to the specified task.
@@ -302,6 +302,8 @@ class Atlas(LocoEnv):
                 a perfect dataset.
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
+            random_env_reset (bool):  If True, a random environment is chosen after each episode. If False, it is
+                sequentially iterated through the environment/model list.
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
             random_start (bool): If True, a random sample from the trajectories
@@ -323,11 +325,11 @@ class Atlas(LocoEnv):
         if task == "walk":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
                         disable_arms=disable_arms, use_foot_forces=use_foot_forces, reward_type="target_velocity",
-                        reward_params=reward_params)
+                        reward_params=reward_params, random_env_reset=random_env_reset)
         elif task == "carry":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
                         disable_arms=disable_arms, use_foot_forces=use_foot_forces, hold_weight=True,
-                        reward_type="target_velocity", reward_params=reward_params)
+                        reward_type="target_velocity", reward_params=reward_params, random_env_reset=random_env_reset)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

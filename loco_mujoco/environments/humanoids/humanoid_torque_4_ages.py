@@ -345,7 +345,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
         return xml_handle
 
     @staticmethod
-    def generate(task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000,
+    def generate(task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True,
                  use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None, debug=False):
         """
         Returns a Humanoid environment corresponding to the specified task.
@@ -358,6 +358,8 @@ class HumanoidTorque4Ages(HumanoidTorque):
                 a perfect dataset.
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
+            random_env_reset (bool):  If True, a random environment is chosen after each episode. If False, it is
+                sequentially iterated through the environment/model list.
             use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
@@ -425,7 +427,8 @@ class HumanoidTorque4Ages(HumanoidTorque):
         # Generate the MDP
         mdp = HumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
                                   disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                                  reward_type="multi_target_velocity", reward_params=reward_params)
+                                  reward_type="multi_target_velocity", random_env_reset=random_env_reset,
+                                  reward_params=reward_params)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

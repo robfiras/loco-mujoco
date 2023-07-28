@@ -7,7 +7,7 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("Atlas.carry")
+    mdp = LocoEnv.make("Atlas.carry", random_env_reset=False)
 
     mdp.play_trajectory(n_steps_per_episode=250)
 
