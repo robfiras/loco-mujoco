@@ -1,12 +1,14 @@
 from .atlas import Atlas
-from .humanoid_muscle import HumanoidMuscle
-from .humanoid_torque import HumanoidTorque
-from .humanoid_torque_4_ages import HumanoidTorque4Ages
+from .humanoids import HumanoidTorque, HumanoidMuscle, HumanoidTorque4Ages, HumanoidMuscle4Ages
+
 
 # register environments in mushroom
 Atlas.register()
 HumanoidTorque.register()
+HumanoidMuscle.register()
 HumanoidTorque4Ages.register()
+HumanoidMuscle4Ages.register()
+
 
 from gymnasium import register
 

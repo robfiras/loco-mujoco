@@ -13,20 +13,21 @@ from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils import check_validity_task_mode_dataset
 
 
-class HumanoidTorque(LocoEnv):
+class BaseHumanoid(LocoEnv):
     """
-    MuJoCo simulation of a simplified humanoid model with torque actuation.
+    MuJoCo simulation of a base humanoid model.
 
     """
 
     valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
                                      data_types=["real"])
 
-    def __init__(self, use_box_feet=False, disable_arms=False, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
+    def __init__(self, use_muscles=False, use_box_feet=False, disable_arms=False, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
         """
         Constructor.
 
         Args:
+            use_muscles (bool): If True, muscle actuators will be used, else torque actuators will be used.
             use_box_feet (bool): If True, boxes are used as feet (for simplification).
             disable_arms (bool): If True, all arm joints are removed and the respective
                 actuators are removed from the action specification.
@@ -35,15 +36,19 @@ class HumanoidTorque(LocoEnv):
             alpha_box_feet (float): Alpha parameter of the boxes, which might be added as feet.
 
         """
+        if use_muscles:
+            xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid" /
+                        "humanoid_muscle.xml").as_posix()
+        else:
+            xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid" /
+                        "humanoid_torque.xml").as_posix()
 
-        xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid_torque" /
-                    "humanoid_torque.xml").as_posix()
-
-        action_spec = self._get_action_specification()
+        action_spec = self._get_action_specification(use_muscles)
 
         observation_spec = self._get_observation_specification()
 
         # --- Modify the xml, the action_spec, and the observation_spec if needed ---
+        self._use_muscles = use_muscles
         self._use_box_feet = use_box_feet
         self._disable_arms = disable_arms
         joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups = self._get_xml_modifications()
@@ -104,7 +109,8 @@ class HumanoidTorque(LocoEnv):
         equ_constr_to_remove = []
         if self._use_box_feet:
             joints_to_remove += ["subtalar_angle_l", "mtp_angle_l", "subtalar_angle_r", "mtp_angle_r"]
-            motors_to_remove += ["mot_subtalar_angle_l", "mot_mtp_angle_l", "mot_subtalar_angle_r", "mot_mtp_angle_r"]
+            if not self._use_muscles:
+                motors_to_remove += ["mot_subtalar_angle_l", "mot_mtp_angle_l", "mot_subtalar_angle_r", "mot_mtp_angle_r"]
             equ_constr_to_remove += [j + "_constraint" for j in joints_to_remove]
             collision_groups = [("floor", ["floor"]),
                                 ("foot_r", ["foot_box_r"]),
@@ -223,13 +229,14 @@ class HumanoidTorque(LocoEnv):
         return grf
 
     @staticmethod
-    def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, use_box_feet=True,
-                 disable_arms=True, use_foot_forces=False, random_start=True,
+    def generate(env, task="walk", dataset_type="real", gamma=0.99, horizon=1000,
+                 use_box_feet=True, disable_arms=True, use_foot_forces=False, random_start=True,
                  init_step_no=None, debug=False, hide_menu_on_startup=False):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
         Args:
+            env (class): Humanoid class, either HumanoidTorque or HumanoidMuscle.
             task (str): Main task to solve. Either "walk" or "run".
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
                 reference trajectory. This data does not perfectly match the kinematics
@@ -237,6 +244,8 @@ class HumanoidTorque(LocoEnv):
                 a perfect dataset.
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
+            use_muscles (bool): If True, muscles actuators are used, else one torque acturator per
+                joint is used.
             use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
@@ -252,8 +261,8 @@ class HumanoidTorque(LocoEnv):
 
         """
 
-        check_validity_task_mode_dataset(HumanoidTorque.__name__, task, None, dataset_type,
-                                         *HumanoidTorque.valid_task_confs.get_all())
+        check_validity_task_mode_dataset(BaseHumanoid.__name__, task, None, dataset_type,
+                                         *BaseHumanoid.valid_task_confs.get_all())
 
         if task == "walk":
             path = "datasets/humanoids/02-constspeed_reduced_humanoid.npz"
@@ -281,11 +290,11 @@ class HumanoidTorque(LocoEnv):
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = HumanoidTorque(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
-                             random_start=random_start, init_step_no=init_step_no,
-                             disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                             reward_type="target_velocity", reward_params=reward_params,
-                             hide_menu_on_startup=hide_menu_on_startup)
+        mdp = env(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
+                  random_start=random_start, init_step_no=init_step_no,
+                  disable_arms=disable_arms, use_foot_forces=use_foot_forces,
+                  reward_type="target_velocity", reward_params=reward_params,
+                  hide_menu_on_startup=hide_menu_on_startup)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -407,7 +416,7 @@ class HumanoidTorque(LocoEnv):
         return observation_spec
 
     @staticmethod
-    def _get_action_specification():
+    def _get_action_specification(use_muscles):
         """
         Getter for the action space specification.
 
@@ -416,15 +425,35 @@ class HumanoidTorque(LocoEnv):
             space entry.
 
         """
-
-        action_spec = ["mot_lumbar_ext", "mot_lumbar_bend", "mot_lumbar_rot", "mot_shoulder_flex_r",
-                       "mot_shoulder_add_r", "mot_shoulder_rot_r", "mot_elbow_flex_r", "mot_pro_sup_r",
-                       "mot_wrist_flex_r", "mot_wrist_dev_r", "mot_shoulder_flex_l", "mot_shoulder_add_l",
-                       "mot_shoulder_rot_l", "mot_elbow_flex_l", "mot_pro_sup_l", "mot_wrist_flex_l",
-                       "mot_wrist_dev_l", "mot_hip_flexion_r", "mot_hip_adduction_r", "mot_hip_rotation_r",
-                       "mot_knee_angle_r", "mot_ankle_angle_r", "mot_subtalar_angle_r", "mot_mtp_angle_r",
-                       "mot_hip_flexion_l", "mot_hip_adduction_l", "mot_hip_rotation_l", "mot_knee_angle_l",
-                       "mot_ankle_angle_l", "mot_subtalar_angle_l", "mot_mtp_angle_l"]
+        if use_muscles:
+            action_spec = ["mot_shoulder_flex_r", "mot_shoulder_add_r", "mot_shoulder_rot_r", "mot_elbow_flex_r",
+                           "mot_pro_sup_r", "mot_wrist_flex_r", "mot_wrist_dev_r", "mot_shoulder_flex_l",
+                           "mot_shoulder_add_l", "mot_shoulder_rot_l", "mot_elbow_flex_l", "mot_pro_sup_l",
+                           "mot_wrist_flex_l", "mot_wrist_dev_l", "glut_med1_r", "glut_med2_r",
+                           "glut_med3_r", "glut_min1_r", "glut_min2_r", "glut_min3_r", "semimem_r", "semiten_r",
+                           "bifemlh_r", "bifemsh_r", "sar_r", "add_long_r", "add_brev_r", "add_mag1_r", "add_mag2_r",
+                           "add_mag3_r", "tfl_r", "pect_r", "grac_r", "glut_max1_r", "glut_max2_r", "glut_max3_r",
+                           "iliacus_r", "psoas_r", "quad_fem_r", "gem_r", "peri_r", "rect_fem_r", "vas_med_r",
+                           "vas_int_r", "vas_lat_r", "med_gas_r", "lat_gas_r", "soleus_r", "tib_post_r",
+                           "flex_dig_r", "flex_hal_r", "tib_ant_r", "per_brev_r", "per_long_r", "per_tert_r",
+                           "ext_dig_r", "ext_hal_r", "glut_med1_l", "glut_med2_l", "glut_med3_l", "glut_min1_l",
+                           "glut_min2_l", "glut_min3_l", "semimem_l", "semiten_l", "bifemlh_l", "bifemsh_l",
+                           "sar_l", "add_long_l", "add_brev_l", "add_mag1_l", "add_mag2_l", "add_mag3_l",
+                           "tfl_l", "pect_l", "grac_l", "glut_max1_l", "glut_max2_l", "glut_max3_l",
+                           "iliacus_l", "psoas_l", "quad_fem_l", "gem_l", "peri_l", "rect_fem_l",
+                           "vas_med_l", "vas_int_l", "vas_lat_l", "med_gas_l", "lat_gas_l", "soleus_l",
+                           "tib_post_l", "flex_dig_l", "flex_hal_l", "tib_ant_l", "per_brev_l", "per_long_l",
+                           "per_tert_l", "ext_dig_l", "ext_hal_l", "ercspn_r", "ercspn_l", "intobl_r",
+                           "intobl_l", "extobl_r", "extobl_l"]
+        else:
+            action_spec = ["mot_lumbar_ext", "mot_lumbar_bend", "mot_lumbar_rot", "mot_shoulder_flex_r",
+                           "mot_shoulder_add_r", "mot_shoulder_rot_r", "mot_elbow_flex_r", "mot_pro_sup_r",
+                           "mot_wrist_flex_r", "mot_wrist_dev_r", "mot_shoulder_flex_l", "mot_shoulder_add_l",
+                           "mot_shoulder_rot_l", "mot_elbow_flex_l", "mot_pro_sup_l", "mot_wrist_flex_l",
+                           "mot_wrist_dev_l", "mot_hip_flexion_r", "mot_hip_adduction_r", "mot_hip_rotation_r",
+                           "mot_knee_angle_r", "mot_ankle_angle_r", "mot_subtalar_angle_r", "mot_mtp_angle_r",
+                           "mot_hip_flexion_l", "mot_hip_adduction_l", "mot_hip_rotation_l", "mot_knee_angle_l",
+                           "mot_ankle_angle_l", "mot_subtalar_angle_l", "mot_mtp_angle_l"]
 
         return action_spec
 
@@ -452,8 +481,8 @@ class HumanoidTorque(LocoEnv):
                   rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, -0.15, 0.0])
 
         # make true foot uncollidable
-        foot_r = xml_handle.find("geom", "foot")
-        bofoot_r = xml_handle.find("geom", "bofoot")
+        foot_r = xml_handle.find("geom", "r_foot")
+        bofoot_r = xml_handle.find("geom", "r_bofoot")
         foot_l = xml_handle.find("geom", "l_foot")
         bofoot_l = xml_handle.find("geom", "l_bofoot")
         foot_r.contype = 0

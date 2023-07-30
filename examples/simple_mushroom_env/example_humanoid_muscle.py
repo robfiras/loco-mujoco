@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("HumanoidTorque4Ages.walk.1.real")
+env = LocoEnv.make("HumanoidMuscle")
 
 action_dim = env.info.action_space.shape[0]
 

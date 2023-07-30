@@ -49,11 +49,11 @@
             <inertial pos="       0        0        0" mass="0.11524999800438" fullinertia="0.00143714 0.00143714 0.00143714        0        0        0"></inertial>
             <joint name="ankle_angle_r" stiffness="10" damping="1" type="hinge" pos="0 0 0" axis="-0.105014 -0.174022 0.979126" limited="true" range=" -1.5708   1.5708" ref="0"></joint>
             <body name="calcn_r" pos="-0.0544606 -0.0468448 0.00884412" quat="1.0 0.0 0.0 0.0">
-              <geom name="foot" type="mesh" mesh="foot"></geom>
+              <geom name="r_foot" type="mesh" mesh="foot"></geom>
               <inertial pos="0.106552 0.0319656        0" mass="1.44062497505475" fullinertia="0.00183186 0.00510303 0.00536472        0        0        0"></inertial>
               <joint name="subtalar_angle_r" armature="0.01" type="hinge" pos="0 0 0" axis=" 0.78718 0.604747 -0.120949" limited="true" range=" -1.5708   1.5708" ref="0"></joint>
               <body name="toes_r" pos="0.190515 -0.00213104 0.00115076" quat="1.0 0.0 0.0 0.0">
-                <geom name="bofoot" type="mesh" mesh="bofoot"></geom>
+                <geom name="r_bofoot" type="mesh" mesh="bofoot"></geom>
                 <inertial pos="0.036867 0.00639311 -0.0186466" mass="0.249631495677486" fullinertia="0.000130847 0.000261694 0.00130847        0        0        0"></inertial>
                 <joint name="mtp_angle_r" armature="0.01" type="hinge" pos="0 0 0" axis="-0.580954        0 0.813936" limited="true" range=" -1.5708   1.5708" ref="0"></joint>
               </body>

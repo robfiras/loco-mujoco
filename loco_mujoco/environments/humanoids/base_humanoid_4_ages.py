@@ -9,14 +9,14 @@ from mushroom_rl.utils.running_stats import *
 
 import loco_mujoco
 from loco_mujoco.environments import ValidTaskConf
-from loco_mujoco.environments.humanoids import HumanoidTorque
+from loco_mujoco.environments.humanoids.base_humanoid import BaseHumanoid
 from loco_mujoco.utils.reward import MultiTargetVelocityReward
 from loco_mujoco.utils import check_validity_task_mode_dataset
 
 
-class HumanoidTorque4Ages(HumanoidTorque):
+class BaseHumanoid4Ages(BaseHumanoid):
     """
-    MuJoCo simulation of 4 simplified humanoid models with torque actuation.
+    MuJoCo simulation of 4 simplified humanoid models.
     At the beginning of each episode, one of the four humanoid models are
     sampled and used to simulate a trajectory. The different humanoids should
     resemble an adult, a teenager (∼12 years), a child (∼5 years), and a
@@ -29,8 +29,8 @@ class HumanoidTorque4Ages(HumanoidTorque):
                                      modes=["all", "1", "2", "3", "4"],
                                      data_types=["real"])
 
-    def __init__(self, scaling=None, scaling_trajectory_map=None, use_box_feet=False, disable_arms=False,
-                 tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
+    def __init__(self, scaling=None, scaling_trajectory_map=None, use_muscles=False,
+                 use_box_feet=False, disable_arms=False, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
         """
         Constructor.
 
@@ -39,6 +39,8 @@ class HumanoidTorque4Ages(HumanoidTorque):
             scaling_trajectory_map (list): A list that contains tuples of two integers
                 for each scaling. Given a set of trajectories, they define the range of
                 the valid trajectory numbers for each scaling factor.
+            use_muscles (bool): If True, muscle actuators are used, else one torque actuator
+                ss used per joint.
             use_box_feet (bool): If True, boxes are used as feet (for simplification).
             disable_arms (bool): If True, all arm joints are removed and the respective
                 actuators are removed from the action specification.
@@ -48,10 +50,15 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
         """
 
-        xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid_torque" /
-                    "humanoid_torque.xml").as_posix()
+        if use_muscles:
+            xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid" /
+                        "humanoid_muscle.xml").as_posix()
+        else:
+            xml_path = (Path(__file__).resolve().parent.parent / "data" / "humanoid" /
+                        "humanoid_torque.xml").as_posix()
 
-        action_spec = self._get_action_specification()
+        self._use_muscles = use_muscles
+        action_spec = self._get_action_specification(use_muscles)
 
         observation_spec = self._get_observation_specification()
 
@@ -78,7 +85,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
         joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups = self._get_xml_modifications()
 
         xml_handle = mjcf.from_path(xml_path)
-        xml_handles = [self.scale_body(deepcopy(xml_handle), scaling) for scaling in self._scalings]
+        xml_handles = [self.scale_body(deepcopy(xml_handle), scaling, use_muscles) for scaling in self._scalings]
 
         if use_box_feet or disable_arms:
             obs_to_remove = ["q_" + j for j in joints_to_remove] + ["dq_" + j for j in joints_to_remove]
@@ -98,7 +105,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
         xml_paths = [self._save_xml_handle(handle, tmp_dir_name) for handle in xml_handles]
 
         # call gran-parent
-        super(HumanoidTorque, self).__init__(xml_paths, action_spec, observation_spec, collision_groups, **kwargs)
+        super(BaseHumanoid, self).__init__(xml_paths, action_spec, observation_spec, collision_groups, **kwargs)
 
         if scaling_trajectory_map is not None and self.trajectories is None:
             warnings.warn("You have defined a scaling_trajectory_map, but no trajectory was defined. The former "
@@ -250,7 +257,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
         """
 
-        low, high = super(HumanoidTorque4Ages, self)._get_observation_space()
+        low, high = super(BaseHumanoid4Ages, self)._get_observation_space()
         if self.more_than_one_env:
             len_env_map = len(self._get_env_id_map(self._current_model_idx, len(self._models)))
             low = np.concatenate([low, np.zeros(len_env_map)])
@@ -269,7 +276,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
         """
 
-        obs = super(HumanoidTorque4Ages, self)._create_observation(obs)
+        obs = super(BaseHumanoid4Ages, self)._create_observation(obs)
         if self.more_than_one_env:
             env_id_map = self._get_env_id_map(self._current_model_idx, len(self._models))
             obs = np.concatenate([obs, env_id_map])
@@ -302,7 +309,7 @@ class HumanoidTorque4Ages(HumanoidTorque):
         return goal_reward_func
 
     @staticmethod
-    def scale_body(xml_handle, scaling):
+    def scale_body(xml_handle, scaling, use_muscles):
         """
         This function scales the kinematics and dynamics of the humanoid model given a Mujoco XML handle.
 
@@ -338,20 +345,28 @@ class HumanoidTorque4Ages(HumanoidTorque):
             assert np.array_equal(h.inertial.fullinertia[3:], np.zeros(3)), "Some of the diagonal elements of the" \
                                                                             "inertia matrix are not zero! Scaling is" \
                                                                             "not done correctly. Double-Check!"
-        actuator_handle = xml_handle.find_all("actuator")
-        for h in actuator_handle:
-            h.gear *= body_scaling ** 2
+
+        if use_muscles:
+            for h in body_handle:
+                for s in h.site:
+                    s.pos *= body_scaling
+
+        if not use_muscles:
+            actuator_handle = xml_handle.find_all("actuator")
+            for h in actuator_handle:
+                h.gear *= body_scaling ** 2
 
         return xml_handle
 
     @staticmethod
-    def generate(task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True,
-                 use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None, debug=False,
-                 hide_menu_on_startup=False):
+    def generate(env, task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True,
+                 use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None,
+                 debug=False, hide_menu_on_startup=False):
         """
         Returns a Humanoid environment corresponding to the specified task.
 
         Args:
+            env (class): Humanoid class, either HumanoidTorque4Ages or HumanoidMuscle4Ages.
             task (str): Main task to solve. Either "walk" or "run".
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
                 reference trajectory. This data does not perfectly match the kinematics
@@ -359,6 +374,8 @@ class HumanoidTorque4Ages(HumanoidTorque):
                 a perfect dataset.
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
+            use_muscles (bool): If True, muscles actuators are used, else one torque acturator per
+                joint is used.
             random_env_reset (bool):  If True, a random environment is chosen after each episode. If False, it is
                 sequentially iterated through the environment/model list.
             use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
@@ -371,8 +388,8 @@ class HumanoidTorque4Ages(HumanoidTorque):
 
         """
 
-        check_validity_task_mode_dataset(HumanoidTorque4Ages.__name__, task, mode, dataset_type,
-                                         *HumanoidTorque4Ages.valid_task_confs.get_all())
+        check_validity_task_mode_dataset(BaseHumanoid4Ages.__name__, task, mode, dataset_type,
+                                         *BaseHumanoid4Ages.valid_task_confs.get_all())
 
         if mode == "all":
             dataset_suffix = "_all.npz"
@@ -427,10 +444,10 @@ class HumanoidTorque4Ages(HumanoidTorque):
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = HumanoidTorque4Ages(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
-                                  disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                                  reward_type="multi_target_velocity", random_env_reset=random_env_reset,
-                                  reward_params=reward_params, hide_menu_on_startup=hide_menu_on_startup)
+        mdp = env(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
+                  disable_arms=disable_arms, use_foot_forces=use_foot_forces,
+                  reward_type="multi_target_velocity", random_env_reset=random_env_reset,
+                  reward_params=reward_params, hide_menu_on_startup=hide_menu_on_startup)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

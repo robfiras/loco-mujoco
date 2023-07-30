@@ -7,9 +7,9 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("HumanoidTorque")
+    mdp = LocoEnv.make("HumanoidMuscle4Ages")
 
-    mdp.play_trajectory(n_steps_per_episode=500)
+    mdp.play_trajectory(n_steps_per_episode=100)
 
 
 if __name__ == '__main__':
