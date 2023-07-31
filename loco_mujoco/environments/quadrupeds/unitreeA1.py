@@ -400,10 +400,9 @@ class UnitreeA1(LocoEnv):
 
         return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
 
-
     @staticmethod
     def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False,
-                 random_start=True, init_step_no=None, debug=False, hide_menu_on_startup=False):
+                 use_torque_ctrl=True, random_start=True, init_step_no=None, debug=False, hide_menu_on_startup=False):
         """
         Returns a Unitree environment corresponding to the specified task.
 
@@ -444,7 +443,7 @@ class UnitreeA1(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
+                            init_step_no=init_step_no, use_torque_ctrl=use_torque_ctrl, setup_random_rot=False,
                             reward_type="velocity_vector", hide_menu_on_startup=hide_menu_on_startup)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
         elif task == "hard":
@@ -458,7 +457,7 @@ class UnitreeA1(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, use_torque_ctrl=True, setup_random_rot=False,
+                            init_step_no=init_step_no, use_torque_ctrl=use_torque_ctrl, setup_random_rot=False,
                             reward_type="velocity_vector", hide_menu_on_startup=hide_menu_on_startup)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
 
