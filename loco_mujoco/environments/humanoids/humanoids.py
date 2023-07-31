@@ -21,8 +21,8 @@ class HumanoidTorque(BaseHumanoid):
         super(HumanoidTorque, self).__init__(use_muscles=False, **kwargs)
 
     @staticmethod
-    def generate(**kwargs):
-        return BaseHumanoid.generate(HumanoidTorque, **kwargs)
+    def generate(*args, **kwargs):
+        return BaseHumanoid.generate(HumanoidTorque, *args, **kwargs)
 
 
 class HumanoidMuscle(BaseHumanoid):
@@ -44,8 +44,8 @@ class HumanoidMuscle(BaseHumanoid):
         super(HumanoidMuscle, self).__init__(use_muscles=True, **kwargs)
 
     @staticmethod
-    def generate(**kwargs):
-        return BaseHumanoid.generate(HumanoidMuscle, **kwargs)
+    def generate(*args, **kwargs):
+        return BaseHumanoid.generate(HumanoidMuscle, *args, **kwargs)
 
 
 class HumanoidTorque4Ages(BaseHumanoid4Ages):
@@ -72,8 +72,8 @@ class HumanoidTorque4Ages(BaseHumanoid4Ages):
         super(HumanoidTorque4Ages, self).__init__(use_muscles=False, **kwargs)
 
     @staticmethod
-    def generate(**kwargs):
-        return BaseHumanoid4Ages.generate(HumanoidTorque4Ages, **kwargs)
+    def generate(*args, **kwargs):
+        return BaseHumanoid4Ages.generate(HumanoidTorque4Ages, *args, **kwargs)
 
 
 class HumanoidMuscle4Ages(BaseHumanoid4Ages):
@@ -100,5 +100,5 @@ class HumanoidMuscle4Ages(BaseHumanoid4Ages):
         super(HumanoidMuscle4Ages, self).__init__(use_muscles=True, **kwargs)
 
     @staticmethod
-    def generate(**kwargs):
-        return BaseHumanoid4Ages.generate(HumanoidMuscle4Ages, **kwargs)
+    def generate(*args, **kwargs):
+        return BaseHumanoid4Ages.generate(HumanoidMuscle4Ages, *args, **kwargs)
