@@ -244,8 +244,6 @@ class BaseHumanoid(LocoEnv):
                 a perfect dataset.
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
-            use_muscles (bool): If True, muscles actuators are used, else one torque acturator per
-                joint is used.
             use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
@@ -254,6 +252,7 @@ class BaseHumanoid(LocoEnv):
                 simulation according to that.
             init_step_no (int): If set, the respective sample from the trajectories
                 is taken to initialize the simulation.
+            debug (bool): If True, the smaller test datasets are used for debugging purposes.
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
 
         Returns:

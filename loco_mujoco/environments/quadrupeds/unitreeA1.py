@@ -416,11 +416,13 @@ class UnitreeA1(LocoEnv):
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
+            use_torque_ctrl (bool): If True, torque control is used, else position control is used.
             random_start (bool): If True, a random sample from the trajectories
                 is chosen at the beginning of each time step and initializes the
                 simulation according to that.
             init_step_no (int): If set, the respective sample from the trajectories
                 is taken to initialize the simulation.
+            debug (bool): If True, the smaller test datasets are used for debugging purposes.
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
 
         Returns:

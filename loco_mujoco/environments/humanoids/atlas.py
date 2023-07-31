@@ -27,7 +27,8 @@ class Atlas(LocoEnv):
     valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
                                      data_types=["real"])
 
-    def __init__(self, disable_arms=False, hold_weight=False, weight_mass=None, tmp_dir_name=None, **kwargs):
+    def __init__(self, disable_arms=False, disable_back_joint=False, hold_weight=False,
+                 weight_mass=None, tmp_dir_name=None, **kwargs):
         """
         Constructor.
 
@@ -53,6 +54,7 @@ class Atlas(LocoEnv):
 
         # --- Modify the xml, the action_spec, and the observation_spec if needed ---
         self._disable_arms = disable_arms
+        self._disable_back_joint = disable_back_joint
         self._hold_weight = hold_weight
         self._weight_mass = weight_mass
         self._valid_weights = [0.1, 1.0, 5.0, 10.0]
@@ -60,7 +62,7 @@ class Atlas(LocoEnv):
         if disable_arms or hold_weight:
             xml_handle = mjcf.from_path(xml_path)
 
-            if disable_arms:
+            if disable_arms or disable_back_joint:
                 joints_to_remove, motors_to_remove, equ_constr_to_remove = self._get_xml_modifications()
                 obs_to_remove = ["q_" + j for j in joints_to_remove] + ["dq_" + j for j in joints_to_remove]
                 observation_spec = [elem for elem in observation_spec if elem[0] not in obs_to_remove]
@@ -182,6 +184,10 @@ class Atlas(LocoEnv):
                                  "l_arm_wry_actuator", "l_arm_wrx_actuator", "r_arm_shz_actuator", "r_arm_shx_actuator",
                                  "r_arm_ely_actuator", "r_arm_elx_actuator", "r_arm_wry_actuator", "r_arm_wrx_actuator"]
 
+        if self._disable_back_joint:
+            joints_to_remove += ["back_bkz", "back_bky", "back_bkx"]
+            motors_to_remove += ["back_bkz_actuator", "back_bky_actuator", "back_bkx_actuator"]
+
         return joints_to_remove, motors_to_remove, equ_constr_to_remove
 
     def _get_observation_space(self):
@@ -239,12 +245,15 @@ class Atlas(LocoEnv):
         pelvis_condition = (pelvis_y_condition or pelvis_tilt_condition or
                             pelvis_list_condition or pelvis_rotation_condition)
 
-        back_euler = self._get_from_obs(obs, ["q_back_bky", "q_back_bkx", "q_back_bkz"])
+        if not self._disable_back_joint:
+            back_euler = self._get_from_obs(obs, ["q_back_bky", "q_back_bkx", "q_back_bkz"])
 
-        back_extension_condition = (back_euler[0] < (-np.pi / 4)) or (back_euler[0] > (np.pi / 10))
-        back_bending_condition = (back_euler[1] < -np.pi / 10) or (back_euler[1] > np.pi / 10)
-        back_rotation_condition = (back_euler[2] < (-np.pi / 4.5)) or (back_euler[2] > (np.pi / 4.5))
-        back_condition = (back_extension_condition or back_bending_condition or back_rotation_condition)
+            back_extension_condition = (back_euler[0] < (-np.pi / 4)) or (back_euler[0] > (np.pi / 10))
+            back_bending_condition = (back_euler[1] < -np.pi / 10) or (back_euler[1] > np.pi / 10)
+            back_rotation_condition = (back_euler[2] < (-np.pi / 4.5)) or (back_euler[2] > (np.pi / 4.5))
+            back_condition = (back_extension_condition or back_bending_condition or back_rotation_condition)
+        else:
+            back_condition = back_extension_condition = back_bending_condition = back_rotation_condition = False
 
         if return_err_msg:
             error_msg = ""
@@ -289,7 +298,8 @@ class Atlas(LocoEnv):
 
     @staticmethod
     def generate(task="walk", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True, disable_arms=True,
-                 use_foot_forces=False, random_start=True, init_step_no=None, debug=False, hide_menu_on_startup=False):
+                 disable_back_joint=False, use_foot_forces=False, random_start=True, init_step_no=None,
+                 debug=False, hide_menu_on_startup=False):
         """
         Returns an Atlas environment corresponding to the specified task.
 
@@ -305,12 +315,14 @@ class Atlas(LocoEnv):
             random_env_reset (bool):  If True, a random environment is chosen after each episode. If False, it is
                 sequentially iterated through the environment/model list.
             disable_arms (bool): If True, arms are disabled.
+            disable_back_joint (bool): If True, the back joint is disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
             random_start (bool): If True, a random sample from the trajectories
                 is chosen at the beginning of each time step and initializes the
                 simulation according to that.
             init_step_no (int): If set, the respective sample from the trajectories
                 is taken to initialize the simulation.
+            debug (bool): If True, the smaller test datasets are used for debugging purposes.
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
 
         Returns:
@@ -325,13 +337,15 @@ class Atlas(LocoEnv):
         # Generate the MDP
         if task == "walk":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
-                        disable_arms=disable_arms, use_foot_forces=use_foot_forces, reward_type="target_velocity",
+                        disable_arms=disable_arms, disable_back_joint=disable_back_joint,
+                        use_foot_forces=use_foot_forces, reward_type="target_velocity",
                         reward_params=reward_params, random_env_reset=random_env_reset,
                         hide_menu_on_startup=hide_menu_on_startup)
         elif task == "carry":
             mdp = Atlas(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
-                        disable_arms=disable_arms, use_foot_forces=use_foot_forces, hold_weight=True,
-                        reward_type="target_velocity", reward_params=reward_params, random_env_reset=random_env_reset,
+                        disable_arms=disable_arms, disable_back_joint=disable_back_joint,
+                        use_foot_forces=use_foot_forces, hold_weight=True, reward_type="target_velocity",
+                        reward_params=reward_params, random_env_reset=random_env_reset,
                         hide_menu_on_startup=hide_menu_on_startup)
 
         # Load the trajectory

@@ -90,16 +90,16 @@
                 <joint name="pelvis_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
             <body name="ltorso" pos="-0.0125 0 0">
                 <inertial pos="-0.0112984 -3.15366e-006 0.0746835" quat="0.997071 0.000128212 0.076485 -0.00012406" mass="2.27" diaginertia="0.003962 0.00341694 0.00169212" />
-                <joint name="back_bkz" axis="0 0 1" range="-0.663225 0.663225"/>
+                <joint name="back_bkz" stiffness="20" damping="10" axis="0 0 1" range="-0.663225 0.663225"/>
                 <geom class="viz" mesh="ltorso"/>
                 <body name="mtorso" pos="0 0 0.162">
                     <inertial pos="-0.00816266 -0.0131245 0.0305974" quat="0.108378 0.49314 0.746335 0.433648" mass="0.799" diaginertia="0.000536243 0.000487378 0.000358057" />
-                    <joint name="back_bky" axis="0 1 0" range="-0.219388 0.538783"/>
+                    <joint name="back_bky" stiffness="20" damping="10" axis="0 1 0" range="-0.219388 0.538783"/>
                     <geom class="viz" mesh="mtorso"/>
                     <geom type="cylinder" size="0.02 0.075" pos="0 0 -0.02" />
                     <body name="utorso" pos="0 0 0.05">
                         <inertial pos="-0.0622 0.0023 0.3157" quat="0.450601 -0.0341277 -0.0439518 0.89099" mass="84.409" diaginertia="1.62425 1.5673 0.552443" />
-                        <joint name="back_bkx" axis="1 0 0" range="-0.523599 0.523599"/>
+                        <joint name="back_bkx" stiffness="30" damping="10" axis="1 0 0" range="-0.523599 0.523599"/>
                         <geom class="viz" mesh="utorso"/>
                         <geom type="box" size="0.2 0.175 0.25" pos="-0.102 0 0.25" />
                         <geom type="box" size="0.065 0.25 0.05" pos="0.2 0 0.46" quat="0.707141 0 0.707073 0" />
