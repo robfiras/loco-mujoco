@@ -49,6 +49,7 @@ class UnitreeA1(LocoEnv):
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_position.xml").as_posix()
 
+        self._use_torque_ctrl = use_torque_ctrl
         action_spec = self._get_action_specification()
 
         observation_spec = self._get_observation_specification()
@@ -177,7 +178,6 @@ class UnitreeA1(LocoEnv):
 
         return dataset
 
-
     def get_kinematic_obs_mask(self):
         """
         Returns a mask (np.array) for the observation specified in observation_spec (or part of it).
@@ -185,6 +185,29 @@ class UnitreeA1(LocoEnv):
         """
 
         return np.arange(len(self.obs_helper.observation_spec)) # -2 (for x,y ) + 1 (for sin_cos_dir) + 1 (for goal_vel)
+
+    def _preprocess_action(self, action):
+        """
+        This function preprocesses all actions. All actions in this environment expected to be between -1 and 1.
+        Hence, we need to unnormalize the action to send to correct action to the simulation.
+        Note: If the action is not in [-1, 1], the unnormalized version will be clipped in Mujoco.
+
+        Args:
+            action (np.array): Action to be send to the environment;
+
+        Returns:
+            Unnormalized action (np.array) that is send to the environment;
+
+        """
+        if self._use_torque_ctrl:
+            unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
+        else:
+            q_pos = self._data.qpos[6:]
+            normalized_qpos = (q_pos - self.norm_act_mean) / self.norm_act_delta
+            new_normalized_qpos = normalized_qpos + action * 0.3
+            unnormalized_action = ((new_normalized_qpos.copy() * self.norm_act_delta) + self.norm_act_mean)
+
+        return unnormalized_action
 
     def _get_observation_space(self):
         """
