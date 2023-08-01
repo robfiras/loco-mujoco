@@ -77,7 +77,6 @@
     <body name="trunk" pos="0 0 0.43" childclass="a1">
       <light name="spotlight" mode="trackcom" pos="0 -0.25 2"/>
       <camera name="track" mode="trackcom" pos="0 -2 0" xyaxes="1 0 0 0 0 1"/>
-
       <joint name="trunk_tx" type="slide" pos="0 0 0" axis="       1        0        0" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_ty" type="slide" pos="0 0 0" axis="       0        1        0" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_tz" type="slide" pos="0 0 0" axis="       0        0        1" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>

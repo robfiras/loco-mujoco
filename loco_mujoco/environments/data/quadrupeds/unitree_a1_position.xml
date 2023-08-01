@@ -1,16 +1,14 @@
 <mujoco model="a1">
   <compiler angle="radian" meshdir="assets" texturedir="assets" autolimits="true"/>
 
-  <option gravity='0 0 -9.806' cone="elliptic" impratio="100"/>
+  <option cone="elliptic" impratio="100"/>
 
   <default>
     <default class="a1">
-      <geom friction="0" margin="0.001"/>
+      <geom friction="0.6" margin="0.001"/>
       <joint axis="0 1 0" damping="2" armature="0.01" frictionloss="0.2"/>
-      <!--general biastype="affine" biasprm="0 -50 0" gaintype="fixed" gainprm="50"/-->
-      <!--position kp="300"250,2.4,3 forcerange="-33.5 33.5" 300 4 best for correct freq./-->
-      <position kp="100" forcerange="-20 20"/>
-
+     <!--position kp="300"250,2.4,3 forcerange="-33.5 33.5" 300 4 best for correct freq./-->
+      <position kp="100" forcerange="-33.5 33.5" ctrllimited="true"/>
 
       <default class="abduction">
         <joint axis="1 0 0" range="-0.802851 0.802851" damping="1"/>
@@ -51,7 +49,7 @@
           <geom size="0.01" fromto="0.02 0 -0.13 0 0 -0.2"/>
         </default>
         <default class="foot">
-          <geom type="sphere" size="0.02" pos="0 0 -0.2" priority="1" solimp="0.015 1 0.062"
+          <geom type="sphere" size="0.02" pos="0 0 -0.2" priority="1" solimp="0.015 1 0.031"
               condim="6" friction="0.8 0.02 0.01"/>
         </default>
       </default>
@@ -79,18 +77,16 @@
 
     <body name="trunk" pos="0 0 0.43" childclass="a1">
       <light name="spotlight" mode="trackcom" pos="0 -0.25 2"/>
-
       <camera name="track" mode="trackcom" pos="0 -2 0" xyaxes="1 0 0 0 0 1"/>
       <joint name="trunk_tx" type="slide" pos="0 0 0" axis="       1        0        0" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_ty" type="slide" pos="0 0 0" axis="       0        1        0" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_tz" type="slide" pos="0 0 0" axis="       0        0        1" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
-      <joint name="trunk_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
-      <joint name="trunk_list" type="hinge" pos="0 0 0" axis="       1        0        0" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
-      <joint name="trunk_tilt" type="hinge" pos="0 0 0" axis="       0        1        0" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="trunk_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="trunk_list" type="hinge" pos="0 0 0" axis="       1        0        0" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="trunk_tilt" type="hinge" pos="0 0 0" axis="       0        1        0" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
 
       <inertial mass="4.713" pos="0 0.0041 -0.0005"
           fullinertia="0.0158533 0.0377999 0.0456542 -3.66e-05 -6.11e-05 -2.75e-05"/>
-
 
       <geom class="visual" mesh="trunk" material="carbonfibre"/>
       <geom class="collision" size="0.125 0.04 0.057" type="box"/>
@@ -232,10 +228,4 @@
     <position class="knee" name="RL_calf" joint="RL_calf_joint"/>
   </actuator>
 
-  <!-- keyframe>
-    <key name="home" qpos="0 0.27 0 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8"
-        ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8"/>
-  </keyframe -->
 </mujoco>
-
-
