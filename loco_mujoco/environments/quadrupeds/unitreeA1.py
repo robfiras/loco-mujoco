@@ -5,6 +5,7 @@ from pathlib import Path
 from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
+from mushroom_rl.utils.angles import mat_to_euler, euler_to_mat
 
 import loco_mujoco
 from loco_mujoco.environments import ValidTaskConf
@@ -184,7 +185,7 @@ class UnitreeA1(LocoEnv):
 
         """
 
-        return np.arange(len(self.obs_helper.observation_spec)) # -2 (for x,y ) + 1 (for sin_cos_dir) + 1 (for goal_vel)
+        return np.arange(len(self.obs_helper.observation_spec))
 
     def _preprocess_action(self, action):
         """
@@ -378,14 +379,15 @@ class UnitreeA1(LocoEnv):
 
         trunk_rotation = self._data.joint("trunk_rotation").qpos[0]
         desired_angle = self._goal.get_direction() + trunk_rotation
-        rot_mat = angle2mat_xy(desired_angle)
+
+        rot_mat = euler_to_mat(np.array([np.pi/2, 0, desired_angle]))
 
         # and set the rotation of the cylinder
-        self._data.site("dir_arrow").xmat = rot_mat.reshape((9,))
+        self._data.site("dir_arrow").xmat = (rot_mat).reshape((9,))
 
         # calc position of the ball corresponding to the arrow
         self._data.site("dir_arrow_ball").xpos = self._data.body("dir_arrow").xpos + \
-                                                 [-0.1 * np.cos(desired_angle), -0.1 * np.sin(desired_angle), 0]
+                                                 [-0.1 * np.sin(desired_angle), 0.1 * np.cos(desired_angle), 0]
 
     def _init_sim_from_obs(self, obs):
         """
@@ -563,7 +565,10 @@ class UnitreeA1(LocoEnv):
         dir_vec = xml_handle.find("body", "dir_arrow")
         # todo: once Mujoco support cones, make an actual arrow (its requested feature).
         dir_vec.add("site", name="dir_arrow_ball", type="sphere", size=".03", pos="-.1 0 0")
-        dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="-.1 0 0 .1 0 0")
+        #dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="-.1 0 0 .1 0 0")
+        dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="0 0 -.1 0 0 .1")
+        #dir_vec.add("site", name="dir_arrow_x", type="cylinder", size=".01", fromto="0 0 0 0.1 0 0")
+        #dir_vec.add("site", name="dir_arrow_y", type="cylinder", size=".01", fromto="0 0 0 0 .1 0")
 
         return xml_handle
 

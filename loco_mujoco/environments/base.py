@@ -5,6 +5,7 @@ from tempfile import mkdtemp
 from itertools import product
 
 import mujoco
+import numpy as np
 from dm_control import mjcf
 
 from mushroom_rl.core import Environment
@@ -417,7 +418,7 @@ class LocoEnv(MultiMuJoCo):
                 else:
                     curr_qpos = sample[0:len_qpos]
 
-                obs = self._create_observation(sample)
+                obs = self._create_observation(np.concatenate(sample))
                 if self._has_fallen(obs):
                     print("Has fallen!")
 

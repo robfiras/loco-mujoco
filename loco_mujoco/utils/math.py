@@ -1,4 +1,5 @@
 import numpy as np
+from mushroom_rl.utils.angles import euler_to_mat, mat_to_euler
 
 
 def rotate_obs(state, angle, idx_rot, idx_xvel, idx_yvel):
@@ -41,8 +42,7 @@ def mat2angle_xy(mat):
 
     """
 
-    mat = np.dot(mat.reshape((3, 3)), np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])).reshape((9,))
-    angle = np.arctan2(mat[3], mat[0])
+    angle = mat_to_euler(mat.reshape((3, 3)))[-1]
 
     return angle
 
@@ -59,11 +59,7 @@ def angle2mat_xy(angle):
 
     """
 
-    mat = np.array([[np.cos(angle), -np.sin(angle), 0], [np.sin(angle), np.cos(angle), 0], [0, 0, 1]])
-
-    # rotate with the default arrow rotation (else the arrow is vertical)
-    arrow = np.array([0, 0, 1, 1, 0, 0, 0, 1, 0]).reshape((3, 3))
-    mat = np.dot(mat, arrow)
+    mat = euler_to_mat(np.array([0, 0, angle]))
 
     return mat
 
