@@ -470,8 +470,8 @@ class LocoEnv(MultiMuJoCo):
                              self.info.observation_space.high[2:])
 
         if self._use_foot_forces:
-            grf_low, grf_high = (-np.ones((12,)) * np.inf,
-                                 np.ones((12,)) * np.inf)
+            grf_low, grf_high = (-np.ones((self._get_grf_size(),)) * np.inf,
+                                 np.ones((self._get_grf_size(),)) * np.inf)
             return (np.concatenate([sim_low, grf_low]),
                     np.concatenate([sim_high, grf_high]))
         else:
