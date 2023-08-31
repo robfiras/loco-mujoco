@@ -80,9 +80,15 @@ class LocoEnv(MultiMuJoCo):
         if collision_groups is None:
             collision_groups = list()
 
+        if use_foot_forces:
+            n_intermediate_steps = n_substeps
+            n_substeps = 1
+        else:
+            n_intermediate_steps = 1
+
         super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
-                         n_substeps=n_substeps, timestep=timestep, collision_groups=collision_groups,
-                         default_camera_mode=default_camera_mode, **viewer_params)
+                         n_substeps=n_substeps, n_intermediate_steps=n_intermediate_steps, timestep=timestep,
+                         collision_groups=collision_groups, default_camera_mode=default_camera_mode, **viewer_params)
 
         # specify reward function
         self._reward_function = self._get_reward_function(reward_type, reward_params)
