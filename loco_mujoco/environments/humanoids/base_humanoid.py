@@ -171,17 +171,17 @@ class BaseHumanoid(LocoEnv):
             error_msg = ""
             if pelvis_height_condition:
                 error_msg += "pelvis_height_condition violated.\n"
-            elif pelvis_tilt_condition:
+            if pelvis_tilt_condition:
                 error_msg += "pelvis_tilt_condition violated.\n"
-            elif pelvis_list_condition:
+            if pelvis_list_condition:
                 error_msg += "pelvis_list_condition violated.\n"
-            elif pelvis_rotation_condition:
+            if pelvis_rotation_condition:
                 error_msg += "pelvis_rotation_condition violated.\n"
-            elif lumbar_extension_condition:
+            if lumbar_extension_condition:
                 error_msg += "lumbar_extension_condition violated.\n"
-            elif lumbar_bending_condition:
+            if lumbar_bending_condition:
                 error_msg += "lumbar_bending_condition violated.\n"
-            elif lumbar_rotation_condition:
+            if lumbar_rotation_condition:
                 error_msg += "lumbar_rotation_condition violated.\n"
 
             return pelvis_condition or lumbar_condition, error_msg
