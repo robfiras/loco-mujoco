@@ -28,7 +28,7 @@ class LocoEnv(MultiMuJoCo):
 
     def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
-                 init_step_no=None, timestep=0.001, use_foot_forces=True, default_camera_mode="follow",
+                 init_step_no=None, timestep=0.002, use_foot_forces=True, default_camera_mode="follow",
                  **viewer_params):
         """
         Constructor.
