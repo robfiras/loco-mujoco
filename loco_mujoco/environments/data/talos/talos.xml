@@ -11,7 +11,10 @@
   <compiler angle="radian" meshdir="./meshes/" autolimits="true"/>
   <size njmax ="1000" nuserdata="600000"/>
   <default>
-    <geom group="1"/>
+    <geom group="1" rgba="0.5 0.6 0.7 0.2"/>
+    <default class="viz">
+			<geom type="mesh" group="0" contype="0" conaffinity="0" density="0" rgba="0.5 0.5 0.5 1"/>
+    </default>
     <motor ctrllimited="true" ctrlrange="-0.95 0.95"/>
   </default>
   <statistic meansize="0.16164" extent="1.99873" center="-0.0420473 -7.99469e-10 -0.214804"/>
@@ -93,12 +96,12 @@
     <material name="MatPlane" reflectance="0.5" texture="texplane" texrepeat="1 1" texuniform="true"/>
   </asset>
   <worldbody>
-    <geom name="floor" pos="0 0 0" group="0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"/>
+    <geom name="floor" pos="0 0 0" group="2" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"/>
     <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
 
     <body name="pelvis" pos="0 0 1.085">
-      <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="base_link"/>
-      <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="base_link_collision"/>
+      <geom class="viz" type="mesh" rgba="0.9 0.9 0.9 1" mesh="base_link"/>
+      <geom type="mesh" mesh="base_link_collision"/>
       <joint name="pelvis_tx" type="slide" pos="0 0 0" axis="       1        0        0" limited="false" range="      -500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="pelvis_tz" type="slide" pos="0 0 0" axis="       0        1        0" limited="false" range="      -300        300" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="pelvis_ty" type="slide" pos="0 0 0" axis="       0        0        1" limited="false" range="      -100        200" ref="0" armature="0" damping="0" stiffness="0"></joint>
@@ -112,109 +115,108 @@
 
         <inertial pos="0.00078223 3.528e-05 -0.0178246" quat="0.703744 0.704233 0.0663452 -0.0663278" mass="2.29466" diaginertia="0.00639091 0.00622386 0.00410256"/>
         <joint name="back_bkz" pos="0 0 0" axis="0 0 1" range="-1.25664 1.25664" damping="1" frictionloss="1"/>
-        <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="torso_1"/>
-        <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="torso_1"/>
+        <geom class="viz" rgba="0.9 0.9 0.9 1" mesh="torso_1"/>
         <body name="torso_2_link">
           <inertial pos="-0.0463 -0.000989647 0.145241" quat="0.704021 0.708473 0.0363665 -0.0331367" mass="16.984" diaginertia="0.444971 0.320913 0.299991"/>
           <joint name="back_bky" pos="0 0 0" axis="0 1 0" range="-0.226893 0.733038" damping="1" frictionloss="1"/>
-          <joint name="back_bkx" pos="0 0 0" axis="1 0 0" range="-0.226893 0.733038" damping="1" frictionloss="1"/>
-          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="torso_2"/>
-          <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="torso_2_collision"/>
-          <geom size="0.005 0.005 0.005" pos="0.04925 0 0.078" quat="0 0.707107 0.707107 0" type="box" contype="0" conaffinity="0" group="0" density="0"/>
+<!--          <joint name="back_bkx" pos="0 0 0" axis="1 0 0" range="-0.226893 0.733038" damping="1" frictionloss="1"/>-->
+          <geom class="viz" rgba="0.9 0.9 0.9 1" mesh="torso_2"/>
+          <geom type="mesh" mesh="torso_2_collision"/>
+          <geom class="viz" size="0.005 0.005 0.005" pos="0.04925 0 0.078" quat="0 0.707107 0.707107 0" type="box"/>
           <body name="head_1_link" pos="0.02 0 0.321">
             <inertial pos="-0.00157211 -0.00157919 0.0217577" quat="0.679576 0.71147 -0.126684 0.126246" mass="0.73746" diaginertia="0.0022809 0.00202202 0.00110971"/>
 <!--            <joint name="head_1_joint" pos="0 0 0" axis="0 1 0" range="-0.20944 0.785398" damping="0.5" frictionloss="1"/>-->
-            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="head_1"/>
+            <geom class="viz" mesh="head_1"/>
             <geom type="mesh" mesh="head_1_collision"/>
             <body name="head_2_link">
               <inertial pos="0.0107913 5.14671e-05 0.142137" quat="0.74103 -0.0213132 -0.0268216 0.670598" mass="1.46395" diaginertia="0.0110858 0.0109629 0.00578449"/>
 <!--              <joint name="head_2_joint" pos="0 0 0" axis="0 0 1" range="-1.309 1.309" damping="0.5" frictionloss="1"/>-->
-              <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="head_2"/>
-              <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="head_2_collision"/>
-              <geom pos="0.066 0 0.1982" type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="orbbec"/>
+              <geom class="viz" rgba="0.9 0.9 0.9 1" mesh="head_2"/>
+              <geom type="mesh" mesh="head_2_collision"/>
+              <geom class="viz"  pos="0.066 0 0.1982" type="mesh" mesh="orbbec"/>
               <geom size="0.02 0.0925 0.015" pos="0.056 0.0025 0.1982" type="box"/>
             </body>
           </body>
           <body name="arm_left_1_link" pos="0 0.1575 0.232">
             <inertial pos="-0.0002762 0.100602 0.0443742" quat="0.509187 0.520076 -0.492016 0.477671" mass="2.71457" diaginertia="0.0135919 0.012374 0.00418528"/>
             <joint name="l_arm_shz" pos="0 0 0" axis="0 0 1" range="-1.5708 0.785398" damping="1" frictionloss="1"/>
-            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_1"/>
+            <geom class="viz" type="mesh" mesh="arm_1"/>
             <geom type="mesh" mesh="arm_1_collision"/>
             <body name="arm_left_2_link" pos="0.00493 0.1365 0.04673">
               <inertial pos="0.0143883 0.00092938 -0.0868427" quat="0.981914 0.00964503 0.164999 0.0923476" mass="2.42509" diaginertia="0.0140925 0.0138001 0.00368288"/>
               <joint name="l_arm_shx" pos="0 0 0" axis="1 0 0" range="0.00872665 2.87107" damping="1" frictionloss="1"/>
-              <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_2"/>
+              <geom class="viz" type="mesh" mesh="arm_2"/>
               <geom type="mesh" mesh="arm_2_collision"/>
               <body name="arm_left_3_link">
                 <inertial pos="0.0136084 0.0124162 -0.2499" quat="0.991718 0.0691072 -0.105592 -0.0238848" mass="2.20874" diaginertia="0.00735601 0.00699198 0.0036592"/>
                 <joint name="l_arm_ely" pos="0 0 0" axis="0 0 1" range="-2.42601 2.42601" damping="1" frictionloss="1"/>
-                <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_3"/>
+                <geom class="viz" type="mesh" mesh="arm_3"/>
                 <geom type="mesh" mesh="arm_3_collision"/>
                 <body name="arm_left_4_link" pos="0.02 0 -0.273">
                   <inertial pos="-0.00742138 -0.0213895 -0.0331266" quat="0.714033 0.164017 0.00140055 0.680627" mass="0.877346" diaginertia="0.00285737 0.00258973 0.00103103"/>
                   <joint name="l_arm_elx" pos="0 0 0" axis="0 1 0" range="-2.23402 0.00349066" damping="1" frictionloss="1"/>
-                  <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_4"/>
+                  <geom class="viz" type="mesh" mesh="arm_4"/>
                   <geom type="mesh" mesh="arm_4_collision"/>
                   <body name="arm_left_5_link" pos="-0.02 0 -0.2643">
                     <inertial pos="-6e-05 0.003262 0.079625" quat="0.711712 -0.019748 0.0131536 0.70207" mass="1.87792" diaginertia="0.004373 0.003495 0.002278"/>
                     <joint name="l_arm_wry" pos="0 0 0" axis="0 0 1" range="-2.51327 2.51327" damping="1" frictionloss="1"/>
-                    <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="arm_5"/>
-                    <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_5_collision"/>
+                    <geom class="viz" type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_5"/>
+                    <geom type="mesh" rgba="0.9 0.9 0.9 0.2" mesh="arm_5_collision"/>
                     <body name="arm_left_6_link">
                       <inertial pos="2.1e-05 -0.001965 -0.000591" quat="0.0104356 0.706678 0.0122672 0.707352" mass="0.40931" diaginertia="0.000154 0.000141 0.000107"/>
                       <joint name="l_arm_wrx" pos="0 0 0" axis="1 0 0" range="-1.37008 1.37008" damping="1" frictionloss="1"/>
-                      <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="arm_6"/>
-                      <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_6_collision"/>
+                      <geom class="viz" type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_6"/>
+                      <geom type="mesh" rgba="0.9 0.9 0.9 0.2" mesh="arm_6_collision"/>
                       <body name="arm_left_7_link">
                         <inertial pos="0.00215393 0.00361697 -0.0837948" quat="0.966304 0.0192407 0.0500561 -0.251755" mass="1.04198" diaginertia="0.00272916 0.00272305 0.0010485"/>
 <!--                        <joint name="arm_left_7_joint" pos="0 0 0" axis="0 1 0" range="-0.680678 0.680678" damping="1" frictionloss="1"/>-->
-                        <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_7"/>
+                        <geom class="viz" type="mesh" mesh="arm_7"/>
                         <geom type="mesh" mesh="arm_7_collision"/>
-                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="-0.707107 0 0 -0.707107" type="cylinder" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1"/>
-                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="-0.707107 0 0 -0.707107" type="cylinder" rgba="0.9 0.9 0.9 1"/>
-                        <geom size="0.025 0.004875" pos="0 0 -0.063725" type="cylinder" contype="0" conaffinity="0" group="0" density="0"/>
+                        <geom class="viz" size="0.0225 0.00785" pos="0 0 -0.051" quat="-0.707107 0 0 -0.707107" type="cylinder" rgba="0.9 0.9 0.9 0.2"/>
+                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="-0.707107 0 0 -0.707107" type="cylinder" rgba="0.9 0.9 0.9 0.2"/>
+                        <geom class="viz" size="0.025 0.004875" pos="0 0 -0.063725" type="cylinder"/>
                         <geom size="0.025 0.004875" pos="0 0 -0.063725" type="cylinder"/>
-                        <geom pos="0 0 -0.092475" type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="base_link_gripper"/>
+                        <geom class="viz" pos="0 0 -0.092475" type="mesh" mesh="base_link_gripper"/>
                         <geom pos="0 0 -0.092475" type="mesh" mesh="base_link_gripper_collision"/>
                         <body name="gripper_left_motor_double_link" pos="0 0.02025 -0.122475">
                           <inertial pos="0.019654 0.018572 -0.011998" quat="0.434706 0.588708 -0.0217956 0.68116" mass="0.134356" diaginertia="0.000272 0.000221 8e-05"/>
 <!--                          <joint name="gripper_left_joint" pos="0 0 0" axis="1 0 0" range="-0.959931 0" damping="1" frictionloss="1"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="gripper_motor_double"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_double_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_double"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="gripper_motor_double_collision"/>
                         </body>
                         <body name="gripper_left_inner_double_link" pos="0 0.00525 -0.148455">
                           <inertial pos="-0.013283 0.036852 -0.023153" quat="0.312568 0.633813 0.365244 0.605953" mass="0.087986" diaginertia="0.000144 8.89999e-05 7.4e-05"/>
 <!--                          <joint name="gripper_left_inner_double_joint" pos="0 0 0" axis="1 0 0" range="-1.0472 0"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="inner_double"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="inner_double_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="inner_double"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="inner_double_collision"/>
                           <body name="gripper_left_fingertip_1_link" pos="0.032 0.04589 -0.06553">
                             <inertial pos="0 0.004604 -0.002537" quat="0.70316 -0.074603 0.074603 0.70316" mass="0.026301" diaginertia="8.99999e-06 8e-06 2e-06"/>
 <!--                            <joint name="gripper_left_fingertip_1_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="fingertip"/>
+                            <geom class="viz" type="mesh" mesh="fingertip"/>
                             <geom type="mesh" mesh="fingertip_collision"/>
                           </body>
                           <body name="gripper_left_fingertip_2_link" pos="-0.032 0.04589 -0.06553">
                             <inertial pos="0 0.004604 -0.002537" quat="0.70316 -0.074603 0.074603 0.70316" mass="0.026301" diaginertia="8.99999e-06 8e-06 2e-06"/>
 <!--                            <joint name="gripper_left_fingertip_2_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="fingertip"/>
+                            <geom class="viz" type="mesh" mesh="fingertip"/>
                             <geom type="mesh" mesh="fingertip_collision"/>
                           </body>
                         </body>
                         <body name="gripper_left_motor_single_link" pos="0 -0.02025 -0.122475">
                           <inertial pos="0.025237 -0.011231 -0.008158" quat="-0.429079 0.588757 0.0530926 0.682962" mass="0.107923" diaginertia="0.000171 0.000142 5.1e-05"/>
 <!--                          <joint name="gripper_left_motor_single_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="gripper_motor_single"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_single_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_single"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="gripper_motor_single_collision"/>
                         </body>
                         <body name="gripper_left_inner_single_link" pos="0 -0.00525 -0.148455">
                           <inertial pos="0 -0.034565 -0.021412" quat="0.672196 -0.216723 0.212111 0.67542" mass="0.047177" diaginertia="4.3e-05 4.2e-05 1.1e-05"/>
 <!--                          <joint name="gripper_left_inner_single_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="inner_single"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="inner_single_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="inner_single"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="inner_single_collision"/>
                           <body name="gripper_left_fingertip_3_link" pos="0 -0.04589 -0.06553" quat="0 0 0 1">
                             <inertial pos="0 0.004604 -0.002537" quat="0.70316 -0.074603 0.074603 0.70316" mass="0.026301" diaginertia="8.99999e-06 8e-06 2e-06"/>
 <!--                            <joint name="gripper_left_fingertip_3_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="fingertip"/>
+                            <geom class="viz" type="mesh" mesh="fingertip"/>
                             <geom type="mesh" mesh="fingertip_collision"/>
                           </body>
                         </body>
@@ -228,83 +230,83 @@
           <body name="arm_right_1_link" pos="0 -0.1575 0.232">
             <inertial pos="-0.0002762 -0.100602 0.0443742" quat="0.520076 0.509187 -0.477671 0.492016" mass="2.71457" diaginertia="0.0135919 0.012374 0.00418528"/>
             <joint name="r_arm_shz" pos="0 0 0" axis="0 0 1" range="-0.785398 1.5708" damping="1" frictionloss="1"/>
-            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_11"/>
+            <geom class="viz" type="mesh" mesh="arm_11"/>
             <geom type="mesh" mesh="arm_1_collision1"/>
             <body name="arm_right_2_link" pos="0.00493 -0.1365 0.04673">
               <inertial pos="0.0143883 -0.00092938 -0.0868427" quat="0.981914 -0.00964503 0.164999 -0.0923476" mass="2.42509" diaginertia="0.0140925 0.0138001 0.00368288"/>
               <joint name="r_arm_shx" pos="0 0 0" axis="1 0 0" range="-2.87107 -0.00872665" damping="1" frictionloss="1"/>
-              <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_21"/>
+              <geom class="viz" type="mesh" mesh="arm_21"/>
               <geom type="mesh" mesh="arm_2_collision1"/>
               <body name="arm_right_3_link">
                 <inertial pos="0.0136084 -0.0124162 -0.2499" quat="0.991718 -0.0691072 -0.105592 0.0238848" mass="2.20874" diaginertia="0.00735601 0.00699198 0.0036592"/>
                 <joint name="r_arm_ely" pos="0 0 0" axis="0 0 1" range="-2.42601 2.42601" damping="1" frictionloss="1"/>
-                <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_31"/>
+                <geom class="viz" type="mesh" mesh="arm_31"/>
                 <geom type="mesh" mesh="arm_3_collision1"/>
                 <body name="arm_right_4_link" pos="0.02 0 -0.273">
                   <inertial pos="-0.00742138 0.0213895 -0.0331266" quat="0.680627 0.00140055 0.164017 0.714033" mass="0.877346" diaginertia="0.00285737 0.00258973 0.00103103"/>
                   <joint name="r_arm_elx" pos="0 0 0" axis="0 1 0" range="-2.23402 0.00349066" damping="1" frictionloss="1"/>
-                  <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_41"/>
+                  <geom class="viz" type="mesh" mesh="arm_41"/>
                   <geom type="mesh" mesh="arm_4_collision1"/>
                   <body name="arm_right_5_link" pos="-0.02 0 -0.2643">
                     <inertial pos="-6e-05 -0.003262 0.079625" quat="0.70207 0.0131536 -0.019748 0.711712" mass="1.87792" diaginertia="0.004373 0.003495 0.002278"/>
                     <joint name="r_arm_wry" pos="0 0 0" axis="0 0 1" range="-2.51327 2.51327" damping="1" frictionloss="1"/>
-                    <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="arm_51"/>
-                    <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_5_collision1"/>
+                    <geom class="viz" type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_51"/>
+                    <geom type="mesh" rgba="0.9 0.9 0.9 0.2" mesh="arm_5_collision1"/>
                     <body name="arm_right_6_link">
                       <inertial pos="2.1e-05 0.001965 -0.000591" quat="-0.0104356 0.706678 -0.0122672 0.707352" mass="0.40931" diaginertia="0.000154 0.000141 0.000107"/>
                       <joint name="r_arm_wrx" pos="0 0 0" axis="1 0 0" range="-1.37008 1.37008" damping="1" frictionloss="1"/>
-                      <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1" mesh="arm_61"/>
-                      <geom type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_6_collision1"/>
+                      <geom class="viz" type="mesh" rgba="0.9 0.9 0.9 1" mesh="arm_61"/>
+                      <geom type="mesh" rgba="0.9 0.9 0.9 0.2" mesh="arm_6_collision1"/>
                       <body name="arm_right_7_link">
                         <inertial pos="0.0023011 -0.00361697 -0.0837948" quat="0.927123 -0.0149278 0.0465372 0.371557" mass="1.04198" diaginertia="0.00273131 0.00271696 0.00105108"/>
 <!--                        <joint name="arm_right_7_joint" pos="0 0 0" axis="0 1 0" range="-0.680678 0.680678" damping="1" frictionloss="1"/>-->
-                        <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="arm_71"/>
+                        <geom class="viz" type="mesh" mesh="arm_71"/>
                         <geom type="mesh" mesh="arm_7_collision1"/>
-                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="0.707107 0 0 -0.707107" type="cylinder" contype="0" conaffinity="0" group="0" density="0" rgba="0.9 0.9 0.9 1"/>
-                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="0.707107 0 0 -0.707107" type="cylinder" rgba="0.9 0.9 0.9 1"/>
-                        <geom size="0.025 0.004875" pos="0 0 -0.063725" quat="4.89658e-12 0 0 -1" type="cylinder" contype="0" conaffinity="0" group="0" density="0"/>
+                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="0.707107 0 0 -0.707107" type="cylinder" class="viz" rgba="0.9 0.9 0.9 1"/>
+                        <geom size="0.0225 0.00785" pos="0 0 -0.051" quat="0.707107 0 0 -0.707107" type="cylinder" rgba="0.9 0.9 0.9 0.2"/>
+                        <geom size="0.025 0.004875" pos="0 0 -0.063725" quat="4.89658e-12 0 0 -1" type="cylinder" class="viz"/>
                         <geom size="0.025 0.004875" pos="0 0 -0.063725" quat="4.89658e-12 0 0 -1" type="cylinder"/>
-                        <geom pos="0 0 -0.092475" quat="4.89657e-12 0 0 -1" type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="base_link_gripper"/>
+                        <geom pos="0 0 -0.092475" quat="4.89657e-12 0 0 -1" class="viz" type="mesh" mesh="base_link_gripper"/>
                         <geom pos="0 0 -0.092475" quat="4.89658e-12 0 0 -1" type="mesh" mesh="base_link_gripper_collision"/>
                         <body name="gripper_right_motor_double_link" pos="0 -0.02025 -0.122475" quat="4.89658e-12 0 0 -1">
                           <inertial pos="0.019654 0.018572 -0.011998" quat="0.434706 0.588708 -0.0217956 0.68116" mass="0.134356" diaginertia="0.000272 0.000221 8e-05"/>
 <!--                          <joint name="gripper_right_joint" pos="0 0 0" axis="1 0 0" range="-0.959931 0" damping="1" frictionloss="1"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="gripper_motor_double"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_double_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_double"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="gripper_motor_double_collision"/>
                         </body>
                         <body name="gripper_right_inner_double_link" pos="0 -0.00525 -0.148455" quat="4.89658e-12 0 0 -1">
                           <inertial pos="-0.013283 0.036852 -0.023153" quat="0.312568 0.633813 0.365244 0.605953" mass="0.087986" diaginertia="0.000144 8.89999e-05 7.4e-05"/>
 <!--                          <joint name="gripper_right_inner_double_joint" pos="0 0 0" axis="1 0 0" range="-1.0472 0"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="inner_double"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="inner_double_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="inner_double"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="inner_double_collision"/>
                           <body name="gripper_right_fingertip_1_link" pos="0.032 0.04589 -0.06553">
                             <inertial pos="0 0.004604 -0.002537" quat="0.70316 -0.074603 0.074603 0.70316" mass="0.026301" diaginertia="8.99999e-06 8e-06 2e-06"/>
 <!--                            <joint name="gripper_right_fingertip_1_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="fingertip"/>
+                            <geom class="viz" type="mesh" mesh="fingertip"/>
                             <geom type="mesh" mesh="fingertip_collision"/>
                           </body>
                           <body name="gripper_right_fingertip_2_link" pos="-0.032 0.04589 -0.06553">
                             <inertial pos="0 0.004604 -0.002537" quat="0.70316 -0.074603 0.074603 0.70316" mass="0.026301" diaginertia="8.99999e-06 8e-06 2e-06"/>
 <!--                            <joint name="gripper_right_fingertip_2_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="fingertip"/>
+                            <geom class="viz" type="mesh" mesh="fingertip"/>
                             <geom type="mesh" mesh="fingertip_collision"/>
                           </body>
                         </body>
                         <body name="gripper_right_motor_single_link" pos="0 0.02025 -0.122475" quat="4.89658e-12 0 0 -1">
                           <inertial pos="0.025237 -0.011231 -0.008158" quat="-0.429079 0.588757 0.0530926 0.682962" mass="0.107923" diaginertia="0.000171 0.000142 5.1e-05"/>
 <!--                          <joint name="gripper_right_motor_single_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="gripper_motor_single"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_single_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="gripper_motor_single"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="gripper_motor_single_collision"/>
                         </body>
                         <body name="gripper_right_inner_single_link" pos="0 0.00525 -0.148455" quat="4.89658e-12 0 0 -1">
                           <inertial pos="0 -0.034565 -0.021412" quat="0.672196 -0.216723 0.212111 0.67542" mass="0.047177" diaginertia="4.3e-05 4.2e-05 1.1e-05"/>
 <!--                          <joint name="gripper_right_inner_single_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="1 0.5 0 1" mesh="inner_single"/>
-                          <geom type="mesh" rgba="1 0.5 0 1" mesh="inner_single_collision"/>
+                          <geom class="viz" type="mesh" rgba="1 0.5 0 1" mesh="inner_single"/>
+                          <geom type="mesh" rgba="1 0.5 0 0.2" mesh="inner_single_collision"/>
                           <body name="gripper_right_fingertip_3_link" pos="0 -0.04589 -0.06553" quat="0 0 0 1">
                             <inertial pos="0 0.004604 -0.002537" quat="0.70316 -0.074603 0.074603 0.70316" mass="0.026301" diaginertia="8.99999e-06 8e-06 2e-06"/>
 <!--                            <joint name="gripper_right_fingertip_3_joint" pos="0 0 0" axis="1 0 0" range="0 1.0472"/>-->
-                            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="fingertip"/>
+                            <geom class="viz" type="mesh" mesh="fingertip"/>
                             <geom type="mesh" mesh="fingertip_collision"/>
                           </body>
                         </body>
@@ -320,33 +322,33 @@
       <body name="leg_left_1_link" pos="-0.02 0.085 -0.27105">
         <inertial pos="0.0224787 0.00106736 0.0313066" quat="0.644765 -0.231551 -0.227865 0.69191" mass="1.84559" diaginertia="0.00849624 0.00642969 0.00372078"/>
         <joint name="hip_rotation_l" pos="0 0 0" axis="0 0 1" range="-0.349066 1.5708"/>
-        <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="hip_z_lo_res"/>
+        <geom class="viz" type="mesh" mesh="hip_z_lo_res"/>
         <geom type="mesh" mesh="hip_z_collision"/>
         <body name="leg_left_2_link">
           <inertial pos="-0.00704703 0.0259266 0.00273385" quat="0.712294 0.701399 -0.00472331 -0.0255805" mass="1.49095" diaginertia="0.00497732 0.00474343 0.00189918"/>
           <joint name="hip_adduction_l" pos="0 0 0" axis="1 0 0" range="-0.5236 0.5236"/>
-          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="hip_x_lo_res"/>
+          <geom class="viz" type="mesh" mesh="hip_x_lo_res"/>
           <geom type="mesh" mesh="hip_x_collision"/>
           <body name="leg_left_3_link">
             <inertial pos="0.0058523 0.0636967 -0.183396" quat="0.995121 -0.0974306 -0.00559068 0.0145098" mass="6.23987" diaginertia="0.153409 0.140791 0.0256712"/>
             <joint name="hip_flexion_l" pos="0 0 0" axis="0 1 0" range="-2.095 0.7"/>
-            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="hip_y_lo_res"/>
+            <geom class="viz" type="mesh" mesh="hip_y_lo_res"/>
             <geom type="mesh" mesh="hip_y_collision"/>
             <body name="leg_left_4_link" pos="0 0 -0.38">
               <inertial pos="0.0131772 0.0291751 -0.115946" quat="0.999357 0.00773677 -0.0135107 0.0322952" mass="3.75995" diaginertia="0.0429266 0.0359662 0.013621"/>
               <joint name="knee_angle_l" pos="0 0 0" axis="0 1 0" range="0 2.618"/>
-              <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="knee_lo_res"/>
+              <geom class="viz" type="mesh" mesh="knee_lo_res"/>
               <geom type="mesh" mesh="knee_collision"/>
               <body name="leg_left_5_link" pos="0 0 -0.325">
                 <inertial pos="-0.0140084 0.0418006 0.0382019" quat="0.94386 -0.249123 0.00319491 0.216924" mass="1.29096" diaginertia="0.0118206 0.010046 0.00352112"/>
                 <joint name="ankle_angle_l" pos="0 0 0" axis="0 1 0" range="-1.27 0.68"/>
-                <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.7 0.7 0.7 1" mesh="ankle_Y_lo_res"/>
-                <geom type="mesh" rgba="0.7 0.7 0.7 1" mesh="ankle_Y_collision"/>
+                <geom class="viz" type="mesh" rgba="0.7 0.7 0.7 1" mesh="ankle_Y_lo_res"/>
+                <geom type="mesh" rgba="0.7 0.7 0.7 0.2" mesh="ankle_Y_collision"/>
                 <body name="leg_left_6_link">
                   <inertial pos="-0.0202201 -0.000511936 -0.0601674" quat="0.335692 0.614815 0.623132 0.347878" mass="1.60777" diaginertia="0.00755845 0.00633561 0.00378828"/>
 <!--                  <joint name="leg_left_6_joint" pos="0 0 0" axis="1 0 0" range="-0.5236 0.5236"/>-->
-                  <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.7 0.7 0.7 1" mesh="ankle_X_lo_res"/>
-                  <geom size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 1"/>
+                  <geom class="viz" type="mesh" rgba="0.7 0.7 0.7 1." mesh="ankle_X_lo_res"/>
+                  <geom size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 0.2"/>
                 </body>
               </body>
             </body>
@@ -356,33 +358,33 @@
       <body name="leg_right_1_link" pos="-0.02 -0.085 -0.27105">
         <inertial pos="0.0224787 -0.00106736 0.0313066" quat="0.69191 -0.227865 -0.231551 0.644765" mass="1.84559" diaginertia="0.00849624 0.00642969 0.00372078"/>
         <joint name="hip_rotation_r" pos="0 0 0" axis="0 0 1" range="-1.5708 0.349066"/>
-        <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="hip_z_lo_res1"/>
+        <geom class="viz" type="mesh" mesh="hip_z_lo_res1"/>
         <geom type="mesh" mesh="hip_z_collision1"/>
         <body name="leg_right_2_link">
           <inertial pos="-0.00704703 -0.0259266 0.00273385" quat="0.701399 0.712294 0.0255805 0.00472331" mass="1.49095" diaginertia="0.00497732 0.00474343 0.00189918"/>
           <joint name="hip_adduction_r" pos="0 0 0" axis="1 0 0" range="-0.5236 0.5236"/>
-          <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="hip_x_lo_res1"/>
+          <geom class="viz" type="mesh" mesh="hip_x_lo_res1"/>
           <geom type="mesh" mesh="hip_x_collision1"/>
           <body name="leg_right_3_link">
             <inertial pos="0.0058523 -0.0636967 -0.183396" quat="0.995121 0.0974306 -0.00559068 -0.0145098" mass="6.23987" diaginertia="0.153409 0.140791 0.0256712"/>
             <joint name="hip_flexion_r" pos="0 0 0" axis="0 1 0" range="-2.095 0.7"/>
-            <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="hip_y_lo_res1"/>
+            <geom class="viz" type="mesh" mesh="hip_y_lo_res1"/>
             <geom type="mesh" mesh="hip_y_collision1"/>
             <body name="leg_right_4_link" pos="0 0 -0.38">
               <inertial pos="0.0131772 -0.0291751 -0.115946" quat="0.999357 -0.00773677 -0.0135107 -0.0322952" mass="3.75995" diaginertia="0.0429266 0.0359662 0.013621"/>
               <joint name="knee_angle_r" pos="0 0 0" axis="0 1 0" range="0 2.618"/>
-              <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" mesh="knee_lo_res1"/>
+              <geom class="viz" type="mesh" mesh="knee_lo_res1"/>
               <geom type="mesh" mesh="knee_collision1"/>
               <body name="leg_right_5_link" pos="0 0 -0.325">
                 <inertial pos="-0.0140084 -0.0418006 0.0382019" quat="0.94386 0.249123 0.00319491 -0.216924" mass="1.29096" diaginertia="0.0118206 0.010046 0.00352112"/>
                 <joint name="ankle_angle_r" pos="0 0 0" axis="0 1 0" range="-1.27 0.68"/>
-                <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.7 0.7 0.7 1" mesh="ankle_Y_lo_res1"/>
-                <geom type="mesh" rgba="0.7 0.7 0.7 1" mesh="ankle_Y_collision1"/>
+                <geom class="viz" type="mesh" rgba="0.7 0.7 0.7 1" mesh="ankle_Y_lo_res1"/>
+                <geom type="mesh" rgba="0.7 0.7 0.7 0.2" mesh="ankle_Y_collision1"/>
                 <body name="leg_right_6_link">
                   <inertial pos="-0.0202201 0.000511936 -0.0601674" quat="0.347878 0.623132 0.614815 0.335692" mass="1.60777" diaginertia="0.00755845 0.00633561 0.00378828"/>
 <!--                  <joint name="leg_right_6_joint" pos="0 0 0" axis="1 0 0" range="-0.5236 0.5236"/>-->
-                  <geom type="mesh" contype="0" conaffinity="0" group="0" density="0" rgba="0.7 0.7 0.7 1" mesh="ankle_X_lo_res1"/>
-                  <geom size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 1"/>
+                  <geom class="viz" type="mesh" rgba="0.7 0.7 0.7 1" mesh="ankle_X_lo_res1"/>
+                  <geom size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 0.2"/>
                 </body>
               </body>
             </body>
@@ -393,29 +395,29 @@
   </worldbody>
 
   	<actuator>
-		<motor name="back_bkz_actuator"  joint="back_bkz" gear="0"/>
-		<motor name="back_bky_actuator"  joint="back_bky" gear="0"/>
-		<motor name="back_bkx_actuator"  joint="back_bkx" gear="0"/>
+		<motor name="back_bkz_actuator"  joint="back_bkz" gear="106"/>
+		<motor name="back_bky_actuator"  joint="back_bky" gear="445"/>
+<!--		<motor name="back_bkx_actuator"  joint="back_bkx" gear="300"/>-->
 
-		<motor name="l_arm_shz_actuator" joint="l_arm_shz" gear="0"/>
-		<motor name="l_arm_shx_actuator" joint="l_arm_shx" gear="0"/>
-		<motor name="l_arm_ely_actuator" joint="l_arm_ely" gear="0"/>
-		<motor name="l_arm_elx_actuator" joint="l_arm_elx" gear="0"/>
-		<motor name="l_arm_wry_actuator" joint="l_arm_wry" gear="0"/>
-		<motor name="l_arm_wrx_actuator" joint="l_arm_wrx" gear="0"/>
+		<motor name="l_arm_shz_actuator" joint="l_arm_shz" gear="87"/>
+		<motor name="l_arm_shx_actuator" joint="l_arm_shx" gear="99"/>
+		<motor name="l_arm_ely_actuator" joint="l_arm_ely" gear="63"/>
+		<motor name="l_arm_elx_actuator" joint="l_arm_elx" gear="112"/>
+		<motor name="l_arm_wry_actuator" joint="l_arm_wry" gear="25"/>
+		<motor name="l_arm_wrx_actuator" joint="l_arm_wrx" gear="25"/>
 
-		<motor name="r_arm_shz_actuator" joint="r_arm_shz" gear="0"/>
-		<motor name="r_arm_shx_actuator" joint="r_arm_shx" gear="0"/>
-		<motor name="r_arm_ely_actuator" joint="r_arm_ely" gear="0"/>
-		<motor name="r_arm_elx_actuator" joint="r_arm_elx" gear="0"/>
-		<motor name="r_arm_wry_actuator" joint="r_arm_wry" gear="0"/>
-		<motor name="r_arm_wrx_actuator" joint="r_arm_wrx" gear="0"/>
+		<motor name="r_arm_shz_actuator" joint="r_arm_shz" gear="87"/>
+		<motor name="r_arm_shx_actuator" joint="r_arm_shx" gear="99"/>
+		<motor name="r_arm_ely_actuator" joint="r_arm_ely" gear="63"/>
+		<motor name="r_arm_elx_actuator" joint="r_arm_elx" gear="112"/>
+		<motor name="r_arm_wry_actuator" joint="r_arm_wry" gear="25"/>
+		<motor name="r_arm_wrx_actuator" joint="r_arm_wrx" gear="25"/>
 
-		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="0"/>
-		<motor name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="0"/>
-		<motor name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="0"/>
-		<motor name="knee_angle_l_actuator" joint="knee_angle_l" gear="0"/>
-		<motor name="ankle_angle_l_actuator" joint="ankle_angle_l" gear="0"/>
+		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="275"/>
+		<motor name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="530"/>
+		<motor name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="840"/>
+		<motor name="knee_angle_l_actuator" joint="knee_angle_l" gear="890"/>
+		<motor name="ankle_angle_l_actuator" joint="ankle_angle_l" gear="740"/>
 <!--		<motor name="l_leg_akx_actuator" joint="l_leg_akx" gear="360"/>-->
 
 		<motor name="hip_flexion_r_actuator" joint="hip_flexion_r" gear="275"/>
@@ -424,7 +426,6 @@
 		<motor name="knee_angle_r_actuator" joint="knee_angle_r" gear="890"/>
 		<motor name="ankle_angle_r_actuator" joint="ankle_angle_r" gear="740"/>
 <!--		<motor name="r_leg_akx_actuator" joint="r_leg_akx" gear="360"/>-->
-
 	</actuator>
 
 </mujoco>

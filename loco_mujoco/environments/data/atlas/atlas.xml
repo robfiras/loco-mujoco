@@ -24,10 +24,10 @@
 	<default>
 		<site type="sphere" size="0.005"/>
 		<joint limited="true" damping="0.0" armature="0.01" type="hinge" pos="0 0 0"/>
-		<geom contype="0" conaffinity="1" friction="1.0 0.1 0.1" rgba="0.5 0.6 0.7 0.2" margin="0.001" group="0" />
+		<geom contype="0" conaffinity="1" friction="1.0 0.1 0.1" rgba="0.5 0.6 0.7 0.2" margin="0.001" group="1" />
 		<motor ctrllimited="true" ctrlrange="-0.95 0.95"/>
 		<default class="viz">
-			<geom contype="0" conaffinity="0" group="1" type="mesh" rgba=".6 .6 .7 1"/>
+			<geom contype="0" conaffinity="0" group="0" type="mesh" rgba=".6 .6 .7 1"/>
 		</default>
 <!--        <default class="ground">-->
 <!--			<geom contype="0" conaffinity="0" group="2" type="mesh" rgba="0.5 0.6 0.7 1"/>-->

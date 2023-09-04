@@ -22,10 +22,10 @@
         <position ctrlrange="-2.69653 -0.916298"/>
       </default>
       <default class="visual">
-        <geom type="mesh" contype="0" conaffinity="0" group="2" material="dark"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="0" material="dark"/>
       </default>
       <default class="collision">
-        <geom group="3" type="capsule"/>
+        <geom group="1" type="capsule" rgba="0.5 0.6 0.7 0.2"/>
         <default class="hip_left">
           <geom size="0.04 0.04" quat="1 1 0 0" type="cylinder" pos="0 0.055 0"/>
         </default>
@@ -71,7 +71,7 @@
   </asset>
 
   <worldbody>
-    <geom name="floor" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"></geom>
+    <geom name="floor" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" group="2" rgba="0.8 0.9 0.8 1"></geom>
     <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
 
     <body name="trunk" pos="0 0 0.43" childclass="a1">

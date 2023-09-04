@@ -86,6 +86,9 @@ class LocoEnv(MultiMuJoCo):
         else:
             n_intermediate_steps = 1
 
+        if "geom_group_visualization_on_startup" not in viewer_params.keys():
+            viewer_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
+
         super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
                          n_substeps=n_substeps, n_intermediate_steps=n_intermediate_steps, timestep=timestep,
                          collision_groups=collision_groups, default_camera_mode=default_camera_mode, **viewer_params)

@@ -16,7 +16,7 @@ from loco_mujoco.utils import check_validity_task_mode_dataset
 
 class Talos(LocoEnv):
     """
-    Mujoco simulation of the Talos robot. Optionally, Atlas can carry
+    Mujoco simulation of the Talos robot. Optionally, Talos can carry
     a weight. This environment can be partially observable by hiding
     some of the state space entries from the policy using a state mask.
     Hidable entries are "positions", "velocities", "foot_forces",
@@ -83,6 +83,7 @@ class Talos(LocoEnv):
                     current_xml_handle = self._add_weight(current_xml_handle, w, color)
                     xml_path.append(self._save_xml_handle(current_xml_handle, tmp_dir_name))
             else:
+                xml_handle = self._reorient_arms(xml_handle)
                 xml_path.append(self._save_xml_handle(xml_handle, tmp_dir_name))
 
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
@@ -185,8 +186,8 @@ class Talos(LocoEnv):
                                  "r_arm_ely_actuator", "r_arm_elx_actuator", "r_arm_wry_actuator", "r_arm_wrx_actuator"]
 
         if self._disable_back_joint:
-            joints_to_remove += ["back_bkz", "back_bky", "back_bkx"]
-            motors_to_remove += ["back_bkz_actuator", "back_bky_actuator", "back_bkx_actuator"]
+            joints_to_remove += ["back_bkz", "back_bky"]
+            motors_to_remove += ["back_bkz_actuator", "back_bky_actuator"]
 
         return joints_to_remove, motors_to_remove, equ_constr_to_remove
 
@@ -246,14 +247,13 @@ class Talos(LocoEnv):
                             pelvis_list_condition or pelvis_rotation_condition)
 
         if not self._disable_back_joint:
-            back_euler = self._get_from_obs(obs, ["q_back_bky", "q_back_bkx", "q_back_bkz"])
+            back_euler = self._get_from_obs(obs, ["q_back_bky", "q_back_bkz"])
 
             back_extension_condition = (back_euler[0] < (-np.pi / 4)) or (back_euler[0] > (np.pi / 10))
-            back_bending_condition = (back_euler[1] < -np.pi / 10) or (back_euler[1] > np.pi / 10)
-            back_rotation_condition = (back_euler[2] < (-np.pi / 4.5)) or (back_euler[2] > (np.pi / 4.5))
-            back_condition = (back_extension_condition or back_bending_condition or back_rotation_condition)
+            back_rotation_condition = (back_euler[1] < -np.pi / 10) or (back_euler[1] > np.pi / 10)
+            back_condition = (back_extension_condition or back_rotation_condition)
         else:
-            back_condition = back_extension_condition = back_bending_condition = back_rotation_condition = False
+            back_condition = back_extension_condition = back_rotation_condition = False
 
         if return_err_msg:
             error_msg = ""
@@ -267,8 +267,6 @@ class Talos(LocoEnv):
                 error_msg += "pelvis_rotation_condition violated.\n"
             elif back_extension_condition:
                 error_msg += "back_extension_condition violated.\n"
-            elif back_bending_condition:
-                error_msg += "back_bending_condition violated.\n"
             elif back_rotation_condition:
                 error_msg += "back_rotation_condition violated.\n"
 
@@ -355,7 +353,7 @@ class Talos(LocoEnv):
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
-            path = "datasets/humanoids/02-constspeed_ATLAS.npz"
+            path = "datasets/humanoids/02-constspeed_TALOS.npz"
             use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
@@ -367,7 +365,9 @@ class Talos(LocoEnv):
 
             traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent / path,
                                traj_dt=(1 / traj_data_freq),
-                               control_dt=(1 / desired_contr_freq))
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=True)
+
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
@@ -392,16 +392,41 @@ class Talos(LocoEnv):
         """
 
         # find pelvis handle
-        pelvis = xml_handle.find("body", "utorso")
+        pelvis = xml_handle.find("body", "torso_1_link")
         pelvis.add("body", name="weight")
         weight = xml_handle.find("body", "weight")
-        weight.add("geom", type="box", size="0.1 0.27 0.1", pos="0.72 0 -0.25", rgba=color, mass=mass)
+        weight.add("geom", type="box", size="0.1 0.25 0.1", pos="0.45 0 -0.20", group="0", rgba=color, mass=mass)
 
         # modify the arm orientation
-        r_clav = xml_handle.find("body", "r_clav")
-        r_clav.quat = [1.0,  0.0, -0.35, 0.0]
-        l_clav = xml_handle.find("body", "l_clav")
-        l_clav.quat = [0.0, -0.35, 0.0,  1.0]
+        arm_right_4_link = xml_handle.find("body", "arm_right_4_link")
+        arm_right_4_link.quat = [1.0,  0.0, -0.65, 0.0]
+        arm_left_4_link = xml_handle.find("body", "arm_left_4_link")
+        arm_left_4_link.quat = [1.0,  0.0, -0.65, 0.0]
+
+        arm_right_6_link = xml_handle.find("body", "arm_right_6_link")
+        arm_right_6_link.quat = [1.0,  0.0, -0.0, 1.0]
+        arm_left_6_link = xml_handle.find("body", "arm_left_6_link")
+        arm_left_6_link.quat = [1.0,  0.0, -0.0, 1.0]
+
+        return xml_handle
+
+    @staticmethod
+    def _reorient_arms(xml_handle):
+        """
+        Reorients the elbow to not collide with the hip.
+
+        Args:
+            xml_handle: Handle to Mujoco XML.
+
+        Returns:
+            Modified Mujoco XML handle.
+
+        """
+        # modify the arm orientation
+        arm_right_4_link = xml_handle.find("body", "arm_right_4_link")
+        arm_right_4_link.quat = [1.0,  0.0, -0.25, 0.0]
+        arm_left_4_link = xml_handle.find("body", "arm_left_4_link")
+        arm_left_4_link.quat = [1.0,  0.0, -0.25, 0.0]
 
         return xml_handle
 
@@ -424,7 +449,6 @@ class Talos(LocoEnv):
                             ("q_pelvis_list", "pelvis_list", ObservationType.JOINT_POS),
                             ("q_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_POS),
                             ("q_back_bkz", "back_bkz", ObservationType.JOINT_POS),
-                            ("q_back_bkx", "back_bkx", ObservationType.JOINT_POS),
                             ("q_back_bky", "back_bky", ObservationType.JOINT_POS),
                             ("q_l_arm_shz", "l_arm_shz", ObservationType.JOINT_POS),
                             ("q_l_arm_shx", "l_arm_shx", ObservationType.JOINT_POS),
@@ -457,7 +481,6 @@ class Talos(LocoEnv):
                             ("dq_pelvis_list", "pelvis_list", ObservationType.JOINT_VEL),
                             ("dq_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_VEL),
                             ("dq_back_bkz", "back_bkz", ObservationType.JOINT_VEL),
-                            ("dq_back_bkx", "back_bkx", ObservationType.JOINT_VEL),
                             ("dq_back_bky", "back_bky", ObservationType.JOINT_VEL),
                             ("dq_l_arm_shz", "l_arm_shz", ObservationType.JOINT_VEL),
                             ("dq_l_arm_shx", "l_arm_shx", ObservationType.JOINT_VEL),
@@ -495,7 +518,7 @@ class Talos(LocoEnv):
 
         """
 
-        action_spec = ["back_bkz_actuator", "back_bky_actuator", "back_bkx_actuator", "l_arm_shz_actuator",
+        action_spec = ["back_bkz_actuator", "back_bky_actuator", "l_arm_shz_actuator",
                        "l_arm_shx_actuator", "l_arm_ely_actuator", "l_arm_elx_actuator", "l_arm_wry_actuator",
                        "l_arm_wrx_actuator", "r_arm_shz_actuator", "r_arm_shx_actuator",
                        "r_arm_ely_actuator", "r_arm_elx_actuator", "r_arm_wry_actuator", "r_arm_wrx_actuator",
