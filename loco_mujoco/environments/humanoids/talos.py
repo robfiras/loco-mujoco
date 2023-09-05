@@ -45,10 +45,8 @@ class Talos(LocoEnv):
         observation_spec = self._get_observation_specification()
 
         collision_groups = [("floor", ["ground"]),
-                            ("foot_r", ["right_foot_back"]),
-                            ("front_foot_r", ["right_foot_front"]),
-                            ("foot_l", ["left_foot_back"]),
-                            ("front_foot_l", ["left_foot_front"])]
+                            ("foot_r", ["right_foot"]),
+                            ("foot_l", ["left_foot"])]
 
         self._hidable_obs = ("positions", "velocities", "foot_forces", "weight")
 
@@ -87,6 +85,26 @@ class Talos(LocoEnv):
                 xml_path.append(self._save_xml_handle(xml_handle, tmp_dir_name))
 
         super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
+
+    def _get_grf_size(self):
+        """
+        Returns the size of the ground force vector.
+
+        """
+
+        return 6
+
+    def _get_ground_forces(self):
+        """
+        Returns the ground forces (np.array). By default, 4 ground force sensors are used.
+        Environments that use more or less have to override this function.
+
+        """
+
+        grf = np.concatenate([self._get_collision_force("floor", "foot_r")[:3],
+                              self._get_collision_force("floor", "foot_l")[:3]])
+
+        return grf
 
     def create_dataset(self, ignore_keys=None):
         """

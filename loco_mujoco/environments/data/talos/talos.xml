@@ -348,7 +348,7 @@
                   <inertial pos="-0.0202201 -0.000511936 -0.0601674" quat="0.335692 0.614815 0.623132 0.347878" mass="1.60777" diaginertia="0.00755845 0.00633561 0.00378828"/>
 <!--                  <joint name="leg_left_6_joint" pos="0 0 0" axis="1 0 0" range="-0.5236 0.5236"/>-->
                   <geom class="viz" type="mesh" rgba="0.7 0.7 0.7 1." mesh="ankle_X_lo_res"/>
-                  <geom size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 0.2"/>
+                  <geom name="left_foot" size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 0.2"/>
                 </body>
               </body>
             </body>
@@ -384,7 +384,7 @@
                   <inertial pos="-0.0202201 0.000511936 -0.0601674" quat="0.347878 0.623132 0.614815 0.335692" mass="1.60777" diaginertia="0.00755845 0.00633561 0.00378828"/>
 <!--                  <joint name="leg_right_6_joint" pos="0 0 0" axis="1 0 0" range="-0.5236 0.5236"/>-->
                   <geom class="viz" type="mesh" rgba="0.7 0.7 0.7 1" mesh="ankle_X_lo_res1"/>
-                  <geom size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 0.2"/>
+                  <geom name="right_foot" size="0.105 0.065 0.01" pos="0 0 -0.1" type="box" rgba="0.7 0.7 0.7 0.2"/>
                 </body>
               </body>
             </body>

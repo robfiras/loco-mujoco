@@ -5,7 +5,6 @@ from tempfile import mkdtemp
 from itertools import product
 
 import mujoco
-import numpy as np
 from dm_control import mjcf
 
 from mushroom_rl.core import Environment

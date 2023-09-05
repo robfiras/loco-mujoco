@@ -188,17 +188,6 @@ class BaseHumanoid(LocoEnv):
         else:
             return pelvis_condition or lumbar_condition
 
-    def _setup_ground_force_statistics(self):
-        """
-        Returns a running average method for the mean ground forces.
-
-        """
-
-        grf_vec_size = self._get_grf_size()
-        mean_grf = RunningAveragedWindow(shape=(grf_vec_size,), window_size=self._n_substeps)
-
-        return mean_grf
-
     def _get_grf_size(self):
         """
         Returns the size of the ground force vector.
