@@ -28,7 +28,7 @@ class LocoEnv(MultiMuJoCo):
     def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
                  init_step_no=None, timestep=0.002, use_foot_forces=True, default_camera_mode="follow",
-                 **viewer_params):
+                 use_absorbing_states=True, **viewer_params):
         """
         Constructor.
 
@@ -70,6 +70,8 @@ class LocoEnv(MultiMuJoCo):
                 the observation space;
             default_camera_mode (str): String defining the default camera mode. Available modes are "static",
                 "follow", and "top_static".
+            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
+                that episodes can terminate earlier.
 
         """
 
@@ -118,6 +120,8 @@ class LocoEnv(MultiMuJoCo):
 
         self._random_start = random_start
         self._init_step_no = init_step_no
+
+        self._use_absorbing_states = use_absorbing_states
 
     def load_trajectory(self, traj_params, warn=True):
         """
@@ -202,7 +206,7 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        return self._has_fallen(obs)
+        return self._has_fallen(obs) if self._use_absorbing_states else False
 
     def get_kinematic_obs_mask(self):
         """
