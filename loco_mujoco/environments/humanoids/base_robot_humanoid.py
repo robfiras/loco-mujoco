@@ -150,7 +150,8 @@ class BaseRobotHumanoid(LocoEnv):
     @staticmethod
     def generate(env, path, task="walk", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True, disable_arms=True,
                  disable_back_joint=False, use_foot_forces=False, random_start=True, init_step_no=None,
-                 debug=False, hide_menu_on_startup=False, use_absorbing_states=True):
+                 debug=False, hide_menu_on_startup=False, use_absorbing_states=True,
+                 clip_trajectory_to_joint_ranges=False):
         """
         Returns an environment corresponding to the specified task.
 
@@ -179,6 +180,7 @@ class BaseRobotHumanoid(LocoEnv):
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
             use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
                 that episodes can terminate earlier.
+            clip_trajectory_to_joint_ranges (bool): If True, trajectory is clipped to joint ranges.
 
         Returns:
             An MDP of the Robot.
@@ -221,12 +223,14 @@ class BaseRobotHumanoid(LocoEnv):
 
             traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent / path,
                                traj_dt=(1 / traj_data_freq),
-                               control_dt=(1 / desired_contr_freq))
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=clip_trajectory_to_joint_ranges)
+
         elif dataset_type == "perfect":
             # todo: generate and add this dataset
             raise ValueError(f"currently not implemented.")
 
-        mdp.load_trajectory(traj_params, warn=False)
+        mdp.load_trajectory(traj_params,  warn=False)
 
         return mdp
 

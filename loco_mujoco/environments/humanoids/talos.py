@@ -159,7 +159,8 @@ class Talos(BaseRobotHumanoid):
     @staticmethod
     def generate(*args, **kwargs):
         path = "datasets/humanoids/02-constspeed_TALOS.npz"
-        return BaseRobotHumanoid.generate(Talos, path, *args, **kwargs)
+        return BaseRobotHumanoid.generate(Talos, path, clip_trajectory_to_joint_ranges=True,
+                                          *args, **kwargs)
 
     @staticmethod
     def _add_weight(xml_handle, mass, color):
