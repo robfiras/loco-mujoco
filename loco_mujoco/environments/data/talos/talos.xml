@@ -11,7 +11,7 @@
   <compiler angle="radian" meshdir="./meshes/" autolimits="true"/>
   <size njmax ="1000" nuserdata="600000"/>
   <default>
-    <geom group="1" rgba="0.5 0.6 0.7 0.2"/>
+    <geom contype="0" conaffinity="1" group="1" rgba="0.5 0.6 0.7 0.2"/>
     <default class="viz">
 			<geom type="mesh" group="0" contype="0" conaffinity="0" density="0" rgba="0.5 0.5 0.5 1"/>
     </default>
@@ -96,7 +96,7 @@
     <material name="MatPlane" reflectance="0.5" texture="texplane" texrepeat="1 1" texuniform="true"/>
   </asset>
   <worldbody>
-    <geom name="floor" pos="0 0 0" group="2" size="500 500 0.125" type="plane" material="MatPlane" condim="3" rgba="0.8 0.9 0.8 1"/>
+    <geom name="floor" friction="1 .1 .1" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" conaffinity="1" contype="1" group="2" rgba="0.8 0.9 0.8 1"></geom>
     <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
 
     <body name="pelvis" pos="0 0 1.085">
@@ -413,19 +413,19 @@
 		<motor name="r_arm_wry_actuator" joint="r_arm_wry" gear="25"/>
 		<motor name="r_arm_wrx_actuator" joint="r_arm_wrx" gear="25"/>
 
-		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="275"/>
-		<motor name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="530"/>
-		<motor name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="840"/>
-		<motor name="knee_angle_l_actuator" joint="knee_angle_l" gear="890"/>
-		<motor name="ankle_angle_l_actuator" joint="ankle_angle_l" gear="740"/>
-<!--		<motor name="l_leg_akx_actuator" joint="l_leg_akx" gear="360"/>-->
+		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="404"/>
+		<motor name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="404"/>
+		<motor name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="210"/>
+		<motor name="knee_angle_l_actuator" joint="knee_angle_l" gear="648"/>
+		<motor name="ankle_angle_l_actuator" joint="ankle_angle_l" gear="400"/>
+<!--		<motor name="l_leg_akx_actuator" joint="l_leg_akx" gear="232"/>-->
 
-		<motor name="hip_flexion_r_actuator" joint="hip_flexion_r" gear="275"/>
-		<motor name="hip_adduction_r_actuator" joint="hip_adduction_r" gear="530"/>
-		<motor name="hip_rotation_r_actuator" joint="hip_rotation_r" gear="840"/>
-		<motor name="knee_angle_r_actuator" joint="knee_angle_r" gear="890"/>
-		<motor name="ankle_angle_r_actuator" joint="ankle_angle_r" gear="740"/>
-<!--		<motor name="r_leg_akx_actuator" joint="r_leg_akx" gear="360"/>-->
+		<motor name="hip_flexion_r_actuator" joint="hip_flexion_r" gear="400"/>
+		<motor name="hip_adduction_r_actuator" joint="hip_adduction_r" gear="404"/>
+		<motor name="hip_rotation_r_actuator" joint="hip_rotation_r" gear="210"/>
+		<motor name="knee_angle_r_actuator" joint="knee_angle_r" gear="648"/>
+		<motor name="ankle_angle_r_actuator" joint="ankle_angle_r" gear="400"/>
+<!--		<motor name="r_leg_akx_actuator" joint="r_leg_akx" gear="232"/>-->
 	</actuator>
 
 </mujoco>
