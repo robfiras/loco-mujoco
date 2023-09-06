@@ -150,7 +150,7 @@ class BaseRobotHumanoid(LocoEnv):
     @staticmethod
     def generate(env, path, task="walk", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True, disable_arms=True,
                  disable_back_joint=False, use_foot_forces=False, random_start=True, init_step_no=None,
-                 debug=False, hide_menu_on_startup=False):
+                 debug=False, hide_menu_on_startup=False, use_absorbing_states=True):
         """
         Returns an environment corresponding to the specified task.
 
@@ -177,6 +177,8 @@ class BaseRobotHumanoid(LocoEnv):
                 is taken to initialize the simulation.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
+            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
+                that episodes can terminate earlier.
 
         Returns:
             An MDP of the Robot.
@@ -193,13 +195,13 @@ class BaseRobotHumanoid(LocoEnv):
                       disable_arms=disable_arms, disable_back_joint=disable_back_joint,
                       use_foot_forces=use_foot_forces, reward_type="target_velocity",
                       reward_params=reward_params, random_env_reset=random_env_reset,
-                      hide_menu_on_startup=hide_menu_on_startup)
+                      hide_menu_on_startup=hide_menu_on_startup, use_absorbing_states=use_absorbing_states)
         elif task == "carry":
             mdp = env(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
                       disable_arms=disable_arms, disable_back_joint=disable_back_joint,
                       use_foot_forces=use_foot_forces, hold_weight=True, reward_type="target_velocity",
                       reward_params=reward_params, random_env_reset=random_env_reset,
-                      hide_menu_on_startup=hide_menu_on_startup)
+                      hide_menu_on_startup=hide_menu_on_startup, use_absorbing_states=use_absorbing_states)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

@@ -361,7 +361,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
     @staticmethod
     def generate(env, task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True,
                  use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None,
-                 debug=False, hide_menu_on_startup=False):
+                 debug=False, hide_menu_on_startup=False, use_absorbing_states=True):
         """
         Returns a Humanoid environment corresponding to the specified task.
 
@@ -382,7 +382,8 @@ class BaseHumanoid4Ages(BaseHumanoid):
             disable_arms (bool): If True, arms are disabled.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
-
+            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
+                that episodes can terminate earlier.
         Returns:
             An MDP of a set of Torque Humanoid of different sizes.
 
@@ -447,7 +448,8 @@ class BaseHumanoid4Ages(BaseHumanoid):
         mdp = env(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
                   disable_arms=disable_arms, use_foot_forces=use_foot_forces,
                   reward_type="multi_target_velocity", random_env_reset=random_env_reset,
-                  reward_params=reward_params, hide_menu_on_startup=hide_menu_on_startup)
+                  reward_params=reward_params, hide_menu_on_startup=hide_menu_on_startup,
+                  use_absorbing_states=use_absorbing_states)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

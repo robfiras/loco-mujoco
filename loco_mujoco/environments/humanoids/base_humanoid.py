@@ -220,7 +220,7 @@ class BaseHumanoid(LocoEnv):
     @staticmethod
     def generate(env, task="walk", dataset_type="real", gamma=0.99, horizon=1000,
                  use_box_feet=True, disable_arms=True, use_foot_forces=False, random_start=True,
-                 init_step_no=None, debug=False, hide_menu_on_startup=False):
+                 init_step_no=None, debug=False, hide_menu_on_startup=False, use_absorbing_states=True):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
@@ -243,6 +243,8 @@ class BaseHumanoid(LocoEnv):
                 is taken to initialize the simulation.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
             hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
+            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
+                that episodes can terminate earlier.
 
         Returns:
             An MDP of a Torque Humanoid.
@@ -282,7 +284,7 @@ class BaseHumanoid(LocoEnv):
                   random_start=random_start, init_step_no=init_step_no,
                   disable_arms=disable_arms, use_foot_forces=use_foot_forces,
                   reward_type="target_velocity", reward_params=reward_params,
-                  hide_menu_on_startup=hide_menu_on_startup)
+                  hide_menu_on_startup=hide_menu_on_startup, use_absorbing_states=use_absorbing_states)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
