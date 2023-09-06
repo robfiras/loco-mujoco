@@ -177,7 +177,7 @@ class Talos(BaseRobotHumanoid):
         """
 
         # find pelvis handle
-        pelvis = xml_handle.find("body", "torso_1_link")
+        pelvis = xml_handle.find("body", "torso_2_link")
         pelvis.add("body", name="weight")
         weight = xml_handle.find("body", "weight")
         weight.add("geom", type="box", size="0.1 0.25 0.1", pos="0.45 0 -0.20", group="0", rgba=color, mass=mass)

@@ -184,7 +184,7 @@ class Atlas(BaseRobotHumanoid):
         pelvis = xml_handle.find("body", "utorso")
         pelvis.add("body", name="weight")
         weight = xml_handle.find("body", "weight")
-        weight.add("geom", type="box", size="0.1 0.27 0.1", pos="0.72 0 -0.25", rgba=color, mass=mass)
+        weight.add("geom", type="box", size="0.1 0.27 0.1", pos="0.72 0 -0.25", group="0", rgba=color, mass=mass)
 
         # modify the arm orientation
         r_clav = xml_handle.find("body", "r_clav")
