@@ -26,14 +26,14 @@ class UnitreeA1(LocoEnv):
     valid_task_confs = ValidTaskConf(tasks=["simple", "hard"],
                                      data_types=["real"])
 
-    def __init__(self, use_torque_ctrl=True, setup_random_rot=False, tmp_dir_name=None,
+    def __init__(self, action_mode="torque", setup_random_rot=False, tmp_dir_name=None,
                  default_target_velocity=0.5, camera_params=None, **kwargs):
         """
         Constructor.
 
         Args:
-            use_torque_ctrl (bool): If True, the Unitree uses torque control, else position control;
-            setup_random_rot (bool): If True, the robot is initialized with a random rotation;
+            action_mode (str): Either "torque", "position", or "position_difference". Defines the action controller.
+            setup_random_rot (bool): If True, the robot is initialized with a random rotation.
             tmp_dir_name (str): Specifies a name of a directory to which temporary files are
                 written, if created. By default, temporary directory names are created automatically.
             default_target_velocity (float): Default target velocity set in the goal, when no trajectory
@@ -43,14 +43,14 @@ class UnitreeA1(LocoEnv):
         """
 
         # Choose xml file (either for torque or position control)
-        if use_torque_ctrl:
+        if action_mode == "torque":
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_torque.xml").as_posix()
         else:
             xml_path = (Path(__file__).resolve().parent.parent / "data" / "quadrupeds" /
                         "unitree_a1_position.xml").as_posix()
 
-        self._use_torque_ctrl = use_torque_ctrl
+        self._action_mode = action_mode
         action_spec = self._get_action_specification()
 
         observation_spec = self._get_observation_specification()
@@ -200,13 +200,17 @@ class UnitreeA1(LocoEnv):
             Unnormalized action (np.array) that is send to the environment;
 
         """
-        if self._use_torque_ctrl:
+        if self._action_mode == "torque":
             unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
-        else:
+        elif self._action_mode == "position":
+            unnormalized_action =  ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
+        elif self._action_mode == "position_difference":
             q_pos = self._data.qpos[6:]
             normalized_qpos = (q_pos - self.norm_act_mean) / self.norm_act_delta
             new_normalized_qpos = normalized_qpos + action * 0.3
             unnormalized_action = ((new_normalized_qpos.copy() * self.norm_act_delta) + self.norm_act_mean)
+        else:
+            raise ValueError(f"Unknown aciton mode: {self._action_mode}")
 
         return unnormalized_action
 
@@ -340,9 +344,9 @@ class UnitreeA1(LocoEnv):
             elif trunk_height_condition:
                 error_msg += "trunk_height_condition violated. %f \n" % trunk_height
 
-            return trunk_condition, error_msg
+            return trunk_condition and False, error_msg
         else:
-            return trunk_condition
+            return trunk_condition and False
 
     def _get_relevant_idx_rotation(self):
         """
@@ -427,7 +431,7 @@ class UnitreeA1(LocoEnv):
 
     @staticmethod
     def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False,
-                 use_torque_ctrl=True, random_start=True, init_step_no=None, debug=False, hide_menu_on_startup=False):
+                 action_mode="torque", random_start=True, init_step_no=None, debug=False, hide_menu_on_startup=False):
         """
         Returns a Unitree environment corresponding to the specified task.
 
@@ -441,7 +445,7 @@ class UnitreeA1(LocoEnv):
             gamma (float): Discounting parameter of the environment.
             horizon (int): Horizon of the environment.
             use_foot_forces (bool): If True, foot forces are added to the observation space.
-            use_torque_ctrl (bool): If True, torque control is used, else position control is used.
+            action_mode (str): Either "torque", "position", or "position_difference". Defines the action controller.
             random_start (bool): If True, a random sample from the trajectories
                 is chosen at the beginning of each time step and initializes the
                 simulation according to that.
@@ -470,7 +474,7 @@ class UnitreeA1(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, use_torque_ctrl=use_torque_ctrl, setup_random_rot=False,
+                            init_step_no=init_step_no, action_mode=action_mode, setup_random_rot=False,
                             reward_type="velocity_vector", hide_menu_on_startup=hide_menu_on_startup)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
         elif task == "hard":
@@ -484,7 +488,7 @@ class UnitreeA1(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, use_torque_ctrl=use_torque_ctrl, setup_random_rot=False,
+                            init_step_no=init_step_no, action_mode=action_mode, setup_random_rot=False,
                             reward_type="velocity_vector", hide_menu_on_startup=hide_menu_on_startup)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
 
