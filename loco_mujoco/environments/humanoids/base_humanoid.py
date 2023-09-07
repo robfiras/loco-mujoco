@@ -187,7 +187,7 @@ class BaseHumanoid(LocoEnv):
 
             return pelvis_condition or lumbar_condition, error_msg
         else:
-            return (pelvis_condition or lumbar_condition) and False
+            return (pelvis_condition or lumbar_condition)
 
     def _get_grf_size(self):
         """
