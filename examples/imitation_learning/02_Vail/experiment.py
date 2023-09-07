@@ -17,7 +17,7 @@ from mushroom_rl.core.logger.logger import Logger
 
 from imitation_lib.imitation import VAIL_TRPO
 from imitation_lib.utils import FullyConnectedNetwork, NormcInitializer, Standardizer, VariationalNet, VDBLoss
-from imitation_lib.utils import BestAgentSaver, prepare_expert_data
+from imitation_lib.utils import BestAgentSaver
 
 from loco_mujoco import LocoEnv
 
@@ -111,9 +111,6 @@ def experiment(env: str = None,
                n_steps_per_fit: int = 1024,
                n_eval_episodes: int = 50,
                n_epochs_save: int = 500,
-               expert_data_path: str = None,
-               scaling: float = 1.0,
-               horizon: int = 1000,
                gamma: float = 0.99,
                discr_only_state: bool = True,
                info_constraint: float = 0.1,
@@ -156,7 +153,6 @@ def experiment(env: str = None,
 
     core = Core(agent, mdp)
 
-    # gail train loop
     for epoch in range(n_epochs):
         with catchtime() as t:
             core.learn(n_steps=n_steps_per_epoch, n_steps_per_fit=n_steps_per_fit, quiet=True, render=False)
