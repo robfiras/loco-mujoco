@@ -148,10 +148,8 @@ class BaseRobotHumanoid(LocoEnv):
         return color
 
     @staticmethod
-    def generate(env, path, task="walk", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True, disable_arms=True,
-                 disable_back_joint=False, use_foot_forces=False, random_start=True, init_step_no=None,
-                 debug=False, hide_menu_on_startup=False, use_absorbing_states=True,
-                 clip_trajectory_to_joint_ranges=False):
+    def generate(env, path, task="walk", dataset_type="real", debug=False,
+                 clip_trajectory_to_joint_ranges=False, **kwargs):
         """
         Returns an environment corresponding to the specified task.
 
@@ -164,22 +162,7 @@ class BaseRobotHumanoid(LocoEnv):
                 reference trajectory. This data does not perfectly match the kinematics
                 and dynamics of this environment, hence it is more challenging. "perfect" uses
                 a perfect dataset.
-            gamma (float): Discounting parameter of the environment.
-            horizon (int): Horizon of the environment.
-            random_env_reset (bool):  If True, a random environment is chosen after each episode. If False, it is
-                sequentially iterated through the environment/model list.
-            disable_arms (bool): If True, arms are disabled.
-            disable_back_joint (bool): If True, the back joint is disabled.
-            use_foot_forces (bool): If True, foot forces are added to the observation space.
-            random_start (bool): If True, a random sample from the trajectories
-                is chosen at the beginning of each time step and initializes the
-                simulation according to that.
-            init_step_no (int): If set, the respective sample from the trajectories
-                is taken to initialize the simulation.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
-            hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
-            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
-                that episodes can terminate earlier.
             clip_trajectory_to_joint_ranges (bool): If True, trajectory is clipped to joint ranges.
 
         Returns:
@@ -193,17 +176,9 @@ class BaseRobotHumanoid(LocoEnv):
 
         # Generate the MDP
         if task == "walk":
-            mdp = env(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
-                      disable_arms=disable_arms, disable_back_joint=disable_back_joint,
-                      use_foot_forces=use_foot_forces, reward_type="target_velocity",
-                      reward_params=reward_params, random_env_reset=random_env_reset,
-                      hide_menu_on_startup=hide_menu_on_startup, use_absorbing_states=use_absorbing_states)
+            mdp = env(reward_type="target_velocity", reward_params=reward_params, **kwargs)
         elif task == "carry":
-            mdp = env(gamma=gamma, horizon=horizon, random_start=random_start, init_step_no=init_step_no,
-                      disable_arms=disable_arms, disable_back_joint=disable_back_joint,
-                      use_foot_forces=use_foot_forces, hold_weight=True, reward_type="target_velocity",
-                      reward_params=reward_params, random_env_reset=random_env_reset,
-                      hide_menu_on_startup=hide_menu_on_startup, use_absorbing_states=use_absorbing_states)
+            mdp = env(hold_weight=True, reward_type="target_velocity", reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

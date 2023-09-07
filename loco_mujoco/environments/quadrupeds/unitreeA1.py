@@ -430,9 +430,7 @@ class UnitreeA1(LocoEnv):
         return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
 
     @staticmethod
-    def generate(task="simple", dataset_type="real", gamma=0.99, horizon=1000, use_foot_forces=False,
-                 action_mode="torque", random_start=True, init_step_no=None, debug=False,
-                 hide_menu_on_startup=False, use_absorbing_states=True):
+    def generate(task="simple", dataset_type="real", debug=False, **kwargs):
         """
         Returns a Unitree environment corresponding to the specified task.
 
@@ -443,19 +441,7 @@ class UnitreeA1(LocoEnv):
                 reference trajectory. This data does not perfectly match the kinematics
                 and dynamics of this environment, hence it is more challenging. "perfect" uses
                 a perfect dataset.
-            gamma (float): Discounting parameter of the environment.
-            horizon (int): Horizon of the environment.
-            use_foot_forces (bool): If True, foot forces are added to the observation space.
-            action_mode (str): Either "torque", "position", or "position_difference". Defines the action controller.
-            random_start (bool): If True, a random sample from the trajectories
-                is chosen at the beginning of each time step and initializes the
-                simulation according to that.
-            init_step_no (int): If set, the respective sample from the trajectories
-                is taken to initialize the simulation.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
-            hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
-            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
-                that episodes can terminate earlier.
 
         Returns:
             An MDP of the Unitree A1 Robot.
@@ -476,10 +462,7 @@ class UnitreeA1(LocoEnv):
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
-            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, action_mode=action_mode, setup_random_rot=False,
-                            reward_type="velocity_vector", hide_menu_on_startup=hide_menu_on_startup,
-                            use_absorbing_states=use_absorbing_states)
+            mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
         elif task == "hard":
             path = "datasets/quadrupeds/walk_8_dir.npz"
@@ -491,10 +474,7 @@ class UnitreeA1(LocoEnv):
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
-            mdp = UnitreeA1(gamma=gamma, horizon=horizon, use_foot_forces=use_foot_forces, random_start=random_start,
-                            init_step_no=init_step_no, action_mode=action_mode, setup_random_rot=False,
-                            reward_type="velocity_vector", hide_menu_on_startup=hide_menu_on_startup,
-                            use_absorbing_states=use_absorbing_states)
+            mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
 
         # Load the trajectory

@@ -22,7 +22,8 @@ class BaseHumanoid(LocoEnv):
     valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
                                      data_types=["real"])
 
-    def __init__(self, use_muscles=False, use_box_feet=False, disable_arms=False, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
+    def __init__(self, use_muscles=False, use_box_feet=True, disable_arms=True,
+                 tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
         """
         Constructor.
 
@@ -186,7 +187,7 @@ class BaseHumanoid(LocoEnv):
 
             return pelvis_condition or lumbar_condition, error_msg
         else:
-            return pelvis_condition or lumbar_condition
+            return (pelvis_condition or lumbar_condition) and False
 
     def _get_grf_size(self):
         """
@@ -218,9 +219,7 @@ class BaseHumanoid(LocoEnv):
         return grf
 
     @staticmethod
-    def generate(env, task="walk", dataset_type="real", gamma=0.99, horizon=1000,
-                 use_box_feet=True, disable_arms=True, use_foot_forces=False, random_start=True,
-                 init_step_no=None, debug=False, hide_menu_on_startup=False, use_absorbing_states=True):
+    def generate(env, task="walk", dataset_type="real", debug=False, **kwargs):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
@@ -231,20 +230,7 @@ class BaseHumanoid(LocoEnv):
                 reference trajectory. This data does not perfectly match the kinematics
                 and dynamics of this environment, hence it is more challenging. "perfect" uses
                 a perfect dataset.
-            gamma (float): Discounting parameter of the environment.
-            horizon (int): Horizon of the environment.
-            use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
-            disable_arms (bool): If True, arms are disabled.
-            use_foot_forces (bool): If True, foot forces are added to the observation space.
-            random_start (bool): If True, a random sample from the trajectories
-                is chosen at the beginning of each time step and initializes the
-                simulation according to that.
-            init_step_no (int): If set, the respective sample from the trajectories
-                is taken to initialize the simulation.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
-            hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
-            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
-                that episodes can terminate earlier.
 
         Returns:
             An MDP of a Torque Humanoid.
@@ -280,11 +266,7 @@ class BaseHumanoid(LocoEnv):
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = env(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet,
-                  random_start=random_start, init_step_no=init_step_no,
-                  disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                  reward_type="target_velocity", reward_params=reward_params,
-                  hide_menu_on_startup=hide_menu_on_startup, use_absorbing_states=use_absorbing_states)
+        mdp = env(reward_type="target_velocity", reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

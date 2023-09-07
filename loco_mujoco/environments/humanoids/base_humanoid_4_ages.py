@@ -30,7 +30,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
                                      data_types=["real"])
 
     def __init__(self, scaling=None, scaling_trajectory_map=None, use_muscles=False,
-                 use_box_feet=False, disable_arms=False, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
+                 use_box_feet=True, disable_arms=True, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
         """
         Constructor.
 
@@ -351,6 +351,11 @@ class BaseHumanoid4Ages(BaseHumanoid):
                 for s in h.site:
                     s.pos *= body_scaling
 
+            actuator_handle = xml_handle.find_all("actuator")
+            for h in actuator_handle:
+                if "mot" not in h.name:
+                    h.force *= body_scaling ** 2
+
         if not use_muscles:
             actuator_handle = xml_handle.find_all("actuator")
             for h in actuator_handle:
@@ -359,31 +364,21 @@ class BaseHumanoid4Ages(BaseHumanoid):
         return xml_handle
 
     @staticmethod
-    def generate(env, task="walk", mode="all", dataset_type="real", gamma=0.99, horizon=1000, random_env_reset=True,
-                 use_box_feet=True, disable_arms=True, use_foot_forces=False, n_models=None,
-                 debug=False, hide_menu_on_startup=False, use_absorbing_states=True):
+    def generate(env, task="walk", mode="all", dataset_type="real", n_models=None, debug=False, **kwargs):
         """
         Returns a Humanoid environment corresponding to the specified task.
 
         Args:
             env (class): Humanoid class, either HumanoidTorque4Ages or HumanoidMuscle4Ages.
             task (str): Main task to solve. Either "walk" or "run".
+            mode (str): Mode of the environment. Either "all" (sample between all humanoid envs), "1"
+                (smallest humanoid), "2" (second smallest humanoid), "3" (teenage humanoid), and "4" (adult humanoid).
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
                 reference trajectory. This data does not perfectly match the kinematics
                 and dynamics of this environment, hence it is more challenging. "perfect" uses
                 a perfect dataset.
-            gamma (float): Discounting parameter of the environment.
-            horizon (int): Horizon of the environment.
-            use_muscles (bool): If True, muscles actuators are used, else one torque acturator per
-                joint is used.
-            random_env_reset (bool):  If True, a random environment is chosen after each episode. If False, it is
-                sequentially iterated through the environment/model list.
-            use_box_feet (bool): If True, a simplified foot model is used consisting of a single box.
-            disable_arms (bool): If True, arms are disabled.
-            use_foot_forces (bool): If True, foot forces are added to the observation space.
-            hide_menu_on_startup (bool): If True, the menu overlay is hidden on startup.
-            use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
-                that episodes can terminate earlier.
+            debug (bool): If True, the smaller test datasets are used for debugging purposes.
+
         Returns:
             An MDP of a set of Torque Humanoid of different sizes.
 
@@ -392,6 +387,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
         check_validity_task_mode_dataset(BaseHumanoid4Ages.__name__, task, mode, dataset_type,
                                          *BaseHumanoid4Ages.valid_task_confs.get_all())
 
+        # todo: check if n_models is still needed
         if mode == "all":
             dataset_suffix = "_all.npz"
             scaling = None
@@ -445,11 +441,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = env(gamma=gamma, horizon=horizon, use_box_feet=use_box_feet, scaling=scaling,
-                  disable_arms=disable_arms, use_foot_forces=use_foot_forces,
-                  reward_type="multi_target_velocity", random_env_reset=random_env_reset,
-                  reward_params=reward_params, hide_menu_on_startup=hide_menu_on_startup,
-                  use_absorbing_states=use_absorbing_states)
+        mdp = env(scaling=scaling, reward_type="multi_target_velocity", reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

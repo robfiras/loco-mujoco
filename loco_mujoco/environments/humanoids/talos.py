@@ -18,7 +18,7 @@ class Talos(BaseRobotHumanoid):
 
     """
 
-    def __init__(self, disable_arms=False, disable_back_joint=False, hold_weight=False,
+    def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
                  weight_mass=None, tmp_dir_name=None, **kwargs):
         """
         Constructor.
