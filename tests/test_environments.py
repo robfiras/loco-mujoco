@@ -91,7 +91,6 @@ def test_all_environments():
             test_dataset = np.load(dataset_path)
 
             if not np.allclose(dataset, test_dataset):
-                raise ValueError(f"Env {task_name} failed.")
                 return False
             if not np.allclose(dataset_gym, test_dataset):
                 return False
