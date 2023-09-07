@@ -73,8 +73,8 @@ def test_all_environments():
 
         np.random.seed(0)
 
-        # if "Talos" not in task_name and "Muscle" not in task_name and "Unitree" not in task_name:
-        if "Atlas" in task_name:
+        if "Talos" not in task_name and "Muscle" not in task_name and "Unitree" not in task_name:
+
             print(f"Testing {task_name}...")
             # --- native environment ---
             task_env = LocoEnv.make(task_name, debug=True)
@@ -88,16 +88,13 @@ def test_all_environments():
             file_name = task_name + ".npy"
             dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "tests" / path / file_name
 
+            test_dataset = np.load(dataset_path)
 
-            np.save(dataset_path, dataset)
-
-            # test_dataset = np.load(dataset_path)
-            #
-            # if not np.allclose(dataset, test_dataset):
-            #     raise ValueError(f"Env {task_name} failed.")
-            #     return False
-            # if not np.allclose(dataset_gym, test_dataset):
-            #     return False
+            if not np.allclose(dataset, test_dataset):
+                raise ValueError(f"Env {task_name} failed.")
+                return False
+            if not np.allclose(dataset_gym, test_dataset):
+                return False
 
     return True
 
