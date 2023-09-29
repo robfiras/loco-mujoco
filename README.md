@@ -1,5 +1,9 @@
 # LocoMuJoCo Benchmark
 ## Installation
+
+Install the latest version of [Mushroom-RL](https://github.com/MushroomRL/mushroom-rl) from the dev branch.
+
+
 To install this repository, clone it and then run:
 
 ```bash
