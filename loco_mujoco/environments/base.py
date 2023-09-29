@@ -1,4 +1,7 @@
 import os
+
+import numpy as np
+import yaml
 import warnings
 from copy import deepcopy
 from tempfile import mkdtemp
@@ -28,7 +31,7 @@ class LocoEnv(MultiMuJoCo):
     def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
                  init_step_no=None, timestep=0.001, use_foot_forces=False, default_camera_mode="follow",
-                 use_absorbing_states=True, **viewer_params):
+                 use_absorbing_states=True, domain_randomization_config=None, **viewer_params):
         """
         Constructor.
 
@@ -72,6 +75,7 @@ class LocoEnv(MultiMuJoCo):
                 "follow", and "top_static".
             use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
                 that episodes can terminate earlier.
+            domain_randomization_config (str): Path to the domain/dynamics randomization config file.
 
         """
 
@@ -89,6 +93,12 @@ class LocoEnv(MultiMuJoCo):
 
         if "geom_group_visualization_on_startup" not in viewer_params.keys():
             viewer_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
+
+        # apply domain randomization
+        if domain_randomization_config is not None:
+            xml_handles = [mjcf.from_path(path, escape_separators=True) for path in xml_path]
+            xml_handles = [self._apply_domain_randomization(h, domain_randomization_config) for h in xml_handles]
+            xml_path = [self._save_xml_handle(h, None) for h in xml_handles]
 
         super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
                          n_substeps=n_substeps, n_intermediate_steps=n_intermediate_steps, timestep=timestep,
@@ -586,15 +596,6 @@ class LocoEnv(MultiMuJoCo):
 
         return grf
 
-    @staticmethod
-    def _get_grf_size():
-        """
-        Returns the size of the ground force vector.
-
-        """
-
-        return 12
-
     def _get_reward_function(self, reward_type, reward_params):
         """
         Constructs a reward function.
@@ -734,6 +735,63 @@ class LocoEnv(MultiMuJoCo):
 
         pass
 
+    @staticmethod
+    def _apply_domain_randomization(xml_handle, domain_randomization_config):
+        """
+        Applies domain/dynamics randomization to the xml_handle based on the provided
+        configuration file.
+
+        Args:
+            xml_handle: Handle to Mujoco XML.
+            domain_randomization_config (str): Path to the configuration file for domain randomization.
+
+        Returns:
+            Modified Mujoco XML Handle.
+
+        """
+
+        if domain_randomization_config is not None:
+            with open(domain_randomization_config, 'r') as file:
+                config = yaml.safe_load(file)
+            # apply domain randomization on joints
+            config_joints = config["Joints"]
+            for joint_name, conf in config_joints.items():
+                jh = xml_handle.find("joint", joint_name)
+                if jh is not None:
+                    for param_name, param in conf.items():
+                        if param["uniform_range"] is None:
+                            if param_name == "damping":
+                                jh.damping = np.clip(np.random.normal(jh.damping if jh.damping is not None else 0.0,
+                                                                      param["sigma"]), 0.0, np.Inf)
+                            elif param_name == "frictionloss":
+                                jh.frictionloss = np.clip(np.random.normal(jh.frictionloss
+                                                                           if jh.frictionloss is not None else 0.0,
+                                                                           param["sigma"]), 0.0, np.Inf)
+                            elif param_name == "armature":
+                                jh.armature = np.clip(np.random.normal(jh.armature if jh.armature is not None else 0.0,
+                                                                       param["sigma"]), 0.0, np.Inf)
+                            elif param_name == "stiffness":
+                                jh.stiffness = np.clip(np.random.normal(jh.stiffness
+                                                                        if jh.stiffness is not None else 0.0,
+                                                                        param["sigma"]), 0.0, np.Inf)
+                            else:
+                                raise ValueError(f"Parameter {param_name} currently nor supported "
+                                                 f"for domain randomizaiton.")
+                        else:
+                            low, high = param["uniform_range"]
+                            if param_name == "damping":
+                                jh.damping = np.random.uniform(low, high)
+                            elif param_name == "frictionloss":
+                                jh.frictionloss = np.random.normal(low, high)
+                            elif param_name == "armature":
+                                jh.armature = np.random.normal(low, high)
+                            elif param_name == "stiffness":
+                                jh.stiffness = np.random.normal(low, high)
+                            else:
+                                raise ValueError(f"Parameter {param_name} currently nor supported "
+                                                 f"for domain randomization.")
+        return xml_handle
+
     @classmethod
     def register(cls):
         """
@@ -747,6 +805,15 @@ class LocoEnv(MultiMuJoCo):
 
         if env_name not in LocoEnv._registered_envs:
             LocoEnv._registered_envs[env_name] = cls
+
+    @staticmethod
+    def _get_grf_size():
+        """
+        Returns the size of the ground force vector.
+
+        """
+
+        return 12
 
     @staticmethod
     def list_registered_loco_mujoco():

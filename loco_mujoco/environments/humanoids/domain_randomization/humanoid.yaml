@@ -1,0 +1,483 @@
+Joints:
+  # set either a sigma for sampling from a normal distirbution or set a delta-range for uniform sampling.
+  q_pelvis_tx:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pelvis_tz:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pelvis_ty:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pelvis_tilt:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pelvis_list:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pelvis_rotation:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_hip_flexion_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_hip_adduction_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_hip_rotation_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_knee_angle_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_ankle_angle_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_subtalar_angle_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_mtp_angle_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_hip_flexion_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_hip_adduction_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_hip_rotation_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_knee_angle_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_ankle_angle_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_subtalar_angle_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_mtp_angle_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_lumbar_extension:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_lumbar_bending:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_lumbar_rotation:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_arm_flex_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_arm_add_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_arm_rot_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_elbow_flex_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pro_sup_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_wrist_flex_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_wrist_dev_r:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_arm_flex_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_arm_add_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_arm_rot_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_elbow_flex_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_pro_sup_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_wrist_flex_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null
+  q_wrist_dev_l:
+      damping:
+        sigma: 0.0
+        uniform_range: null
+      stiffness:
+        sigma: 0.0
+        uniform_range: null
+      armature:
+        sigma: 0.0
+        uniform_range: null
+      frictionloss:
+        sigma: 0.0
+        uniform_range: null

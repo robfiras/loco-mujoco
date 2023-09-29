@@ -23,6 +23,9 @@ def experiment(seed=0):
         if "4Ages" in env or "carry" in env:
             env_params["random_env_reset"] = False
 
+        if "Humanoid" in env:
+            env_params["use_box_feet"] = False
+
         mdp = LocoEnv.make(env, hide_menu_on_startup=True, **env_params)
 
         save_path_video = "./record_all"
