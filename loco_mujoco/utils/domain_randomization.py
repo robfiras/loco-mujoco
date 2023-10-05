@@ -7,8 +7,23 @@ from multiprocessing import Queue, Pool
 
 
 class DomainRandomizationHandler:
+    """
+    Class for handling domain randomization.
+
+    """
 
     def __init__(self, xml_paths, domain_rand_conf_path, parallel=True, N_worker_per_xml=4):
+        """
+        Constructor.
+
+        Args:
+            xml_paths (str): Path to the xml file.
+            domain_rand_conf_path (str): Path to the domain randomization config file.
+            parallel (bool): If True, domain randimzation will be done in parallel to speed up the simulation runtime.
+            N_worker_per_xml (int): Number of workers for parallel domain randomization.
+
+        """
+
         assert N_worker_per_xml >= 1 if parallel else True
         self._xml_handles = [mjcf.from_path(f) for f in xml_paths]
         self._domain_rand_conf_path = domain_rand_conf_path
@@ -26,6 +41,8 @@ class DomainRandomizationHandler:
                     rq.put("get")
 
     def get_randomized_model(self, model_id):
+        """ Returns a randomized model based on the model-id. """
+
         if self.parallel:
             model = self._send_queues[model_id].get()
             self._recv_queues[model_id].put("get")
@@ -112,7 +129,7 @@ def set_joint_conf(conf, jh):
             try:
                 low, high = param["uniform_range"]
             except ValueError as e:
-                raise Exception(f"The parameter unform_range for {joint_name} is wrongly specified "
+                raise Exception(f"The parameter uniform_range for {joint_name} is wrongly specified "
                                 f"in the domain_randomization_config. The format is:\n"
                                 "uniform_range: [low, high]\n") from e
             if param_name == "damping":
@@ -130,6 +147,18 @@ def set_joint_conf(conf, jh):
     return jh
 
 def build_MjModel_from_xml_handle(xml_handle, path_domain_rand_conf):
+    """
+    Function that takes in an xml_handle and a path to the domain randomization file and returns a randomizaed model.
+
+    Args:
+        xml_handle: Mujoco xml handle.
+        path_domain_rand_conf (str): Path to the domain randomization file.
+
+    Returns:
+        Randomized model.
+
+    """
+
     xml_string = xml_handle.to_xml_string()
     xml_assets = xml_handle.get_assets()
     new_xml_handle = mjcf.from_xml_string(xml_string, assets=xml_assets, escape_separators=True)
@@ -138,6 +167,18 @@ def build_MjModel_from_xml_handle(xml_handle, path_domain_rand_conf):
     return model
 
 def build_MjModel_from_xml_handle_job(xml_handle, path_domain_rand_conf, sq, rq):
+    """
+    Worker function for parallel domain randomization. It takes in an xml_handle and a path to the domain
+    randomization file and puts a randomizaed model in the respective queue.
+
+    Args:
+        xml_handle: Mujoco xml handle.
+        path_domain_rand_conf (str): Path to the domain randomization file.
+        sq (Queue): Send queue used to send the model to the main tread.
+        rq (Queue): Receive queue used to receive the trigger to sample another randomized model.
+
+    """
+
     while True:
         mess = rq.get()
         if mess == "get":
