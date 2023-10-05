@@ -1,7 +1,5 @@
 import os
 
-import numpy as np
-import yaml
 import warnings
 from copy import deepcopy
 from tempfile import mkdtemp
@@ -19,7 +17,7 @@ from mushroom_rl.utils.record import VideoRecorder
 
 from loco_mujoco.utils import Trajectory
 from loco_mujoco.utils import NoReward, CustomReward,\
-    TargetVelocityReward, PosReward
+    TargetVelocityReward, PosReward, DomainRandomizationHandler
 
 
 class LocoEnv(MultiMuJoCo):
@@ -31,7 +29,8 @@ class LocoEnv(MultiMuJoCo):
     def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
                  init_step_no=None, timestep=0.001, use_foot_forces=False, default_camera_mode="follow",
-                 use_absorbing_states=True, domain_randomization_config=None, **viewer_params):
+                 use_absorbing_states=True, domain_randomization_config=None, parallel_dom_rand=True,
+                 N_worker_per_xml_dom_rand=4, **viewer_params):
         """
         Constructor.
 
@@ -76,6 +75,10 @@ class LocoEnv(MultiMuJoCo):
             use_absorbing_states (bool): If True, absorbing states are defined for each environment. This means
                 that episodes can terminate earlier.
             domain_randomization_config (str): Path to the domain/dynamics randomization config file.
+            parallel_dom_rand (bool): If True and a domain_randomization_config file is passed, the domain
+                randomization will run in parallel to speed up simulation run-time.
+            N_worker_per_xml_dom_rand (int): Number of workers used per xml-file for parallel domain randomization.
+                If parallel is set to True, this number has to be greater 1.
 
         """
 
@@ -94,11 +97,11 @@ class LocoEnv(MultiMuJoCo):
         if "geom_group_visualization_on_startup" not in viewer_params.keys():
             viewer_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
 
-        # apply domain randomization
         if domain_randomization_config is not None:
-            xml_handles = [mjcf.from_path(path, escape_separators=True) for path in xml_path]
-            xml_handles = [self._apply_domain_randomization(h, domain_randomization_config) for h in xml_handles]
-            xml_path = [self._save_xml_handle(h, None) for h in xml_handles]
+            self._domain_rand = DomainRandomizationHandler(xml_path, domain_randomization_config, parallel_dom_rand,
+                                                           N_worker_per_xml_dom_rand)
+        else:
+            self._domain_rand = None
 
         super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
                          n_substeps=n_substeps, n_intermediate_steps=n_intermediate_steps, timestep=timestep,
@@ -165,6 +168,32 @@ class LocoEnv(MultiMuJoCo):
         """
 
         return self._reward_function(state, action, next_state, absorbing)
+
+    def reset(self, obs=None):
+
+        mujoco.mj_resetData(self._model, self._data)
+
+        if self._domain_rand is not None:
+            self._models[self._current_model_idx] = self._domain_rand.get_randomized_model(self._current_model_idx)
+            self._datas[self._current_model_idx] = mujoco.MjData(self._models[self._current_model_idx])
+
+        if self._random_env_reset:
+            self._current_model_idx = np.random.randint(0, len(self._models))
+        else:
+            self._current_model_idx = self._current_model_idx + 1 \
+                if self._current_model_idx < len(self._models) - 1 else 0
+
+        self._model = self._models[self._current_model_idx]
+        self._data = self._datas[self._current_model_idx]
+        self.obs_helper = self.obs_helpers[self._current_model_idx]
+
+        self.setup(obs)
+
+        if self._viewer is not None and self.more_than_one_env:
+            self._viewer.load_new_model(self._model)
+
+        self._obs = self._create_observation(self.obs_helper._build_obs(self._data))
+        return self._modify_observation(self._obs)
 
     def setup(self, obs):
         """
@@ -734,63 +763,6 @@ class LocoEnv(MultiMuJoCo):
         """
 
         pass
-
-    @staticmethod
-    def _apply_domain_randomization(xml_handle, domain_randomization_config):
-        """
-        Applies domain/dynamics randomization to the xml_handle based on the provided
-        configuration file.
-
-        Args:
-            xml_handle: Handle to Mujoco XML.
-            domain_randomization_config (str): Path to the configuration file for domain randomization.
-
-        Returns:
-            Modified Mujoco XML Handle.
-
-        """
-
-        if domain_randomization_config is not None:
-            with open(domain_randomization_config, 'r') as file:
-                config = yaml.safe_load(file)
-            # apply domain randomization on joints
-            config_joints = config["Joints"]
-            for joint_name, conf in config_joints.items():
-                jh = xml_handle.find("joint", joint_name)
-                if jh is not None:
-                    for param_name, param in conf.items():
-                        if param["uniform_range"] is None:
-                            if param_name == "damping":
-                                jh.damping = np.clip(np.random.normal(jh.damping if jh.damping is not None else 0.0,
-                                                                      param["sigma"]), 0.0, np.Inf)
-                            elif param_name == "frictionloss":
-                                jh.frictionloss = np.clip(np.random.normal(jh.frictionloss
-                                                                           if jh.frictionloss is not None else 0.0,
-                                                                           param["sigma"]), 0.0, np.Inf)
-                            elif param_name == "armature":
-                                jh.armature = np.clip(np.random.normal(jh.armature if jh.armature is not None else 0.0,
-                                                                       param["sigma"]), 0.0, np.Inf)
-                            elif param_name == "stiffness":
-                                jh.stiffness = np.clip(np.random.normal(jh.stiffness
-                                                                        if jh.stiffness is not None else 0.0,
-                                                                        param["sigma"]), 0.0, np.Inf)
-                            else:
-                                raise ValueError(f"Parameter {param_name} currently nor supported "
-                                                 f"for domain randomizaiton.")
-                        else:
-                            low, high = param["uniform_range"]
-                            if param_name == "damping":
-                                jh.damping = np.random.uniform(low, high)
-                            elif param_name == "frictionloss":
-                                jh.frictionloss = np.random.normal(low, high)
-                            elif param_name == "armature":
-                                jh.armature = np.random.normal(low, high)
-                            elif param_name == "stiffness":
-                                jh.stiffness = np.random.normal(low, high)
-                            else:
-                                raise ValueError(f"Parameter {param_name} currently nor supported "
-                                                 f"for domain randomization.")
-        return xml_handle
 
     @classmethod
     def register(cls):
