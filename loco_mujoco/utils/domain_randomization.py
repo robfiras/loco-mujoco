@@ -129,7 +129,7 @@ def set_joint_conf(conf, jh):
             try:
                 low, high = param["uniform_range"]
             except ValueError as e:
-                raise Exception(f"The parameter uniform_range for {joint_name} is wrongly specified "
+                raise Exception(f"The parameter uniform_range for {jh.name} is wrongly specified "
                                 f"in the domain_randomization_config. The format is:\n"
                                 "uniform_range: [low, high]\n") from e
             if param_name == "damping":
