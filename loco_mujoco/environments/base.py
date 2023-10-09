@@ -466,8 +466,6 @@ class LocoEnv(MultiMuJoCo):
                     self.reset()
                     sample = self.trajectories.get_current_sample()
                     curr_qpos = sample[0:len_qpos]
-                else:
-                    curr_qpos = sample[0:len_qpos]
 
                 obs = self._create_observation(np.concatenate(sample))
                 if self._has_fallen(obs):
