@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 import time
 
-env = LocoEnv.make("HumanoidTorque", domain_randomization_config="./humanoid.yaml")
+env = LocoEnv.make("HumanoidTorque", domain_randomization_config="./domain_randomization_humanoid.yaml")
 
 action_dim = env.info.action_space.shape[0]
 

@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("Talos.walk", domain_randomization_config="./talos.yaml")
+env = LocoEnv.make("Talos.walk", domain_randomization_config="./domain_randomization_talos.yaml")
 
 action_dim = env.info.action_space.shape[0]
 

@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("HumanoidMuscle", disable_arms=False, use_box_feet=False, domain_randomization_config="./humanoid.yaml")
+env = LocoEnv.make("HumanoidMuscle", disable_arms=False, use_box_feet=False, domain_randomization_config="./domain_randomization_humanoid.yaml")
 
 action_dim = env.info.action_space.shape[0]
 

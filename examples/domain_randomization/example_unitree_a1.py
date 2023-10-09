@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("UnitreeA1.simple", domain_randomization_config="./unitree_a1.yaml")
+env = LocoEnv.make("UnitreeA1.simple", domain_randomization_config="./domain_randomization_unitree_a1.yaml")
 
 action_dim = env.info.action_space.shape[0]
 

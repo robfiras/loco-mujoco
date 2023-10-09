@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("Atlas", domain_randomization_config="./atlas.yaml")
+env = LocoEnv.make("Atlas", domain_randomization_config="./domain_randomization_atlas.yaml")
 
 action_dim = env.info.action_space.shape[0]
 
