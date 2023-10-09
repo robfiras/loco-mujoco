@@ -64,7 +64,6 @@ class UnitreeA1(LocoEnv):
         # append observation_spec with the direction arrow and add it to the xml file
         observation_spec.append(("dir_arrow", "dir_arrow", ObservationType.SITE_ROT))
         xml_handle = self._add_dir_vector_to_xml_handle(mjcf.from_path(xml_path))
-        xml_path = self._save_xml_handle(xml_handle, tmp_dir_name)
 
         self.setup_random_rot = setup_random_rot
 
@@ -75,7 +74,7 @@ class UnitreeA1(LocoEnv):
         if camera_params is None:
             # make the camera by default a bit higher
             camera_params = dict(follow=dict(distance=3.5, elevation=-20.0, azimuth=90.0))
-        super().__init__(xml_path, action_spec, observation_spec,  collision_groups,
+        super().__init__(xml_handle, action_spec, observation_spec,  collision_groups,
                          camera_params=camera_params, **kwargs)
 
     def setup(self, obs):

@@ -26,16 +26,16 @@ class LocoEnv(MultiMuJoCo):
 
     """
 
-    def __init__(self, xml_path, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
+    def __init__(self, xml_handles, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
                  init_step_no=None, timestep=0.001, use_foot_forces=False, default_camera_mode="follow",
-                 use_absorbing_states=True, domain_randomization_config=None, parallel_dom_rand=True,
+                 use_absorbing_states=True, domain_randomization_config=None, parallel_dom_rand=False,
                  N_worker_per_xml_dom_rand=4, **viewer_params):
         """
         Constructor.
 
         Args:
-            xml_path (string): The path to the XML file with which the environment should be created;
+            xml_handle : MuJoCo xml handle.
             actuation_spec (list): A list specifying the names of the joints
                 which should be controllable by the agent. Can be left empty
                 when all actuators should be used;
@@ -82,8 +82,8 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        if type(xml_path) != list:
-            xml_path = [xml_path]
+        if type(xml_handles) != list:
+            xml_handles = [xml_handles]
 
         if collision_groups is None:
             collision_groups = list()
@@ -98,12 +98,12 @@ class LocoEnv(MultiMuJoCo):
             viewer_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
 
         if domain_randomization_config is not None:
-            self._domain_rand = DomainRandomizationHandler(xml_path, domain_randomization_config, parallel_dom_rand,
+            self._domain_rand = DomainRandomizationHandler(xml_handles, domain_randomization_config, parallel_dom_rand,
                                                            N_worker_per_xml_dom_rand)
         else:
             self._domain_rand = None
 
-        super().__init__(xml_path, action_spec, observation_spec, gamma=gamma, horizon=horizon,
+        super().__init__(xml_handles, action_spec, observation_spec, gamma=gamma, horizon=horizon,
                          n_substeps=n_substeps, n_intermediate_steps=n_intermediate_steps, timestep=timestep,
                          collision_groups=collision_groups, default_camera_mode=default_camera_mode, **viewer_params)
 

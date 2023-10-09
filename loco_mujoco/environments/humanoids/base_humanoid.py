@@ -54,11 +54,11 @@ class BaseHumanoid(LocoEnv):
         self._disable_arms = disable_arms
         joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups = self._get_xml_modifications()
 
+        xml_handle = mjcf.from_path(xml_path)
         if self._use_box_feet or self._disable_arms:
             obs_to_remove = ["q_" + j for j in joints_to_remove] + ["dq_" + j for j in joints_to_remove]
             observation_spec = [elem for elem in observation_spec if elem[0] not in obs_to_remove]
             action_spec = [ac for ac in action_spec if ac not in motors_to_remove]
-            xml_handle = mjcf.from_path(xml_path)
 
             xml_handle = self._delete_from_xml_handle(xml_handle, joints_to_remove,
                                                       motors_to_remove, equ_constr_to_remove)
@@ -68,9 +68,7 @@ class BaseHumanoid(LocoEnv):
             if self._disable_arms:
                 xml_handle = self._reorient_arms(xml_handle)
 
-            xml_path = self._save_xml_handle(xml_handle, tmp_dir_name)
-
-        super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
+        super().__init__(xml_handle, action_spec, observation_spec, collision_groups, **kwargs)
 
     def create_dataset(self, ignore_keys=None):
         """

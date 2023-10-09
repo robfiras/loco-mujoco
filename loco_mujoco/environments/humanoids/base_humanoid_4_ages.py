@@ -102,10 +102,8 @@ class BaseHumanoid4Ages(BaseHumanoid):
                 if disable_arms:
                     self._reorient_arms(handle)
 
-        xml_paths = [self._save_xml_handle(handle, tmp_dir_name) for handle in xml_handles]
-
         # call gran-parent
-        super(BaseHumanoid, self).__init__(xml_paths, action_spec, observation_spec, collision_groups, **kwargs)
+        super(BaseHumanoid, self).__init__(xml_handles, action_spec, observation_spec, collision_groups, **kwargs)
 
         if scaling_trajectory_map is not None and self.trajectories is None:
             warnings.warn("You have defined a scaling_trajectory_map, but no trajectory was defined. The former "

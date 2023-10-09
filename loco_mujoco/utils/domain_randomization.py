@@ -12,12 +12,12 @@ class DomainRandomizationHandler:
 
     """
 
-    def __init__(self, xml_paths, domain_rand_conf_path, parallel=True, N_worker_per_xml=4):
+    def __init__(self, xml_handles, domain_rand_conf_path, parallel=True, N_worker_per_xml=4):
         """
         Constructor.
 
         Args:
-            xml_paths (str): Path to the xml file.
+            xml_handles : List of Mujoco xml handles.
             domain_rand_conf_path (str): Path to the domain randomization config file.
             parallel (bool): If True, domain randimzation will be done in parallel to speed up the simulation runtime.
             N_worker_per_xml (int): Number of workers for parallel domain randomization.
@@ -25,7 +25,7 @@ class DomainRandomizationHandler:
         """
 
         assert N_worker_per_xml >= 1 if parallel else True
-        self._xml_handles = [mjcf.from_path(f) for f in xml_paths]
+        self._xml_handles = xml_handles
         self._domain_rand_conf_path = domain_rand_conf_path
         self._curr_model_id = None
         self.parallel = parallel
@@ -146,6 +146,7 @@ def set_joint_conf(conf, jh):
 
     return jh
 
+
 def build_MjModel_from_xml_handle(xml_handle, path_domain_rand_conf):
     """
     Function that takes in an xml_handle and a path to the domain randomization file and returns a randomizaed model.
@@ -159,12 +160,10 @@ def build_MjModel_from_xml_handle(xml_handle, path_domain_rand_conf):
 
     """
 
-    xml_string = xml_handle.to_xml_string()
-    xml_assets = xml_handle.get_assets()
-    new_xml_handle = mjcf.from_xml_string(xml_string, assets=xml_assets, escape_separators=True)
-    new_xml_handle = apply_domain_randomization(new_xml_handle, path_domain_rand_conf)
+    new_xml_handle = apply_domain_randomization(xml_handle, path_domain_rand_conf)
     model = mujoco.MjModel.from_xml_string(xml=new_xml_handle.to_xml_string(), assets=new_xml_handle.get_assets())
     return model
+
 
 def build_MjModel_from_xml_handle_job(xml_handle, path_domain_rand_conf, sq, rq):
     """

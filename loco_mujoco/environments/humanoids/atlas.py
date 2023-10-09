@@ -62,21 +62,24 @@ class Atlas(BaseRobotHumanoid):
                 xml_handle = self._delete_from_xml_handle(xml_handle, joints_to_remove,
                                                           motors_to_remove, equ_constr_to_remove)
 
-            xml_path = []
+            xml_handles = []
             if hold_weight and weight_mass is not None:
                 color_red = np.array([1.0, 0.0, 0.0, 1.0])
                 xml_handle = self._add_weight(xml_handle, weight_mass, color_red)
-                xml_path.append(self._save_xml_handle(xml_handle, tmp_dir_name))
+                xml_handles.append(xml_handle)
             elif hold_weight and weight_mass is None:
                 for i, w in enumerate(self._valid_weights):
                     color = self._get_box_color(i)
                     current_xml_handle = deepcopy(xml_handle)
                     current_xml_handle = self._add_weight(current_xml_handle, w, color)
-                    xml_path.append(self._save_xml_handle(current_xml_handle, tmp_dir_name))
+                    xml_handles.append(current_xml_handle)
             else:
-                xml_path.append(self._save_xml_handle(xml_handle, tmp_dir_name))
+                xml_handles.append(xml_handle)
 
-        super().__init__(xml_path, action_spec, observation_spec, collision_groups, **kwargs)
+        else:
+            xml_handles = mjcf.from_path(xml_path)
+
+        super().__init__(xml_handles, action_spec, observation_spec, collision_groups, **kwargs)
 
     def _get_xml_modifications(self):
         """
