@@ -159,8 +159,14 @@ class UnitreeA1(LocoEnv):
             ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
 
         if self.trajectories is not None:
-            rot_mat_idx = self._get_idx("dir_arrow")
-            state_callback_params = dict(rot_mat_idx=rot_mat_idx, goal_velocity_idx=self._goal_velocity_idx)
+            rot_mat_idx_arrow = self._get_idx("dir_arrow")
+            trunk_euler_orientation_idx = self._get_idx(["q_trunk_rotation", "q_trunk_list", "q_trunk_tilt"])
+            trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
+                                                 "dq_trunk_rotation", "dq_trunk_list", "dq_trunk_tilt"])
+            state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
+                                         trunk_euler_orientation_idx=trunk_euler_orientation_idx,
+                                         trunk_euler_vel_idx=trunk_euler_vel_idx,
+                                         goal_velocity_idx=self._goal_velocity_idx)
             dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
                                                        state_callback=self._modify_observation_callback,
                                                        state_callback_params=state_callback_params)
@@ -283,9 +289,13 @@ class UnitreeA1(LocoEnv):
 
         """
 
-        rot_mat_idx = self._get_idx("dir_arrow")
+        rot_mat_idx_arrow = self._get_idx("dir_arrow")
+        trunk_euler_orientation_idx = self._get_idx(["q_trunk_rotation", "q_trunk_list", "q_trunk_tilt"])
+        trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
+                                             "dq_trunk_rotation", "dq_trunk_list", "dq_trunk_tilt"])
 
-        return self._modify_observation_callback(obs, rot_mat_idx, self._goal_velocity_idx)
+        return self._modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
+                                                 rot_mat_idx_arrow, self._goal_velocity_idx)
 
     def _get_reward_function(self, reward_type, reward_params):
         """
@@ -326,21 +336,13 @@ class UnitreeA1(LocoEnv):
 
         """
 
-        trunk_euler = self._get_from_obs(obs, ["q_trunk_list", "q_trunk_tilt"])
         trunk_height = self._get_from_obs(obs, ["q_trunk_tz"])
-
-        trunk_list_condition = (trunk_euler[0] < -0.2793) or (trunk_euler[0] > 0.2793)
-        trunk_tilt_condition = (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
         trunk_height_condition = trunk_height[0] < -.24
-        trunk_condition = (trunk_list_condition or trunk_tilt_condition or trunk_height_condition)
+        trunk_condition = (trunk_height_condition)
 
         if return_err_msg:
             error_msg = ""
-            if trunk_list_condition:
-                error_msg += "trunk_list_condition violated.\n"
-            elif trunk_tilt_condition:
-                error_msg += "trunk_tilt_condition violated.\n"
-            elif trunk_height_condition:
+            if trunk_height_condition:
                 error_msg += "trunk_height_condition violated. %f \n" % trunk_height
 
             return trunk_condition, error_msg
@@ -504,23 +506,32 @@ class UnitreeA1(LocoEnv):
         return 43
 
     @staticmethod
-    def _modify_observation_callback(obs, rot_mat_idx, goal_velocity_idx):
+    def _modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
+                                     rot_mat_idx_arrow, goal_velocity_idx):
         """
         Transforms the rotation matrix from obs to a sin-cos feature.
 
         Args:
             obs (np.array): Generated observation.
-            rot_mat_idx (int): Index of the beginning rotation matrix in the observation.
+            rot_mat_idx_arrow (int): Index of the beginning rotation matrix in the observation.
             goal_velocity_idx (int): Index of the goal speed in the observation.
 
         Returns:
             The final environment observation for the agent.
 
         """
+        trunk_rot_mat = euler_to_mat(obs[trunk_euler_orientation_idx])
 
-        rot_mat = obs[rot_mat_idx].reshape((3, 3))
+        # replace trunk orientation with projected gravity vector
+        obs[trunk_euler_orientation_idx] = trunk_rot_mat.T @ np.array([0.0, 0.0, -1.0])
+
+        # replace absolute velocities with relative ones
+        obs[trunk_euler_vel_idx[:3]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[:3]] # linear part
+        obs[trunk_euler_vel_idx[3:]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[3:]] # angular part
+
+        rot_mat_arrow = obs[rot_mat_idx_arrow].reshape((3, 3))
         # convert mat to angle
-        angle = mat2angle_xy(rot_mat)
+        angle = mat2angle_xy(rot_mat_idx_arrow)
         # transform the angle to be in [-pi, pi] todo: this is not needed anymore when doing sin cos transformation.
         angle = transform_angle_2pi(angle)
         # make sin-cos transformation
@@ -530,7 +541,7 @@ class UnitreeA1(LocoEnv):
         goal_velocity = obs[goal_velocity_idx]
 
         # concatenate everything to new obs
-        new_obs = np.concatenate([obs[:rot_mat_idx[0]], angle, [goal_velocity]])
+        new_obs = np.concatenate([obs[:rot_mat_idx_arrow[0]], angle, [goal_velocity]])
 
         return new_obs
 
