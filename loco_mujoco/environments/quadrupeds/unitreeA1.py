@@ -170,14 +170,6 @@ class UnitreeA1(LocoEnv):
             dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
                                                        state_callback=self._modify_observation_callback,
                                                        state_callback_params=state_callback_params)
-            # check that all state in the dataset satisfy the has fallen method.
-            for state in dataset["states"]:
-                has_fallen, msg = self._has_fallen(state, return_err_msg=True)
-                if has_fallen:
-                    err_msg = "Some of the states in the created dataset are terminal states. " \
-                              "This should not happen.\n\nViolations:\n"
-                    err_msg += msg
-                    raise ValueError(err_msg)
         else:
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
@@ -336,13 +328,21 @@ class UnitreeA1(LocoEnv):
 
         """
 
+        trunk_euler = self._get_from_obs(obs, ["q_trunk_list", "q_trunk_tilt"])
         trunk_height = self._get_from_obs(obs, ["q_trunk_tz"])
+
+        trunk_list_condition = (trunk_euler[0] < -0.2793) or (trunk_euler[0] > 0.2793)
+        trunk_tilt_condition = (trunk_euler[1] < -0.192) or (trunk_euler[1] > 0.192)
         trunk_height_condition = trunk_height[0] < -.24
-        trunk_condition = (trunk_height_condition)
+        trunk_condition = (trunk_list_condition or trunk_tilt_condition or trunk_height_condition)
 
         if return_err_msg:
             error_msg = ""
-            if trunk_height_condition:
+            if trunk_list_condition:
+                error_msg += "trunk_list_condition violated.\n"
+            elif trunk_tilt_condition:
+                error_msg += "trunk_tilt_condition violated.\n"
+            elif trunk_height_condition:
                 error_msg += "trunk_height_condition violated. %f \n" % trunk_height
 
             return trunk_condition, error_msg
