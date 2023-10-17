@@ -237,6 +237,11 @@ class BaseHumanoid(LocoEnv):
 
         check_validity_task_mode_dataset(BaseHumanoid.__name__, task, None, dataset_type,
                                          *BaseHumanoid.valid_task_confs.get_all())
+        if "reward_type" in kwargs.keys():
+            reward_type = kwargs["reward_type"]
+            del kwargs["reward_type"]
+        else:
+            reward_type = "target_velocity"
 
         if task == "walk":
             path = "datasets/humanoids/02-constspeed_reduced_humanoid.npz"
@@ -249,7 +254,11 @@ class BaseHumanoid(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
-            reward_params = dict(target_velocity=1.25)
+            if "reward_params" in kwargs.keys():
+                reward_params = kwargs["reward_params"]
+                del kwargs["reward_params"]
+            else:
+                reward_params = dict(target_velocity=1.25)
         elif task == "run":
             path = "datasets/humanoids/05-run_reduced_humanoid.npz"
             use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
@@ -261,10 +270,14 @@ class BaseHumanoid(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
-            reward_params = dict(target_velocity=2.5)
+            if "reward_params" in kwargs.keys():
+                reward_params = kwargs["reward_params"]
+                del kwargs["reward_params"]
+            else:
+                reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = env(reward_type="target_velocity", reward_params=reward_params, **kwargs)
+        mdp = env(reward_type=reward_type, reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
