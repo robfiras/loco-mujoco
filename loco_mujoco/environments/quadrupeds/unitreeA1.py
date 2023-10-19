@@ -282,9 +282,9 @@ class UnitreeA1(LocoEnv):
         """
 
         rot_mat_idx_arrow = self._get_idx("dir_arrow")
-        trunk_euler_orientation_idx = self._get_idx(["q_trunk_rotation", "q_trunk_list", "q_trunk_tilt"])
+        trunk_euler_orientation_idx = self._get_idx(["q_trunk_list", "q_trunk_tilt", "q_trunk_rotation"])
         trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
-                                             "dq_trunk_rotation", "dq_trunk_list", "dq_trunk_tilt"])
+                                             "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
 
         return self._modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
                                                  rot_mat_idx_arrow, self._goal_velocity_idx)
@@ -411,11 +411,11 @@ class UnitreeA1(LocoEnv):
         """
         keys = self.get_all_observation_keys()
         rot_mat_idx = keys.index("dir_arrow")
-        trunk_rot_idx = keys.index("q_trunk_rotation")
         trunk_list_idx = keys.index("q_trunk_list")
         trunk_tilt_idx = keys.index("q_trunk_tilt")
+        trunk_rot_idx = keys.index("q_trunk_rotation")
 
-        return dict(rot_mat_idx=rot_mat_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
+        return dict(rot_mat_idx=rot_mat_idx, trunk_orientation_idx=[trunk_list_idx, trunk_tilt_idx, trunk_rot_idx])
 
     def _get_interpolate_remap_params(self):
         """
@@ -424,11 +424,11 @@ class UnitreeA1(LocoEnv):
         """
         keys = self.get_all_observation_keys()
         angle_idx = keys.index("dir_arrow")
-        trunk_rot_idx = keys.index("q_trunk_rotation")
         trunk_list_idx = keys.index("q_trunk_list")
         trunk_tilt_idx = keys.index("q_trunk_tilt")
+        trunk_rot_idx = keys.index("q_trunk_rotation")
 
-        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_rot_idx, trunk_list_idx, trunk_tilt_idx])
+        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_list_idx, trunk_tilt_idx, trunk_rot_idx])
 
     @staticmethod
     def generate(task="simple", dataset_type="real", debug=False, **kwargs):
@@ -588,9 +588,9 @@ class UnitreeA1(LocoEnv):
             ("q_trunk_tx", "trunk_tx", ObservationType.JOINT_POS),
             ("q_trunk_ty", "trunk_ty", ObservationType.JOINT_POS),
             ("q_trunk_tz", "trunk_tz", ObservationType.JOINT_POS),
-            ("q_trunk_rotation", "trunk_rotation", ObservationType.JOINT_POS),
             ("q_trunk_list", "trunk_list", ObservationType.JOINT_POS),
             ("q_trunk_tilt", "trunk_tilt", ObservationType.JOINT_POS),
+            ("q_trunk_rotation", "trunk_rotation", ObservationType.JOINT_POS),
             # --- Front ---
             ("q_FR_hip_joint", "FR_hip_joint", ObservationType.JOINT_POS),
             ("q_FR_thigh_joint", "FR_thigh_joint", ObservationType.JOINT_POS),
@@ -610,9 +610,9 @@ class UnitreeA1(LocoEnv):
             ("dq_trunk_tx", "trunk_tx", ObservationType.JOINT_VEL),
             ("dq_trunk_ty", "trunk_ty", ObservationType.JOINT_VEL),
             ("dq_trunk_tz", "trunk_tz", ObservationType.JOINT_VEL),
-            ("dq_trunk_rotation", "trunk_rotation", ObservationType.JOINT_VEL),
             ("dq_trunk_list", "trunk_list", ObservationType.JOINT_VEL),
             ("dq_trunk_tilt", "trunk_tilt", ObservationType.JOINT_VEL),
+            ("dq_trunk_rotation", "trunk_rotation", ObservationType.JOINT_VEL),
             # --- Front ---
             ("dq_FR_hip_joint", "FR_hip_joint", ObservationType.JOINT_VEL),
             ("dq_FR_thigh_joint", "FR_thigh_joint", ObservationType.JOINT_VEL),

@@ -80,9 +80,9 @@
       <joint name="trunk_tx" type="slide" pos="0 0 0" axis="       1        0        0" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_ty" type="slide" pos="0 0 0" axis="       0        1        0" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_tz" type="slide" pos="0 0 0" axis="       0        0        1" limited="false" range="-500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
-      <joint name="trunk_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_list" type="hinge" pos="0 0 0" axis="       1        0        0" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
       <joint name="trunk_tilt" type="hinge" pos="0 0 0" axis="       0        1        0" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="trunk_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -3.141592654   3.141592654" ref="0" armature="0" damping="0" stiffness="0"></joint>
 
       <inertial mass="4.713" pos="0 0.0041 -0.0005"
           fullinertia="0.0158533 0.0377999 0.0456542 -3.66e-05 -6.11e-05 -2.75e-05"/>
