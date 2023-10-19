@@ -35,7 +35,7 @@ class Talos(BaseRobotHumanoid):
 
         observation_spec = self._get_observation_specification()
 
-        collision_groups = [("floor", ["ground"]),
+        collision_groups = [("floor", ["floor"]),
                             ("foot_r", ["right_foot"]),
                             ("foot_l", ["left_foot"])]
 
@@ -155,6 +155,27 @@ class Talos(BaseRobotHumanoid):
         else:
 
             return pelvis_condition or back_condition
+
+    def _get_ground_forces(self):
+        """
+        Returns the ground forces (np.array). By default, 4 ground force sensors are used.
+        Environments that use more or less have to override this function.
+
+        """
+
+        grf = np.concatenate([self._get_collision_force("floor", "foot_r")[:3],
+                              self._get_collision_force("floor", "foot_l")[:3]])
+
+        return grf
+
+    @staticmethod
+    def _get_grf_size():
+        """
+        Returns the size of the ground force vector.
+
+        """
+
+        return 6
 
     @staticmethod
     def generate(*args, **kwargs):

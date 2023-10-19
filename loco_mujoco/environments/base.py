@@ -572,7 +572,7 @@ class LocoEnv(MultiMuJoCo):
         """
 
         if self._use_foot_forces:
-            grf =self._get_ground_forces()
+            grf = self._get_ground_forces()
             self.mean_grf.update_stats(grf)
 
     def _init_sim_from_obs(self, obs):

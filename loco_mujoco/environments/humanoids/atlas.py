@@ -35,7 +35,7 @@ class Atlas(BaseRobotHumanoid):
 
         observation_spec = self._get_observation_specification()
 
-        collision_groups = [("floor", ["ground"]),
+        collision_groups = [("floor", ["floor"]),
                             ("foot_r", ["right_foot_back"]),
                             ("front_foot_r", ["right_foot_front"]),
                             ("foot_l", ["left_foot_back"]),

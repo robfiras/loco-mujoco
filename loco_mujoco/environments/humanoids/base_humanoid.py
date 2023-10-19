@@ -453,14 +453,14 @@ class BaseHumanoid(LocoEnv):
 
         """
 
-        # find foot and attach bricks
+        # find foot and attach box
         toe_l = xml_handle.find("body", "toes_l")
         size = np.array([0.112, 0.03, 0.05]) * scaling
         pos = np.array([-0.09, 0.019, 0.0]) * scaling
-        toe_l.add("geom", name="foot_brick_l", type="box", size=size.tolist(), pos=pos.tolist(),
+        toe_l.add("geom", name="foot_box_l", type="box", size=size.tolist(), pos=pos.tolist(),
                   rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, 0.15, 0.0])
         toe_r = xml_handle.find("body", "toes_r")
-        toe_r.add("geom", name="foot_brick_r", type="box", size=size.tolist(), pos=pos.tolist(),
+        toe_r.add("geom", name="foot_box_r", type="box", size=size.tolist(), pos=pos.tolist(),
                   rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, -0.15, 0.0])
 
         # make true foot uncollidable
