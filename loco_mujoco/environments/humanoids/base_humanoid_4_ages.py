@@ -30,7 +30,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
                                      data_types=["real"])
 
     def __init__(self, scaling=None, scaling_trajectory_map=None, use_muscles=False,
-                 use_box_feet=True, disable_arms=True, tmp_dir_name=None, alpha_box_feet=0.5, **kwargs):
+                 use_box_feet=True, disable_arms=True, alpha_box_feet=0.5, **kwargs):
         """
         Constructor.
 
@@ -44,8 +44,6 @@ class BaseHumanoid4Ages(BaseHumanoid):
             use_box_feet (bool): If True, boxes are used as feet (for simplification).
             disable_arms (bool): If True, all arm joints are removed and the respective
                 actuators are removed from the action specification.
-            tmp_dir_name (str): Specifies a name of a directory to which temporary files are
-                written, if created. By default, temporary directory names are created automatically.
             alpha_box_feet (float): Alpha parameter of the boxes, which might be added as feet.
 
         """

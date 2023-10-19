@@ -26,7 +26,7 @@ class UnitreeA1(LocoEnv):
     valid_task_confs = ValidTaskConf(tasks=["simple", "hard"],
                                      data_types=["real"])
 
-    def __init__(self, action_mode="torque", setup_random_rot=False, tmp_dir_name=None,
+    def __init__(self, action_mode="torque", setup_random_rot=False,
                  default_target_velocity=0.5, camera_params=None, **kwargs):
         """
         Constructor.
@@ -34,8 +34,6 @@ class UnitreeA1(LocoEnv):
         Args:
             action_mode (str): Either "torque", "position", or "position_difference". Defines the action controller.
             setup_random_rot (bool): If True, the robot is initialized with a random rotation.
-            tmp_dir_name (str): Specifies a name of a directory to which temporary files are
-                written, if created. By default, temporary directory names are created automatically.
             default_target_velocity (float): Default target velocity set in the goal, when no trajectory
                 data is provided.
             camera_params (dict): Dictionary defining some of the camera parameters for visualization.

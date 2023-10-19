@@ -19,7 +19,7 @@ class Atlas(BaseRobotHumanoid):
     """
 
     def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
-                 weight_mass=None, tmp_dir_name=None, **kwargs):
+                 weight_mass=None, **kwargs):
         """
         Constructor.
 
