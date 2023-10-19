@@ -160,9 +160,9 @@ class UnitreeA1(LocoEnv):
 
         if self.trajectories is not None:
             rot_mat_idx_arrow = self._get_idx("dir_arrow")
-            trunk_euler_orientation_idx = self._get_idx(["q_trunk_rotation", "q_trunk_list", "q_trunk_tilt"])
+            trunk_euler_orientation_idx = self._get_idx(["q_trunk_list", "q_trunk_tilt", "q_trunk_rotation"])
             trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
-                                                 "dq_trunk_rotation", "dq_trunk_list", "dq_trunk_tilt"])
+                                                 "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
             state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
                                          trunk_euler_orientation_idx=trunk_euler_orientation_idx,
                                          trunk_euler_vel_idx=trunk_euler_vel_idx,
