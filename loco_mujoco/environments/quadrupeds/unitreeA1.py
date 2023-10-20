@@ -529,7 +529,7 @@ class UnitreeA1(LocoEnv):
 
         rot_mat_arrow = obs[rot_mat_idx_arrow].reshape((3, 3))
         # convert mat to angle
-        angle = mat2angle_xy(rot_mat_idx_arrow)
+        angle = mat2angle_xy(rot_mat_arrow)
         # transform the angle to be in [-pi, pi] todo: this is not needed anymore when doing sin cos transformation.
         angle = transform_angle_2pi(angle)
         # make sin-cos transformation
