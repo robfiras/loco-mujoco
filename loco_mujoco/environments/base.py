@@ -172,6 +172,7 @@ class LocoEnv(MultiMuJoCo):
     def reset(self, obs=None):
 
         mujoco.mj_resetData(self._model, self._data)
+        self.mean_grf.reset()
 
         if self._domain_rand is not None:
             self._models[self._current_model_idx] = self._domain_rand.get_randomized_model(self._current_model_idx)
@@ -335,7 +336,8 @@ class LocoEnv(MultiMuJoCo):
         Args:
             n_episodes (int): Number of episode to replay.
             n_steps_per_episode (int): Number of steps to replay per episode.
-            record (bool): If True, the replay will be recorded.
+            render (bool): If True, trajectory will be rendered.
+            record (bool): If True, the rendered trajectory will be recorded.
             recorder_params (dict): Dictionary containing the recorder parameters.
 
         """
@@ -412,6 +414,7 @@ class LocoEnv(MultiMuJoCo):
         Args:
             n_episodes (int): Number of episode to replay.
             n_steps_per_episode (int): Number of steps to replay per episode.
+            render (bool): If True, trajectory will be rendered.
             record (bool): If True, the replay will be recorded.
             recorder_params (dict): Dictionary containing the recorder parameters.
 

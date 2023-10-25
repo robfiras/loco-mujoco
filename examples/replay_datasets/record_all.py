@@ -26,7 +26,7 @@ def experiment(seed=0):
         if "Humanoid" in env:
             env_params["use_box_feet"] = False
 
-        mdp = LocoEnv.make(env, hide_menu_on_startup=True, **env_params)
+        mdp = LocoEnv.make(env, headless=True, **env_params)
 
         save_path_video = "./record_all"
         mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
