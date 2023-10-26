@@ -112,6 +112,7 @@ class VelocityVectorReward(RewardInterface):
         # get desired velocity vector in x-y-plane
         rot_mat = state[self._rot_mat_idx].reshape((3, 3))
         angle = mat2angle_xy(rot_mat)
+        angle -= np.pi/2
         norm_x = np.cos(angle)
         norm_y = np.sin(angle)
         des_vel = state[self._goal_vel_idx] * np.array([norm_x, norm_y])
