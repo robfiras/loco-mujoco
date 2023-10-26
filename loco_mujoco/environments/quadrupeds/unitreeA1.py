@@ -381,7 +381,7 @@ class UnitreeA1(LocoEnv):
         """
 
         trunk_rotation = self._data.joint("trunk_rotation").qpos[0]
-        desired_angle = self._goal.get_direction() + trunk_rotation
+        desired_angle = self._goal.get_direction() #    + trunk_rotation
 
         rot_mat = euler_to_mat(np.array([np.pi/2, 0, desired_angle]))
 
