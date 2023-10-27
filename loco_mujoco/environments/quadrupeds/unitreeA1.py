@@ -518,14 +518,14 @@ class UnitreeA1(LocoEnv):
             The final environment observation for the agent.
 
         """
-        trunk_rot_mat = euler_to_mat(obs[trunk_euler_orientation_idx])
+        #trunk_rot_mat = euler_to_mat(obs[trunk_euler_orientation_idx])
 
         # replace trunk orientation with projected gravity vector
-        obs[trunk_euler_orientation_idx] = trunk_rot_mat.T @ np.array([0.0, 0.0, -1.0])
+        #obs[trunk_euler_orientation_idx] = trunk_rot_mat.T @ np.array([0.0, 0.0, -1.0])
 
         # replace absolute velocities with relative ones
-        obs[trunk_euler_vel_idx[:3]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[:3]] # linear part
-        obs[trunk_euler_vel_idx[3:]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[3:]] # angular part
+        #obs[trunk_euler_vel_idx[:3]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[:3]] # linear part
+        #obs[trunk_euler_vel_idx[3:]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[3:]] # angular part
 
         rot_mat_arrow = obs[rot_mat_idx_arrow].reshape((3, 3))
         # convert mat to angle
