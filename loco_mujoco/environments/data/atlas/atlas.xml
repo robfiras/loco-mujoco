@@ -360,16 +360,16 @@
 		<motor name="r_arm_wry_actuator" joint="r_arm_wry" gear="25"/>
 		<motor name="r_arm_wrx_actuator" joint="r_arm_wrx" gear="25"/>
 
-		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="275"/>
+		<motor name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="840"/>
 		<motor name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="530"/>
-		<motor name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="840"/>
+		<motor name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="275"/>
 		<motor name="knee_angle_l_actuator" joint="knee_angle_l" gear="890"/>
 		<motor name="ankle_angle_l_actuator" joint="ankle_angle_l" gear="740"/>
 <!--		<motor name="l_leg_akx_actuator" joint="l_leg_akx" gear="360"/>-->
 
-		<motor name="hip_flexion_r_actuator" joint="hip_flexion_r" gear="275"/>
+		<motor name="hip_flexion_r_actuator" joint="hip_flexion_r" gear="840"/>
 		<motor name="hip_adduction_r_actuator" joint="hip_adduction_r" gear="530"/>
-		<motor name="hip_rotation_r_actuator" joint="hip_rotation_r" gear="840"/>
+		<motor name="hip_rotation_r_actuator" joint="hip_rotation_r" gear="275"/>
 		<motor name="knee_angle_r_actuator" joint="knee_angle_r" gear="890"/>
 		<motor name="ankle_angle_r_actuator" joint="ankle_angle_r" gear="740"/>
 <!--		<motor name="r_leg_akx_actuator" joint="r_leg_akx" gear="360"/>-->
