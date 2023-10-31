@@ -182,6 +182,46 @@ class UnitreeA1(LocoEnv):
 
         return np.arange(len(self.obs_helper.observation_spec))
 
+    def obs_to_kinematics_conversion(self, obs):
+        """
+        Calculates a dictionary containing the kinematics given the observation.
+
+        Args:
+            obs (np.array): observations; Shouldn't be more than one trajectory!
+
+        Returns:
+            Dictionary containing the keys specified in observation_spec with the corresponding
+            values from the observation. Additionally, the goal direction and speed are computed.
+
+        """
+
+        obs = np.atleast_2d(obs)
+        rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
+        num_data = len(obs)
+        dataset = dict()
+        for i, key in enumerate(rel_keys):
+            if i < 2:
+                # fill with zeros for x and y position
+                dataset[key] = np.zeros(num_data)
+            elif key == "dir_arrow":
+                sin_cos = obs[:, i-2:i]
+                angle = np.arctan2(sin_cos[:, 0],sin_cos[:, 1]) + np.pi/2
+                if num_data > 1:
+                    dataset[key] = [angle2mat_xy(a).reshape((9,)) for a in angle]
+                else:
+                    dataset[key] = angle2mat_xy(angle).reshape((9,))
+                # calculate goal_speed
+                dq_trunk_tx = obs[:, rel_keys.index("dq_trunk_tx")-2]
+                dq_trunk_ty = obs[:, rel_keys.index("dq_trunk_ty")-2]
+                vels = np.stack([dq_trunk_tx, dq_trunk_ty], axis=1)
+                goal_speed = np.linalg.norm(vels, axis=1)
+                goal_speed = np.mean(goal_speed) * np.ones_like(goal_speed)
+                dataset["goal_speed"] = goal_speed
+            else:
+                dataset[key] = obs[:, i-2]
+
+        return dataset
+
     def _preprocess_action(self, action):
         """
         This function preprocesses all actions. All actions in this environment expected to be between -1 and 1.
