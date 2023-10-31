@@ -425,8 +425,12 @@ class UnitreeA1(LocoEnv):
         trunk_list_idx = keys.index("q_trunk_list")
         trunk_tilt_idx = keys.index("q_trunk_tilt")
         trunk_rot_idx = keys.index("q_trunk_rotation")
+        position_indices = [keys.index(key) for key in keys if key.startswith("q_")]
+        velocity_indices = [keys.index(key) for key in keys if key.startswith("dq_")]
+        ctrl_dt = self.dt
 
-        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_list_idx, trunk_tilt_idx, trunk_rot_idx])
+        return dict(angle_idx=angle_idx, trunk_orientation_idx=[trunk_list_idx, trunk_tilt_idx, trunk_rot_idx],
+                    position_indices=position_indices, velocity_indices=velocity_indices, ctrl_dt=ctrl_dt)
 
     @staticmethod
     def generate(task="simple", dataset_type="real", debug=False, **kwargs):
@@ -699,14 +703,24 @@ class UnitreeA1(LocoEnv):
 
         angle_idx = interpolate_remap_params["angle_idx"]
         trunk_orientation_idx = interpolate_remap_params["trunk_orientation_idx"]
+        position_indices = interpolate_remap_params["position_indices"]
+        velocity_indices = interpolate_remap_params["velocity_indices"]
+        ctrl_dt = interpolate_remap_params["ctrl_dt"]
         traj_list = [list() for j in range(len(traj))]
         for i in range(len(traj_list)):
             # if the state is a rotation
             if i in trunk_orientation_idx:
                 # make sure it is in range -pi,pi
                 traj_list[i] = [transform_angle_2pi(angle) for angle in traj[i]]
+            elif i in velocity_indices:
+                # the interpolation is problematic in the joint velocities for the Unitree. Recalculate them here based
+                # on the positions
+                joint_position_idx = position_indices[velocity_indices.index(i)]
+                joint_position = traj[joint_position_idx]
+                traj_list[i] = [0.0] + list((joint_position[1:] - joint_position[:-1]) / ctrl_dt)
             else:
                 traj_list[i] = list(traj[i])
+
         # transforms angles into rotation matrices todo: this is slow, implement vectorized implementation
         traj_list[angle_idx] = np.array([angle2mat_xy(angle).reshape(9,) for angle in traj[angle_idx]])
         return traj_list
