@@ -78,6 +78,12 @@ def apply_domain_randomization(xml_handle, domain_randomization_config):
                 config_default = config["Default"]
             else:
                 config_default = None
+            if "Inertial" in config.keys():
+                config_interial = config["Inertial"]
+            else:
+                config_interial = None
+
+            # apply all modification to joints
             all_joints = xml_handle.find_all("joint")
             for jh in all_joints:
                 if config_joints is not None and jh.name in config_joints.keys():
@@ -87,6 +93,15 @@ def apply_domain_randomization(xml_handle, domain_randomization_config):
                     if "exclude" in config_default.keys() and jh.name not in config_default["exclude"]:
                         conf = config_default["Joints"]
                         set_joint_conf(conf, jh)
+            # apply all modifications to interial elements
+            all_bodies = xml_handle.find_all("body")
+            for bh in all_bodies:
+                if config_interial is not None and bh.name in config_interial.keys() and bh.inertial is not None:
+                    conf = config_interial[bh.name]
+                    set_inertial_conf(conf, bh.inertial)
+                elif config_default is not None and "Inertial" in config_default.keys() and bh.inertial is not None:
+                    conf = config_default["Inertial"]
+                    set_inertial_conf(conf, bh.inertial)
 
     return xml_handle
 
@@ -126,12 +141,7 @@ def set_joint_conf(conf, jh):
                 raise ValueError(f"Parameter {param_name} currently nor supported "
                                  f"for domain randomizaiton.")
         elif "uniform_range" in param.keys():
-            try:
-                low, high = param["uniform_range"]
-            except ValueError as e:
-                raise Exception(f"The parameter uniform_range for {jh.name} is wrongly specified "
-                                f"in the domain_randomization_config. The format is:\n"
-                                "uniform_range: [low, high]\n") from e
+            low, high = check_uniform_range_conf(jh, param["uniform_range"])
             if param_name == "damping":
                 jh.damping = np.random.uniform(low, high)
             elif param_name == "frictionloss":
@@ -143,8 +153,70 @@ def set_joint_conf(conf, jh):
             else:
                 raise ValueError(f"Parameter {param_name} currently nor supported "
                                  f"for domain randomization.")
+        elif "uniform_range_delta":
+            found_type = type(param["uniform_range_delta"])
+            assert found_type == float, f"uniform_range_delta parameter should be a float, but found {found_type}."
 
     return jh
+
+
+def set_inertial_conf(conf, ih):
+    """
+    Set the properties of the inertial handle (ih) to the randomization properties defined in conf.
+
+    Args:
+        conf (dict): Dictionary defining the randomization properties of the inertial.
+        ih: Mujoco inertial handle to be modified.
+
+    Returns:
+        Mujoco inertial handle.
+
+    """
+
+    for param_name, param in conf.items():
+        valid_params = {"sigma", "uniform_range", "uniform_range_delta"}
+        found_valid_elements = list(set(param.keys()) & valid_params)    # get number by intersection
+        assert len(found_valid_elements) == 1, f"Exactly one parameter should be provided for inertial of " \
+                                               f"body {ih.parent.name}, but found {len(found_valid_elements)}" \
+                                               f" for {param_name}. Valid parameters are {valid_params}."
+
+        if param_name == "mass":
+            assert ih.mass is not None, "Randomizing masses not allowed if not specified in xml."
+            if "sigma" in param.keys():
+                ih.mass = np.clip(np.random.normal(ih.mass, param["sigma"]), 0.0, np.Inf)
+            elif "uniform_range" in param.keys():
+                low, high = check_uniform_range_conf(ih, param["uniform_range"])
+                ih.mass = np.random.uniform(low, high)
+            elif "uniform_range_delta" in param.keys():
+                delta = check_uniform_range_delta_conf(ih, param["uniform_range_delta"])
+                low, high = ih.mass - delta, ih.mass + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for body {ih.parent.name} is bigger" \
+                                  f" than mass ({ih.mass}). Negative masses are not allowed."
+                ih.mass = np.random.uniform(low, high)
+
+        elif param_name == "diaginertia" or "fullinertia":
+            assert "uniform_range_delta" in found_valid_elements, f"domain randomization of inertia only allowed using " \
+                                                                  f"uniform_range_delta, but found {list(param.keys())}."
+            if param_name == "diaginertia":
+                assert ih.diaginertia is not None, "Randomizing diaginertia not allowed if not specified in the xml."
+                delta = check_uniform_range_delta_conf(ih, param["uniform_range_delta"])
+                lows, highs = ih.diaginertia - delta, ih.diaginertia + delta
+                check_lows_singular_values(lows, delta, ih, ih.diaginertia)
+                ih.diaginertia = np.random.uniform(lows, highs)
+            elif param_name == "fullinertia":
+                assert ih.fullinertia is not None, "Randomizing fullinertia not allowed if not specified in the xml."
+                delta = check_uniform_range_delta_conf(ih, param["uniform_range_delta"])
+                # Do svd and apply randomization only on signular values
+                fi = ih.fullinertia
+                triu = np.array([[fi[0], fi[3], fi[4]], [0.0, fi[1], fi[5]], [0.0, 0.0, fi[2]]])
+                U, sing_val, Vh = np.linalg.svd(triu, compute_uv=True)
+                lows, highs = sing_val - delta, sing_val + delta
+                check_lows_singular_values(lows, delta, ih, sing_val)
+                new_sing_val = np.random.uniform(lows, highs)
+                new_triu = U @ np.diag(new_sing_val) @ Vh
+                ih.fullinertia = np.array([new_triu[0, 0], new_triu[1, 1], new_triu[2, 2],
+                                           new_triu[0, 1], new_triu[0, 2], new_triu[1, 2]])
+    return ih
 
 
 def build_MjModel_from_xml_handle(xml_handle, path_domain_rand_conf):
@@ -187,3 +259,40 @@ def build_MjModel_from_xml_handle_job(xml_handle, path_domain_rand_conf, sq, rq)
             exit()
         else:
             raise ValueError(f"Unknown message {mess}.")
+
+
+def check_uniform_range_conf(h, params, check_low_greater_zero=True):
+    if hasattr(h, "name"):
+        name = h.name
+    else:
+        name = h.parent.name
+
+    try:
+        low, high = params
+    except ValueError as e:
+        raise Exception(f"The parameter uniform_range for {name} is wrongly specified "
+                        f"in the domain_randomization_config. The format is:\n"
+                        "uniform_range: [low, high]\n") from e
+    assert high > low, f"uniform_range for body {name} wrongly specified, because high < low"
+    if check_low_greater_zero:
+        assert low >= 0.0, f"uniform_range for body {name} wrongly specified, because low < 0.0"
+    return low, high
+
+
+def check_uniform_range_delta_conf(h, params):
+    if hasattr(h, "name"):
+        name = h.name
+    else:
+        name = h.parent.name
+
+    found_type = type(params)
+    assert found_type == float, f"uniform_range_delta parameter for {name} should be a float, but found {found_type}."
+    delta = params
+    return delta
+
+
+def check_lows_singular_values(lows, delta, ih, sing_val):
+    assert np.all(lows > 0.0), f"Error for body f{ih.parent.name}. " \
+                               f"uniform_range_delta param ({delta}) is bigger than the smallest" \
+                               f"singular values ({np.min(sing_val)}). " \
+                               f"Negative singular values are not allowed."
