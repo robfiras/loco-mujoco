@@ -82,6 +82,10 @@ def apply_domain_randomization(xml_handle, domain_randomization_config):
                 config_interial = config["Inertial"]
             else:
                 config_interial = None
+            if "Geoms" in config.keys():
+                config_geoms = config["Geoms"]
+            else:
+                config_geoms = None
 
             # apply all modification to joints
             all_joints = xml_handle.find_all("joint")
@@ -96,12 +100,22 @@ def apply_domain_randomization(xml_handle, domain_randomization_config):
             # apply all modifications to interial elements
             all_bodies = xml_handle.find_all("body")
             for bh in all_bodies:
+                # apply modification to inertial
                 if config_interial is not None and bh.name in config_interial.keys() and bh.inertial is not None:
                     conf = config_interial[bh.name]
                     set_inertial_conf(conf, bh.inertial)
                 elif config_default is not None and "Inertial" in config_default.keys() and bh.inertial is not None:
                     conf = config_default["Inertial"]
                     set_inertial_conf(conf, bh.inertial)
+                # apply modifications to geoms
+                if config_geoms is not None and bh.name in config_geoms.keys() and bh.geom is not None:
+                    conf = config_geoms[bh.name]
+                    for g in bh.geom:
+                        set_geom_conf(conf, g)
+                elif config_default is not None and "Geoms" in config_default.keys() and bh.geom is not None:
+                    conf = config_default["Geoms"]
+                    for g in bh.geom:
+                        set_geom_conf(conf, g)
 
     return xml_handle
 
@@ -120,8 +134,11 @@ def set_joint_conf(conf, jh):
     """
 
     for param_name, param in conf.items():
-        assert ("sigma" in list(param.keys())) != ("uniform_range" in list(param.keys())), \
-            "Specifying sigma and uniform_range on a single joint is not allowed."
+        valid_params = {"sigma", "uniform_range", "uniform_range_delta"}
+        found_valid_elements = list(set(param.keys()) & valid_params)  # get number by intersection
+        assert len(found_valid_elements) == 1, f"Exactly one parameter should be provided for joint " \
+                                               f"{jh.name}, but found {len(found_valid_elements)}" \
+                                               f" for {param_name}. Valid parameters are {valid_params}."
         if "sigma" in param.keys():
             if param_name == "damping":
                 jh.damping = np.clip(np.random.normal(jh.damping if jh.damping is not None else 0.0,
@@ -154,10 +171,112 @@ def set_joint_conf(conf, jh):
                 raise ValueError(f"Parameter {param_name} currently nor supported "
                                  f"for domain randomization.")
         elif "uniform_range_delta":
-            found_type = type(param["uniform_range_delta"])
-            assert found_type == float, f"uniform_range_delta parameter should be a float, but found {found_type}."
+            delta = check_uniform_range_delta_conf(jh, param["uniform_range_delta"])
+            if param_name == "damping":
+                if jh.damping is None:
+                    jh.damping = 0.0
+                low, high = jh.damping - delta, jh.damping + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for joint {jh.name} is bigger" \
+                                  f" than damping ({jh.damping}). Negative dampings are not allowed."
+                jh.damping = np.random.uniform(low, high)
+            elif param_name == "frictionloss":
+                if jh.frictionloss is None:
+                    jh.frictionloss = 0.0
+                low, high = jh.frictionloss - delta, jh.frictionloss + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for joint {jh.name} is bigger" \
+                                  f" than frictionloss ({jh.frictionloss}). Negative frictionlosses are not allowed."
+                jh.frictionloss = np.random.normal(low, high)
+            elif param_name == "armature":
+                if jh.armature is None:
+                    jh.armature = 0.0
+                low, high = jh.armature - delta, jh.armature + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for joint {jh.name} is bigger" \
+                                  f" than armature ({jh.armature}). Negative armatures are not allowed."
+                jh.armature = np.random.normal(low, high)
+            elif param_name == "stiffness":
+                if jh.stiffness is None:
+                    jh.stiffness = 0.0
+                low, high = jh.stiffness - delta, jh.stiffness + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for joint {jh.name} is bigger" \
+                                  f" than stiffness ({jh.stiffness}). Negative stiffness are not allowed."
+                jh.stiffness = np.random.normal(low, high)
+            else:
+                raise ValueError(f"Parameter {param_name} currently nor supported "
+                                 f"for domain randomization.")
 
     return jh
+
+
+def set_geom_conf(conf, gh):
+    """
+    Set the properties of the geom handle (gh) to the randomization properties defined in conf.
+
+    Args:
+        conf (dict): Dictionary defining the randomization properties of the geom.
+        gh: Mujoco geom handle to be modified.
+
+    Returns:
+        Mujoco geom handle.
+
+    """
+
+    for param_name, param in conf.items():
+        valid_params = {"sigma", "uniform_range", "uniform_range_delta"}
+        found_valid_elements = list(set(param.keys()) & valid_params)    # get number by intersection
+        assert len(found_valid_elements) == 1, f"Exactly one parameter should be provided for geom of " \
+                                               f"body {gh.parent.name}, but found {len(found_valid_elements)}" \
+                                               f" for {param_name}. Valid parameters are {valid_params}."
+
+        if param_name == "mass":
+            assert gh.mass is not None, f"Randomizing masses not allowed if not specified in xml. " \
+                                        f"Error occurred in body {gh.parent.name}."
+            if "sigma" in param.keys():
+                gh.mass = np.clip(np.random.normal(gh.mass, param["sigma"]), 0.0, np.Inf)
+            elif "uniform_range" in param.keys():
+                low, high = check_uniform_range_conf(gh, param["uniform_range"])
+                gh.mass = np.random.uniform(low, high)
+            elif "uniform_range_delta" in param.keys():
+                delta = check_uniform_range_delta_conf(gh, param["uniform_range_delta"])
+                low, high = gh.mass - delta, gh.mass + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for body {gh.parent.name} is bigger" \
+                                  f" than mass ({gh.mass}). Negative masses are not allowed."
+                gh.mass = np.random.uniform(low, high)
+        elif param_name == "friction":
+            if "sigma" in param.keys():
+                dim_sigma = len(param["sigma"])
+                assert dim_sigma == 3, f"sigma for randomizing friction in geom of body {gh.parent.name} " \
+                                       f"needs to be 3-dimensional but is {dim_sigma}."
+                assert gh.friction is not None, f"Randomizing friction not allowed if not specified in xml. " \
+                                                f"Error occurred in body {gh.parent.name}."
+                gh.friction = np.clip(np.random.normal(gh.friction, param["sigma"]), 0.0, np.Inf)
+            elif "uniform_range_delta" in param.keys():
+                dim_range = len(param["uniform_range_delta"])
+                assert dim_range == 3, f"uniform_range_delta for randomizing friction in geom of body {gh.parent.name} " \
+                                       f"needs to be 3-dimensional but is {dim_range}."
+                delta = param["uniform_range_delta"]
+                assert gh.friction is not None, f"Randomizing friction not allowed if not specified in xml. " \
+                                                f"Error occurred in body {gh.parent.name}."
+                assert np.all(gh.friction >= delta), f"uniform_delta range is bigger than friction coefficient. " \
+                                                     f"Negative friction coefficients are not allowed. " \
+                                                     f"Error occurred in body {gh.parent.name}."
+                low, high = gh.friction - delta, gh.friction + delta
+                gh.friction = np.random.uniform(low, high)
+        elif param_name == "density":
+            assert gh.density is not None, f"Randomizing the density is not allowed when not specified in the xml. " \
+                                           f"Error occurred in body {gh.parent.name}."
+            if "sigma" in param.keys():
+                gh.density = np.clip(np.random.normal(gh.density, param["sigma"]), 0.0, np.Inf)
+            elif "uniform_range" in param.keys():
+                low, high = check_uniform_range_conf(gh, param["uniform_range"])
+                gh.density = np.random.uniform(low, high)
+            elif "uniform_range_delta" in param.keys():
+                delta = check_uniform_range_delta_conf(gh, param["uniform_range_delta"])
+                low, high = gh.density - delta, gh.density + delta
+                assert low > 0.0, f"uniform_range_delta param ({delta}) for body {gh.parent.name} is bigger" \
+                                  f" than density ({gh.density}). Negative density are not allowed."
+                gh.density = np.random.uniform(low, high)
+
+    return gh
 
 
 def set_inertial_conf(conf, ih):
