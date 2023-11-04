@@ -1,7 +1,7 @@
-mushroom-rl
+mushroom-rl==1.10.0
 numpy
 scipy
-mujoco
+mujoco==2.3.6
 gymnasium
 dm_control
 pyyaml
