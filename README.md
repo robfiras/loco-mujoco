@@ -1,6 +1,8 @@
-# LocoMuJoCo 
+# LocoMuJoCo
 
-![](https://media.giphy.com/media/5N0bdxFKv8c640WMC6/giphy-downsized-large.gif)
+<p align="center">
+  <img src="https://media.giphy.com/media/5N0bdxFKv8c640WMC6/giphy-downsized-large.gif" />
+</p>
 
 **LocoMuJoCo** is an **imitation learning benchmark** specifically targeted towards **locomotion**. It encompasses a diverse set of environments, including quadrupeds, bipeds, and musculoskeletal human models, each accompanied by comprehensive datasets, such as real noisy motion capture data, ground truth expert data, and ground truth sub-optimal data,
 enabling evaluation across a spectrum of difficulty levels. 
