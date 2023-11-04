@@ -1,4 +1,4 @@
-mushroom-rl==1.10.0
+mushroom-rl>=1.10.0
 numpy
 scipy
 mujoco==2.3.6
