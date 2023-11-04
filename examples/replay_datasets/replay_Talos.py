@@ -7,7 +7,7 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("Talos.carry", random_env_reset=False, disable_back_joint=True)
+    mdp = LocoEnv.make("Talos.carry")
 
     mdp.play_trajectory_from_velocity(n_episodes=3, n_steps_per_episode=500)
 
