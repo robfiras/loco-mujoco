@@ -73,27 +73,25 @@ def test_all_environments():
 
         np.random.seed(0)
 
-        if "Talos" not in task_name and "Muscle" not in task_name and "Unitree" not in task_name:
+        print(f"Testing {task_name}...")
+        # --- native environment ---
+        task_env = LocoEnv.make(task_name, debug=True)
+        dataset = run_environment(task_env, N_EPISODES, N_STEPS)
 
-            print(f"Testing {task_name}...")
-            # --- native environment ---
-            task_env = LocoEnv.make(task_name, debug=True)
-            dataset = run_environment(task_env, N_EPISODES, N_STEPS)
+        np.random.seed(0)
+        # --- run gymnasium environment ---
+        task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
+        dataset_gym = run_environment_gymnasium(task_env, N_EPISODES, N_STEPS)
 
-            np.random.seed(0)
-            # --- run gymnasium environment ---
-            task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
-            dataset_gym = run_environment_gymnasium(task_env, N_EPISODES, N_STEPS)
+        file_name = task_name + ".npy"
+        dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "tests" / path / file_name
 
-            file_name = task_name + ".npy"
-            dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "tests" / path / file_name
+        test_dataset = np.load(dataset_path)
 
-            test_dataset = np.load(dataset_path)
-
-            if not np.allclose(dataset, test_dataset):
-                return False
-            if not np.allclose(dataset_gym, test_dataset):
-                return False
+        if not np.allclose(dataset, test_dataset):
+            return False
+        if not np.allclose(dataset_gym, test_dataset):
+            return False
 
     return True
 
