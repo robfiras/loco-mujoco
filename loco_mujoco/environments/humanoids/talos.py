@@ -6,6 +6,8 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 from loco_mujoco.environments.humanoids.base_robot_humanoid import BaseRobotHumanoid
+from loco_mujoco.utils import check_validity_task_mode_dataset
+from loco_mujoco.environments import ValidTaskConf
 
 
 class Talos(BaseRobotHumanoid):
@@ -17,6 +19,9 @@ class Talos(BaseRobotHumanoid):
     or "weight".
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
+                                     data_types=["real"])
 
     def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
                  weight_mass=None, **kwargs):
@@ -178,10 +183,26 @@ class Talos(BaseRobotHumanoid):
         return 6
 
     @staticmethod
-    def generate(*args, **kwargs):
+    def generate(task="walk", dataset_type="real", **kwargs):
+        """
+        Returns an environment corresponding to the specified task.
+
+        Args:
+        task (str): Main task to solve. Either "walk" or "carry". The latter is walking while carrying
+                an unknown weight, which makes the task partially observable.
+        dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
+                reference trajectory. This data does not perfectly match the kinematics
+                and dynamics of this environment, hence it is more challenging. "perfect" uses
+                a perfect dataset.
+
+        """
+        check_validity_task_mode_dataset(Talos.__name__, task, None, dataset_type,
+                                         *Talos.valid_task_confs.get_all())
+
         path = "datasets/humanoids/02-constspeed_TALOS.npz"
-        return BaseRobotHumanoid.generate(Talos, path, clip_trajectory_to_joint_ranges=True,
-                                          *args, **kwargs)
+
+        return BaseRobotHumanoid.generate(Talos, path, task, dataset_type,
+                                          clip_trajectory_to_joint_ranges=True, **kwargs)
 
     @staticmethod
     def _add_weight(xml_handle, mass, color):

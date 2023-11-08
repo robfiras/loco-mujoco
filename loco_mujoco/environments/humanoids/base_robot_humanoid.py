@@ -6,19 +6,14 @@ from copy import deepcopy
 from mushroom_rl.utils.running_stats import *
 
 import loco_mujoco
-from loco_mujoco.environments import ValidTaskConf
 from loco_mujoco.environments import LocoEnv
-from loco_mujoco.utils import check_validity_task_mode_dataset
 
 
 class BaseRobotHumanoid(LocoEnv):
     """
-    Base Class for the Mujoco simulation of Atlas and Talos.
+    Base Class for the Mujoco simulation of Atlas, UnitreeH1 and Talos.
 
     """
-
-    valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
-                                     data_types=["real"])
 
     def create_dataset(self, ignore_keys=None):
         """
@@ -169,16 +164,17 @@ class BaseRobotHumanoid(LocoEnv):
             An MDP of the Robot.
 
         """
-        check_validity_task_mode_dataset(BaseRobotHumanoid.__name__, task, None, dataset_type,
-                                         *BaseRobotHumanoid.valid_task_confs.get_all())
-
-        reward_params = dict(target_velocity=1.25)
 
         # Generate the MDP
         if task == "walk":
+            reward_params = dict(target_velocity=1.25)
             mdp = env(reward_type="target_velocity", reward_params=reward_params, **kwargs)
         elif task == "carry":
+            reward_params = dict(target_velocity=1.25)
             mdp = env(hold_weight=True, reward_type="target_velocity", reward_params=reward_params, **kwargs)
+        elif task == "run":
+            reward_params = dict(target_velocity=2.5)
+            mdp = env(hold_weight=False, reward_type="target_velocity", reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
