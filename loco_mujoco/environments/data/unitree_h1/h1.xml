@@ -235,7 +235,7 @@ Modified by Firas Al-Hafez 2023.
     <motor class="h1" name="hip_rotation_l_actuator" joint="hip_rotation_l" gear="200"/>
     <motor class="h1" name="hip_adduction_l_actuator" joint="hip_adduction_l" gear="200"/>
     <motor class="h1" name="hip_flexion_l_actuator" joint="hip_flexion_l" gear="200"/>
-    <motor class="h1" name="knee_angle_l_actuator" joint="knee_angle_l" gear="3000"/>
+    <motor class="h1" name="knee_angle_l_actuator" joint="knee_angle_l" gear="300"/>
     <motor class="h1" name="ankle_angle_l_actuator" joint="ankle_angle_l" gear="40"/>
     <motor class="h1" name="hip_rotation_r_actuator" joint="hip_rotation_r" gear="200"/>
     <motor class="h1" name="hip_adduction_r_actuator" joint="hip_adduction_r" gear="200"/>
