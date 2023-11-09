@@ -37,7 +37,11 @@ To replay a dataset run:
 ```bash
 python examples/replay_datasets/replay_Unitree.py
 ```
+---
+## Environments & Tasks
+You want a quick overview of all **environments**, **tasks** and **datasets** available? [Here](/loco_mujoco/environments) you can find it.
 
+And stay tuned! There are many more to come ...
 
 ---
 ## Example
