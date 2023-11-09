@@ -608,7 +608,7 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_substeps)
+        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_intermediate_steps)
 
         return mean_grf
 

@@ -294,18 +294,7 @@ class UnitreeA1(LocoEnv):
             New observation vector (np.array);
 
         """
-
-        if self._use_foot_forces:
-            obs = np.concatenate([obs[2:],
-                                  [self._goal.get_velocity()],
-                                  self.mean_grf.mean / 1000.,
-                                  ]).flatten()
-        else:
-            obs = np.concatenate([obs[2:],
-                                  [self._goal.get_velocity()]
-                                  ]).flatten()
-
-        return obs
+        return np.concatenate([obs[2:], [self._goal.get_velocity()]]).flatten()
 
     def _modify_observation(self, obs):
         """
@@ -324,8 +313,15 @@ class UnitreeA1(LocoEnv):
         trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
                                              "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
 
-        return self._modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
+        obs = self._modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
                                                  rot_mat_idx_arrow, self._goal_velocity_idx)
+
+        if self._use_foot_forces:
+            obs = np.concatenate([obs,
+                                  self.mean_grf.mean / 1000.,
+                                  ]).flatten()
+
+        return obs
 
     def _get_reward_function(self, reward_type, reward_params):
         """
@@ -562,14 +558,6 @@ class UnitreeA1(LocoEnv):
             The final environment observation for the agent.
 
         """
-        #trunk_rot_mat = euler_to_mat(obs[trunk_euler_orientation_idx])
-
-        # replace trunk orientation with projected gravity vector
-        #obs[trunk_euler_orientation_idx] = trunk_rot_mat.T @ np.array([0.0, 0.0, -1.0])
-
-        # replace absolute velocities with relative ones
-        #obs[trunk_euler_vel_idx[:3]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[:3]] # linear part
-        #obs[trunk_euler_vel_idx[3:]] = trunk_rot_mat.T @ obs[trunk_euler_vel_idx[3:]] # angular part
 
         rot_mat_arrow = obs[rot_mat_idx_arrow].reshape((3, 3))
         # convert mat to angle
