@@ -153,7 +153,7 @@ class UnitreeH1(BaseRobotHumanoid):
         pelvis_y_condition = (obs[0] < -0.3) or (obs[0] > 0.1)
         pelvis_tilt_condition = (pelvis_euler[0] < (-np.pi / 4.5)) or (pelvis_euler[0] > (np.pi / 12))
         pelvis_list_condition = (pelvis_euler[1] < -np.pi / 12) or (pelvis_euler[1] > np.pi / 8)
-        pelvis_rotation_condition = (pelvis_euler[2] < (-np.pi / 10)) or (pelvis_euler[2] > (np.pi / 10))
+        pelvis_rotation_condition = (pelvis_euler[2] < (-np.pi / 8)) or (pelvis_euler[2] > (np.pi / 8))
         pelvis_condition = (pelvis_y_condition or pelvis_tilt_condition or
                             pelvis_list_condition or pelvis_rotation_condition)
 
