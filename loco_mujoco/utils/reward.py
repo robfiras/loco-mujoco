@@ -1,6 +1,7 @@
 import numpy as np
 from loco_mujoco.utils.math import mat2angle_xy
 
+
 class RewardInterface:
     """
     Interface to specify a reward function.
