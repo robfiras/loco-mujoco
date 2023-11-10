@@ -84,6 +84,16 @@ env = gym.make("LocoMujoco", env_name="HumanoidTorque.run", reward_type="custom"
 
 ```
 
+LocoMuJoCo *natively* supports [MushroomRL](https://github.com/MushroomRL/mushroom-rl):
+
+```python
+import numpy as np
+import loco_mujoco
+
+env = LocoEnv.make("HumanoidTorque.run")
+dataset = env.create_dataset()
+```
+
 You can find many more examples [here](examples)
 
 ---
