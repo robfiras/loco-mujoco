@@ -88,7 +88,7 @@ LocoMuJoCo *natively* supports [MushroomRL](https://github.com/MushroomRL/mushro
 
 ```python
 import numpy as np
-import loco_mujoco
+from loco_mujoco import LocoEnv
 
 env = LocoEnv.make("HumanoidTorque.run")
 dataset = env.create_dataset()
