@@ -106,3 +106,9 @@ booktitle={6th Robot Learning Workshop, NeurIPS},
 year={2023}
 ```
 
+---
+## Credits 
+Both Unitree models were taken from the [MuJoCo menagerie](https://github.com/google-deepmind/mujoco_menagerie)
+
+
+
