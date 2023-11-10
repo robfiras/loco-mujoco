@@ -5,3 +5,4 @@ mujoco==2.3.6
 gymnasium
 dm_control
 pyyaml
+wget

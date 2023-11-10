@@ -1,6 +1,9 @@
 import os
 
+import wget
+import zipfile
 import warnings
+from pathlib import Path
 from copy import deepcopy
 from tempfile import mkdtemp
 from itertools import product
@@ -15,6 +18,7 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 from mushroom_rl.utils.record import VideoRecorder
 
+import loco_mujoco
 from loco_mujoco.utils import Trajectory
 from loco_mujoco.utils import NoReward, CustomReward,\
     TargetVelocityReward, PosReward, DomainRandomizationHandler
@@ -915,6 +919,36 @@ class LocoEnv(MultiMuJoCo):
         return task_names
 
     _registered_envs = dict()
+
+    @classmethod
+    def download_all_datasets(cls):
+        """
+        Download and installs all datasets.
+
+        """
+        dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "datasets"
+
+        print("Downloading Humanoid Datasets ...\n")
+        dataset_path_humanoid = dataset_path / "humanoids"
+        dataset_path_humanoid_str = str(dataset_path_humanoid)
+        humanoid_url = "https://zenodo.org/records/10102870/files/humanoid_datasets_v0.1.zip?download=1"
+        wget.download(humanoid_url, out=dataset_path_humanoid_str)
+        file_name = "humanoid_datasets_v0.1.zip"
+        file_path = str(dataset_path_humanoid / file_name)
+        with zipfile.ZipFile(file_path, "r") as zip_ref:
+            zip_ref.extractall(dataset_path_humanoid_str)
+        os.remove(file_path)
+
+        print("Downloading Quadruped Datasets ...\n")
+        dataset_path_quadrupeds = dataset_path / "quadrupeds"
+        dataset_path_quadrupeds_str = str(dataset_path_quadrupeds)
+        quadruped_url = "https://zenodo.org/records/10102870/files/quadruped_datasets_v0.1.zip?download=1"
+        wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
+        file_name = "quadruped_datasets_v0.1.zip"
+        file_path = str(dataset_path_quadrupeds / file_name)
+        with zipfile.ZipFile(file_path, "r") as zip_ref:
+            zip_ref.extractall(dataset_path_quadrupeds_str)
+        os.remove(file_path)
 
 
 class ValidTaskConf:
