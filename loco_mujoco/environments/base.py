@@ -223,7 +223,7 @@ class LocoEnv(MultiMuJoCo):
                     sample = self.trajectories.reset_trajectory()
                 elif self._init_step_no:
                     traj_len = self.trajectories.trajectory_length
-                    n_traj = self.trajectories.nnumber_of_trajectories
+                    n_traj = self.trajectories.number_of_trajectories
                     assert self._init_step_no <= traj_len * n_traj
                     substep_no = int(self._init_step_no % traj_len)
                     traj_no = int(self._init_step_no / traj_len)
