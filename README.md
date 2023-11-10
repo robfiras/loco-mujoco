@@ -6,6 +6,8 @@
 **LocoMuJoCo** is an **imitation learning benchmark** specifically targeted towards **locomotion**. It encompasses a diverse set of environments, including quadrupeds, bipeds, and musculoskeletal human models, each accompanied by comprehensive datasets, such as real noisy motion capture data, ground truth expert data, and ground truth sub-optimal data,
 enabling evaluation across a spectrum of difficulty levels. 
 
+**LocoMuJoCo** also allows you to specify your own reward function to use this benchmark for **pure reinforcement learning**! Checkout the example below!
+
 ### Key Advantages 
 ✅ Easy to use with [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) or [Mushroom-RL](https://github.com/MushroomRL/mushroom-rl) interface \
 ✅ Many environments including humanoids and quadrupeds \
@@ -23,6 +25,12 @@ To install this repository, clone it and then run:
 ```bash
 cd loco-mujoco
 pip install -e . 
+```
+
+Now you have to download and install the datasets by running
+
+```bash
+python download_datasets.py
 ```
 
 If you also want to run the baselines, you have to install our imitation learning library [imitation_lib](https://github.com/robfiras/ls-iq). You find example files for training the baselines for any LocoMuJoCo task [here](examples/imitation_learning).
