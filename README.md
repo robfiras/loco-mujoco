@@ -104,6 +104,7 @@ title={LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Locomotion},
 author={Firas Al-Hafez and Guoping Zhao and Jan Peters and Davide Tateo},
 booktitle={6th Robot Learning Workshop, NeurIPS},
 year={2023}
+}
 ```
 
 ---
