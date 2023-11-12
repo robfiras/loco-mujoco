@@ -19,7 +19,7 @@ class DomainRandomizationHandler:
         Args:
             xml_handles : List of Mujoco xml handles.
             domain_rand_conf_path (str): Path to the domain randomization config file.
-            parallel (bool): If True, domain randimzation will be done in parallel to speed up the simulation runtime.
+            parallel (bool): If True, domain randomization will be done in parallel to speed up the simulation runtime.
             N_worker_per_xml (int): Number of workers for parallel domain randomization.
 
         """
