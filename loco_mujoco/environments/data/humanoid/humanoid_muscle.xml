@@ -16,55 +16,9 @@
     <muscle scale="200" ctrlrange="0 1" ctrllimited="true" range="0.65 1.05"></muscle>
     <motor ctrlrange="-1.0 1.0" ctrllimited="true"></motor>
   </default>
-  <option integrator="Euler" iterations="50" solver="Newton"  timestep="0.001" collision="all">
+  <option integrator="Euler" iterations="50" solver="Newton"  timestep="0.001" collision="dynamic">
     <flag energy="enable"></flag>
   </option>
-  <contact>
-      <pair geom1="floor" geom2="r_foot"/>
-      <pair geom1="floor" geom2="r_bofoot"/>
-      <pair geom1="floor" geom2="l_foot"/>
-      <pair geom1="floor" geom2="l_bofoot"/>
-      <pair geom1="r_foot" geom2="femur_l"/>
-      <pair geom1="r_bofoot" geom2="femur_l"/>
-      <pair geom1="r_foot" geom2="tibia_l"/>
-      <pair geom1="r_bofoot" geom2="tibia_l"/>
-      <pair geom1="r_foot" geom2="fibula_l"/>
-      <pair geom1="r_bofoot" geom2="fibula_l"/>
-      <pair geom1="r_foot" geom2="talus_lv"/>
-      <pair geom1="r_bofoot" geom2="talus_lv"/>
-      <pair geom1="l_foot" geom2="femur_r"/>
-      <pair geom1="l_bofoot" geom2="femur_r"/>
-      <pair geom1="l_foot" geom2="tibia_r"/>
-      <pair geom1="l_bofoot" geom2="tibia_r"/>
-      <pair geom1="l_foot" geom2="fibula_r"/>
-      <pair geom1="l_bofoot" geom2="fibula_r"/>
-      <pair geom1="l_foot" geom2="talus_rv"/>
-      <pair geom1="l_bofoot" geom2="fibula_r"/>
-      <pair geom1="l_foot" geom2="r_foot"/>
-      <pair geom1="l_foot" geom2="r_bofoot"/>
-      <pair geom1="l_bofoot" geom2="r_foot"/>
-      <pair geom1="l_bofoot" geom2="r_bofoot"/>
-
-      <pair geom1="talus_rv" geom2="femur_l"/>
-      <pair geom1="talus_rv" geom2="tibia_l"/>
-      <pair geom1="talus_rv" geom2="fibula_l"/>
-      <pair geom1="talus_rv" geom2="talus_lv"/>
-      <pair geom1="talus_lv" geom2="femur_r"/>
-      <pair geom1="talus_lv" geom2="tibia_r"/>
-      <pair geom1="talus_lv" geom2="fibula_r"/>
-
-      <pair geom1="fibula_r" geom2="tibia_l"/>
-      <pair geom1="fibula_r" geom2="femur_l"/>
-      <pair geom1="fibula_r" geom2="fibula_l"/>
-      <pair geom1="fibula_l" geom2="tibia_r"/>
-      <pair geom1="fibula_l" geom2="femur_r"/>
-
-      <pair geom1="tibia_r" geom2="femur_l"/>
-      <pair geom1="tibia_r" geom2="tibia_l"/>
-      <pair geom1="tibia_l" geom2="femur_r"/>
-
-      <pair geom1="femur_r" geom2="femur_l"/>
-  </contact>
   <size njmax="1000" nconmax="400" nuser_jnt="1"></size>
   <worldbody>
     <geom name="floor" pos="0 0 0" size="200 200 0.125" type="plane" material="MatPlane" condim="3" group="2" rgba="0.8 0.9 0.8 1"></geom>
@@ -230,10 +184,10 @@
           <site name="grac_r-P3" pos="-0.0216971 -0.0575426 -0.0399772"></site>
           <site name="grac_r-P4" pos="0.00670009 -0.0933546 -0.0254604"></site>
           <site name="grac_r-P2" pos="-0.0296702 -0.0356222 -0.0421436"></site>
-<!--          <site name="rect_fem_r-P3" pos="0.0780827 -0.0123631   0.0014"></site>-->
-<!--          <site name="vas_med_r-P5" pos="0.0762363 -0.00800787  -0.0146"></site>-->
-<!--          <site name="vas_int_r-P4" pos="0.0785259 -0.00619903   0.0018"></site>-->
-<!--          <site name="vas_lat_r-P5" pos="0.0762297 -0.0117237   0.0165"></site>-->
+          <site name="rect_fem_r-P3" pos="0.04071991 -0.06776167  0.0014"></site>
+          <site name="vas_med_r-P5" pos="0.04286936 -0.06354775 -0.0146"></site>
+          <site name="vas_int_r-P4" pos="0.04100479 -0.06810118  0.0014"></site>
+          <site name="vas_lat_r-P5" pos="0.04001863 -0.06593119  0.0165"></site>
           <site name="soleus_r-P1" pos="-0.00268004 -0.171187 0.00792844"></site>
           <site name="tib_post_r-P1" pos="-0.0104968 -0.150529 0.0021217"></site>
           <site name="tib_post_r-P2" pos="-0.0160802 -0.452368 -0.025572"></site>
@@ -379,10 +333,10 @@
           <site name="grac_l-P3" pos="-0.0216971 -0.0575426 0.0399772"></site>
           <site name="grac_l-P4" pos="0.00670009 -0.0933546 0.0254604"></site>
           <site name="grac_l-P2" pos="-0.0296702 -0.0356222 0.0421436"></site>
-<!--          <site name="rect_fem_l-P3" pos="0.0780827 -0.0123631  -0.0014"></site>-->
-<!--          <site name="vas_med_l-P5" pos="0.0762363 -0.00800787   0.0146"></site>-->
-<!--          <site name="vas_int_l-P4" pos="0.0780827 -0.0123631  -0.0014"></site>-->
-<!--          <site name="vas_lat_l-P5" pos="0.0762297 -0.0117237  -0.0165"></site>-->
+          <site name="rect_fem_l-P3" pos="0.04071991 -0.06776167 -0.0014"></site>
+          <site name="vas_med_l-P5" pos="0.04286936 -0.06354775  0.0146"></site>
+          <site name="vas_int_l-P4" pos="0.04071991 -0.06776167 -0.0014"></site>
+          <site name="vas_lat_l-P5" pos="0.04001863 -0.06593119 -0.0165"></site>
           <site name="soleus_l-P1" pos="-0.00268004 -0.171187 -0.00792844"></site>
           <site name="tib_post_l-P1" pos="-0.0104968 -0.150529 -0.0021217"></site>
           <site name="tib_post_l-P2" pos="-0.0160802 -0.452368 0.025572"></site>
@@ -793,27 +747,27 @@
     <spatial name="rect_fem_r_tendon">
       <site site="rect_fem_r-P1"></site>
       <site site="rect_fem_r-P2"></site>
-<!--      <site site="rect_fem_r-P3"></site>-->
+      <site site="rect_fem_r-P3"></site>
     </spatial>
     <spatial name="vas_med_r_tendon">
       <site site="vas_med_r-P1"></site>
       <site site="vas_med_r-P2"></site>
       <site site="vas_med_r-P3"></site>
       <site site="vas_med_r-P4"></site>
-<!--      <site site="vas_med_r-P5"></site>-->
+      <site site="vas_med_r-P5"></site>
     </spatial>
     <spatial name="vas_int_r_tendon">
       <site site="vas_int_r-P1"></site>
       <site site="vas_int_r-P2"></site>
       <site site="vas_int_r-P3"></site>
-<!--      <site site="vas_int_r-P4"></site>-->
+      <site site="vas_int_r-P4"></site>
     </spatial>
     <spatial name="vas_lat_r_tendon">
       <site site="vas_lat_r-P1"></site>
       <site site="vas_lat_r-P2"></site>
       <site site="vas_lat_r-P3"></site>
       <site site="vas_lat_r-P4"></site>
-<!--      <site site="vas_lat_r-P5"></site>-->
+      <site site="vas_lat_r-P5"></site>
     </spatial>
     <spatial name="med_gas_r_tendon">
       <site site="med_gas_r-P1"></site>
@@ -1034,27 +988,27 @@
     <spatial name="rect_fem_l_tendon">
       <site site="rect_fem_l-P1"></site>
       <site site="rect_fem_l-P2"></site>
-<!--      <site site="rect_fem_l-P3"></site>-->
+      <site site="rect_fem_l-P3"></site>
     </spatial>
     <spatial name="vas_med_l_tendon">
       <site site="vas_med_l-P1"></site>
       <site site="vas_med_l-P2"></site>
       <site site="vas_med_l-P3"></site>
       <site site="vas_med_l-P4"></site>
-<!--      <site site="vas_med_l-P5"></site>-->
+      <site site="vas_med_l-P5"></site>
     </spatial>
     <spatial name="vas_int_l_tendon">
       <site site="vas_int_l-P1"></site>
       <site site="vas_int_l-P2"></site>
       <site site="vas_int_l-P3"></site>
-<!--      <site site="vas_int_l-P4"></site>-->
+      <site site="vas_int_l-P4"></site>
     </spatial>
     <spatial name="vas_lat_l_tendon">
       <site site="vas_lat_l-P1"></site>
       <site site="vas_lat_l-P2"></site>
       <site site="vas_lat_l-P3"></site>
       <site site="vas_lat_l-P4"></site>
-<!--      <site site="vas_lat_l-P5"></site>-->
+      <site site="vas_lat_l-P5"></site>
     </spatial>
     <spatial name="med_gas_l_tendon">
       <site site="med_gas_l-P1"></site>
@@ -1205,10 +1159,10 @@
     <muscle name="quad_fem_r" tendon="quad_fem_r_tendon" timeconst="    0.01     0.04" force="381" lengthrange="0.050161 0.103273"></muscle>
     <muscle name="gem_r" tendon="gem_r_tendon" timeconst="    0.01     0.04" force="164" lengthrange="0.0493334 0.0725491"></muscle>
     <muscle name="peri_r" tendon="peri_r_tendon" timeconst="    0.01     0.04" force="444" lengthrange="0.127586 0.153147"></muscle>
-    <muscle name="rect_fem_r" tendon="rect_fem_r_tendon" timeconst="    0.01     0.04" force="1169" lengthrange="0.333385  0.43661"></muscle>
-    <muscle name="vas_med_r" tendon="vas_med_r_tendon" timeconst="    0.01     0.04" force="1294" lengthrange="0.153639 0.233612"></muscle>
-    <muscle name="vas_int_r" tendon="vas_int_r_tendon" timeconst="    0.01     0.04" force="1365" lengthrange=" 0.15964 0.236933"></muscle>
-    <muscle name="vas_lat_r" tendon="vas_lat_r_tendon" timeconst="    0.01     0.04" force="1871" lengthrange="0.179887 0.255591"></muscle>
+    <muscle name="rect_fem_r" tendon="rect_fem_r_tendon" timeconst="    0.01     0.04" force="1169" lengthrange="0.333385  0.48661"></muscle>
+    <muscle name="vas_med_r" tendon="vas_med_r_tendon" timeconst="    0.01     0.04" force="1294" lengthrange="0.153639 0.268612"></muscle>
+    <muscle name="vas_int_r" tendon="vas_int_r_tendon" timeconst="    0.01     0.04" force="1365" lengthrange="0.161238 0.274306"></muscle>
+    <muscle name="vas_lat_r" tendon="vas_lat_r_tendon" timeconst="    0.01     0.04" force="1871" lengthrange="0.179887 0.290591"></muscle>
     <muscle name="med_gas_r" tendon="med_gas_r_tendon" timeconst="    0.01     0.04" force="1558" lengthrange="0.467428 0.531486"></muscle>
     <muscle name="lat_gas_r" tendon="lat_gas_r_tendon" timeconst="    0.01     0.04" force="683" lengthrange="0.460271 0.531127"></muscle>
     <muscle name="soleus_r" tendon="soleus_r_tendon" timeconst="    0.01     0.04" force="3549" lengthrange="0.305933 0.356779"></muscle>
@@ -1248,10 +1202,10 @@
     <muscle name="quad_fem_l" tendon="quad_fem_l_tendon" timeconst="    0.01     0.04" force="381" lengthrange="0.050161 0.103273"></muscle>
     <muscle name="gem_l" tendon="gem_l_tendon" timeconst="    0.01     0.04" force="164" lengthrange="0.0493334 0.0725491"></muscle>
     <muscle name="peri_l" tendon="peri_l_tendon" timeconst="    0.01     0.04" force="444" lengthrange="0.127586 0.153147"></muscle>
-    <muscle name="rect_fem_l" tendon="rect_fem_l_tendon" timeconst="    0.01     0.04" force="1169" lengthrange="0.333385  0.43661"></muscle>
-    <muscle name="vas_med_l" tendon="vas_med_l_tendon" timeconst="    0.01     0.04" force="1294" lengthrange="0.153639 0.233612"></muscle>
-    <muscle name="vas_int_l" tendon="vas_int_l_tendon" timeconst="    0.01     0.04" force="1365" lengthrange="0.161238 0.239306"></muscle>
-    <muscle name="vas_lat_l" tendon="vas_lat_l_tendon" timeconst="    0.01     0.04" force="1871" lengthrange="0.179887 0.255591"></muscle>
+    <muscle name="rect_fem_l" tendon="rect_fem_l_tendon" timeconst="    0.01     0.04" force="1169" lengthrange="0.333385  0.48661"></muscle>
+    <muscle name="vas_med_l" tendon="vas_med_l_tendon" timeconst="    0.01     0.04" force="1294" lengthrange="0.153639 0.268612"></muscle>
+    <muscle name="vas_int_l" tendon="vas_int_l_tendon" timeconst="    0.01     0.04" force="1365" lengthrange="0.161238 0.274306"></muscle>
+    <muscle name="vas_lat_l" tendon="vas_lat_l_tendon" timeconst="    0.01     0.04" force="1871" lengthrange="0.179887 0.290591"></muscle>
     <muscle name="med_gas_l" tendon="med_gas_l_tendon" timeconst="    0.01     0.04" force="1558" lengthrange="0.467428 0.531486"></muscle>
     <muscle name="lat_gas_l" tendon="lat_gas_l_tendon" timeconst="    0.01     0.04" force="683" lengthrange="0.460271 0.531127"></muscle>
     <muscle name="soleus_l" tendon="soleus_l_tendon" timeconst="    0.01     0.04" force="3549" lengthrange="0.305933 0.356779"></muscle>
