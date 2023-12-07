@@ -21,9 +21,10 @@ class Talos(BaseRobotHumanoid):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
-                                     data_types=["real"])
+                                     data_types=["real", "perfect"],
+                                     non_combinable=[("carry", None, "perfect")])
 
-    def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
+    def __init__(self, disable_arms=True, disable_back_joint=False, hold_weight=False,
                  weight_mass=None, **kwargs):
         """
         Constructor.
@@ -196,10 +197,17 @@ class Talos(BaseRobotHumanoid):
                 a perfect dataset.
 
         """
+        if "disable_arms" in kwargs.keys():
+            assert  kwargs["disable_arms"] == True,\
+                "Activating the arms in the Talos environment is currently not supported."
+
         check_validity_task_mode_dataset(Talos.__name__, task, None, dataset_type,
                                          *Talos.valid_task_confs.get_all())
 
-        path = "datasets/humanoids/02-constspeed_TALOS.npz"
+        if dataset_type == "real":
+            path = "datasets/humanoids/real/02-constspeed_TALOS.npz"
+        elif dataset_type == "perfect":
+            path = "datasets/humanoids/perfect/talos_walk/perfect_expert_dataset_det.npz"
 
         return BaseRobotHumanoid.generate(Talos, path, task, dataset_type,
                                           clip_trajectory_to_joint_ranges=True, **kwargs)

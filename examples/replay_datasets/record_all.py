@@ -15,26 +15,33 @@ def experiment(seed=0):
                                                                                      ".all" in env or ".carry" in env \
             else dict(n_episodes=3, n_steps_per_episode=500, record=True)
 
-        if "Humanoid" in env or "Atlas.walk" in env:
-            env_params = dict(disable_arms=False)
-        else:
-            env_params = dict()
+        if "H1" in env:
 
-        if "4Ages" in env or "carry" in env:
-            env_params["random_env_reset"] = False
+            if "Humanoid" in env or "Atlas.walk" in env:
+                env_params = dict(disable_arms=False)
+            else:
+                env_params = dict()
 
-        if "Humanoid" in env:
-            env_params["use_box_feet"] = False
+            if "4Ages" in env or "carry" in env:
+                env_params["random_env_reset"] = False
 
-        mdp = LocoEnv.make(env, headless=True, **env_params)
+            if "Humanoid" in env:
+                env_params["use_box_feet"] = False
 
-        save_path_video = "./record_all"
-        mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
+            if "carry" in env:
+                disable_arms = True
+            else:
+                disable_arms = False
 
-        path_video = save_path_video + "/" + env + "/recording.mp4"
+            mdp = LocoEnv.make(env, headless=True, disable_arms=disable_arms, **env_params)
 
-        duration = 10.0 if ".all" in env or ".carry" in env or "Unitree.hard" in env else 4.0
-        video2gif(path_video, duration=duration)
+            save_path_video = "./record_all"
+            mdp.play_trajectory(recorder_params=dict(tag=env, path=save_path_video), **replay_params)
+
+            path_video = save_path_video + "/" + env + "/recording.mp4"
+
+            duration = 10.0 if ".all" in env or ".carry" in env or "Unitree.hard" in env else 4.0
+            video2gif(path_video, duration=duration)
 
 
 if __name__ == '__main__':

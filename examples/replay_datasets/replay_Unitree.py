@@ -7,7 +7,7 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("UnitreeA1.simple")
+    mdp = LocoEnv.make("UnitreeA1.hard.perfect")
 
     mdp.play_trajectory_from_velocity(n_steps_per_episode=250)
 

@@ -1,20 +1,33 @@
 from setuptools import setup, find_packages
 from os import path
+import glob
+from loco_mujoco import __version__
 
-requires_list = []
-here = path.abspath(path.dirname(__file__))
-with open(path.join(here, 'requirements.txt'), encoding='utf-8') as f:
-    for line in f:
-        requires_list.append(str(line))
 
-setup(name='loco_mujoco',
-      version='0.1',
-      description='Imitation learning benchmark focusing on complex locomotion tasks using MuJoCo.',
-      license='MIT',
-      author="Firas Al-Hafez",
-      author_mail="fi.alhafez@gmail.com",
+def glob_data_files(data_package, data_type=None):
+    data_type = '*' if data_type is None else data_type
+    data_dir = data_package.replace(".", "/")
+    data_files = [] 
+    directories = glob.glob(data_dir+'/**/', recursive=True) 
+    for directory in directories:
+        subdir = directory[len(data_dir)+1:]
+        if subdir != "":
+            files = subdir + data_type
+            data_files.append(files)
+    return data_files
+
+
+loco_mujoco_xml_package = 'loco_mujoco.environments.data'
+loco_mujoco_data_package = 'datasets'
+
+
+setup(author="Firas Al-Hafez",
+      url="https://github.com/robfiras/loco-mujoco",
+      version=__version__,
       packages=[package for package in find_packages()
-                if package.startswith('loco_mujoco')],
-      install_requires=requires_list,
-      zip_safe=False,
+                if package.startswith('loco_mujoco') or package.startswith('datasets')],
+      package_data={
+          loco_mujoco_data_package: glob_data_files(loco_mujoco_data_package),
+          loco_mujoco_xml_package: glob_data_files(loco_mujoco_xml_package)
+      }
       )

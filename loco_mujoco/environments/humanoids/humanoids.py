@@ -1,5 +1,7 @@
 from loco_mujoco.environments.humanoids.base_humanoid import BaseHumanoid
 from loco_mujoco.environments.humanoids.base_humanoid_4_ages import BaseHumanoid4Ages
+from loco_mujoco.environments import ValidTaskConf
+from loco_mujoco.utils import check_validity_task_mode_dataset
 
 
 class HumanoidTorque(BaseHumanoid):
@@ -7,6 +9,9 @@ class HumanoidTorque(BaseHumanoid):
     MuJoCo simulation of a humanoid model with one torque actuator per joint.
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
+                                     data_types=["real", "perfect"])
 
     def __init__(self, **kwargs):
         """
@@ -21,8 +26,23 @@ class HumanoidTorque(BaseHumanoid):
         super(HumanoidTorque, self).__init__(use_muscles=False, **kwargs)
 
     @staticmethod
-    def generate(*args, **kwargs):
-        return BaseHumanoid.generate(HumanoidTorque, *args, **kwargs)
+    def generate(task="walk", dataset_type="real", **kwargs):
+
+        check_validity_task_mode_dataset(HumanoidTorque.__name__, task, None, dataset_type,
+                                         *HumanoidTorque.valid_task_confs.get_all())
+
+        if dataset_type == "real":
+            if task == "walk":
+                path = "datasets/humanoids/real/02-constspeed_reduced_humanoid.npz"
+            elif task == "run":
+                path = "datasets/humanoids/real/05-run_reduced_humanoid.npz"
+        elif dataset_type == "perfect":
+            if task == "walk":
+                path = "datasets/humanoids/perfect/humanoid_torque_walk/perfect_expert_dataset_det.npz"
+            elif task == "run":
+                path = "datasets/humanoids/perfect/humanoid_torque_run/perfect_expert_dataset_det.npz"
+
+        return BaseHumanoid.generate(HumanoidTorque, path, task, dataset_type, **kwargs)
 
 
 class HumanoidMuscle(BaseHumanoid):
@@ -30,6 +50,10 @@ class HumanoidMuscle(BaseHumanoid):
     MuJoCo simulation of a humanoid model with muscle actuation.
 
     """
+
+    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
+                                     data_types=["real", "perfect"],
+                                     non_combinable=[("run", None, "perfect")])
 
     def __init__(self, **kwargs):
         """
@@ -44,8 +68,21 @@ class HumanoidMuscle(BaseHumanoid):
         super(HumanoidMuscle, self).__init__(use_muscles=True, **kwargs)
 
     @staticmethod
-    def generate(*args, **kwargs):
-        return BaseHumanoid.generate(HumanoidMuscle, *args, **kwargs)
+    def generate(task="walk", dataset_type="real", **kwargs):
+
+        check_validity_task_mode_dataset(HumanoidMuscle.__name__, task, None, dataset_type,
+                                         *HumanoidMuscle.valid_task_confs.get_all())
+
+        if dataset_type == "real":
+            if task == "walk":
+                path = "datasets/humanoids/real/02-constspeed_reduced_humanoid.npz"
+            elif task == "run":
+                path = "datasets/humanoids/real/05-run_reduced_humanoid.npz"
+        elif dataset_type == "perfect":
+            if task == "walk":
+                path = "datasets/humanoids/perfect/humanoid_muscle_walk/perfect_expert_dataset_det.npz"
+
+        return BaseHumanoid.generate(HumanoidMuscle, path, task, dataset_type, **kwargs)
 
 
 class HumanoidTorque4Ages(BaseHumanoid4Ages):

@@ -5,7 +5,7 @@ import numpy as np
 from scipy import interpolate
 
 
-class Trajectory(object):
+class Trajectory:
     """
     General class to handle trajectory data. It builds a general trajectory from a numpy bin file(.npy), and
     automatically interpolates the trajectory to the desired control frequency. This class is used to generate datasets
@@ -14,25 +14,26 @@ class Trajectory(object):
     All trajectories are required to be of equal length.
 
     """
-    def __init__(self, keys, traj_path, low, high, joint_pos_idx, interpolate_map, interpolate_remap,
-                 interpolate_map_params=None, interpolate_remap_params=None,  traj_dt=0.002, control_dt=0.01,
-                 ignore_keys=None, clip_trajectory_to_joint_ranges=False, warn=True):
+    def __init__(self, keys, low, high, joint_pos_idx, interpolate_map, interpolate_remap,
+                 traj_path=None, traj_files=None, interpolate_map_params=None, interpolate_remap_params=None,
+                 traj_dt=0.002, control_dt=0.01, ignore_keys=None, clip_trajectory_to_joint_ranges=False,
+                 traj_info=None, warn=True):
         """
         Constructor.
 
         Args:
             keys (list): List of keys to extract data from the trajectories.
-            traj_path (string): path with the trajectory for the
-                model to follow. Should be a numpy zipped file (.npz)
-                with a 'trajectory_data' array and possibly a
-                'split_points' array inside. The 'trajectory_data'
-                should be in the shape (joints x observations).
             low (np.array): Lower bound of the trajectory values.
             high (np.array): Upper bound of the trajectory values.
             joint_pos_idx (np.array): Array including all indices of the joint positions in the trajectory.
             interpolate_map (func): Function used to map a trajectory to some space that allows interpolation.
             interpolate_remap (func): Function used to map a transformed trajectory back to the original space after
                 interpolation.
+            traj_path (string): path with the trajectory for the model to follow. Should be a numpy zipped file (.npz)
+                with a 'trajectory_data' array and possibly a 'split_points' array inside. The 'trajectory_data'
+                should be in the shape (joints x observations). If traj_files is specified, this should be None.
+            traj_files (dict): Dictionary containing all trajectory files. If traj_path is specified, this
+                should be None.
             interpolate_map_params: Set of parameters needed to do the interpolation by the Unitree environment.
             interpolate_remap_params: Set of parameters needed to do the interpolation by the Unitree environment.
             traj_dt (float): Time step of the trajectory file.
@@ -40,12 +41,19 @@ class Trajectory(object):
             ignore_keys (list): List of keys to ignore in the dataset.
             clip_trajectory_to_joint_ranges (bool): If True, the joint positions in the trajectory are clipped
                 between the low and high values in the trajectory.
+            traj_info (list): A list of custom labels for each trajectory.
             warn (bool): If True, a warning will be raised, if some trajectory ranges are violated.
 
         """
 
+        assert (traj_path is not None) != (traj_files is not None), "Please specify either traj_path or " \
+                                                                    "traj_files, but not both."
+
         # load data
-        self._trajectory_files = np.load(traj_path, allow_pickle=True)
+        if traj_path is not None:
+            self._trajectory_files = np.load(traj_path, allow_pickle=True)
+        else:
+            self._trajectory_files = traj_files
 
         # convert to dict to be mutable
         self._trajectory_files = {k: d for k, d in self._trajectory_files.items()}
@@ -74,6 +82,11 @@ class Trajectory(object):
         #  the shape of the array is just (n_trajectories, n_samples).
         self.trajectories = self._extract_trajectory_from_files()
 
+        if traj_info is not None:
+            assert len(traj_info) == self.number_of_trajectories, "The number of trajectory infos/labels need " \
+                                                                  "to be equal to the number of trajectories."
+        self._traj_info = traj_info
+
         self.traj_dt = traj_dt
         self.control_dt = control_dt
 
@@ -99,9 +112,9 @@ class Trajectory(object):
                 the state transformation.
 
         Returns:
-            Dictionary containing states, next_states and absorbing flags. For the states the shape is
-            (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
-            (N_traj x N_samples_per_traj).
+            Dictionary containing states, next_states, absorbing and last flags. For the states the shape is
+            (N_traj x N_samples_per_traj-1, dim_state), while the flags have the shape
+            (N_traj x N_samples_per_traj-1). If traj_info was specified, it will also include that.
 
         """
         flat_traj = self.flattened_trajectories()
@@ -127,8 +140,14 @@ class Trajectory(object):
         new_states = states[:-1]
         new_next_states = states[1:]
         absorbing = np.zeros(len(states[:-1]))  # we assume that there are no absorbing states in the trajectory
+        last = np.zeros(len(states))
+        last[self.split_points[1:]-1] = np.ones(len(self.split_points)-1)
 
-        return dict(states=new_states, next_states=new_next_states, absorbing=absorbing)
+        if self._traj_info is not None:
+            info = np.array([[l] * self.trajectory_length for l in self._traj_info]).reshape(-1)
+            return dict(states=new_states, next_states=new_next_states, absorbing=absorbing, last=last, info=info)
+        else:
+            return dict(states=new_states, next_states=new_next_states, absorbing=absorbing, last=last)
 
     def _extract_trajectory_from_files(self):
         """
@@ -207,11 +226,11 @@ class Trajectory(object):
             trajectories[i] = np.array(trajectories[i])
         self.trajectories = trajectories
 
-        # todo: this is currently not working properly, maybe this is not even needed
         # interpolation of split_points
-        #self.split_points = [0]
-        #for k in range(self.number_of_trajectories):
-        #    self.split_points.append(self.split_points[-1] + len(self.trajectories[0][k]))
+        self.split_points = [0]
+        for k in range(self.number_of_trajectories):
+           self.split_points.append(self.split_points[-1] + len(self.trajectories[0][k]))
+        self.split_points = np.array(self.split_points)
 
     def reset_trajectory(self, substep_no=None, traj_no=None):
         """

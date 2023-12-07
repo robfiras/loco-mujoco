@@ -2,7 +2,8 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("UnitreeH1.walk")
+env = LocoEnv.make("UnitreeH1.run")
+expert_data = env.create_dataset()
 
 action_dim = env.info.action_space.shape[0]
 

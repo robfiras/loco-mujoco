@@ -183,7 +183,7 @@ class BaseRobotHumanoid(LocoEnv):
 
         if dataset_type == "real":
             traj_data_freq = 500  # hz
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
@@ -192,18 +192,46 @@ class BaseRobotHumanoid(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
 
-            traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent.parent / path,
+            traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent / path,
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq),
                                clip_trajectory_to_joint_ranges=clip_trajectory_to_joint_ranges)
 
         elif dataset_type == "perfect":
-            # todo: generate and add this dataset
-            raise ValueError(f"currently not implemented.")
+            traj_data_freq = 100  # hz
+            traj_files = mdp.get_traj_files_from_dataset(path, traj_data_freq)
+            traj_params = dict(traj_files=traj_files,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=clip_trajectory_to_joint_ranges)
 
-        mdp.load_trajectory(traj_params,  warn=False)
+        elif dataset_type == "preference":
+            traj_data_freq = 100  # hz
+            infos = []
+            all_paths = next(os.walk(Path(loco_mujoco.__file__).resolve().parent / path), (None, None, []))[2]
+            for i, p in enumerate(all_paths):
+                traj_files = mdp.get_traj_files_from_dataset(path + p, traj_data_freq)
+                if i == 0:
+                    all_traj_files = traj_files
+                else:
+                    for key in traj_files.keys():
+                        if key == "split_points":
+                            all_traj_files[key] = np.concatenate([all_traj_files[key],
+                                                                  traj_files[key][1:] + all_traj_files[key][-1]])
+                        else:
+                            all_traj_files[key] = np.concatenate([all_traj_files[key], traj_files[key]])
+                info = p.split(".")[0]
+                info = info.split("_")[-2]
+                n_traj = len(traj_files["split_points"]) - 1
+                infos += [info] * n_traj
+
+            traj_params = dict(traj_files=all_traj_files,
+                               traj_dt=(1 / traj_data_freq),
+                               traj_info = infos,
+                               control_dt=(1 / desired_contr_freq),
+                               clip_trajectory_to_joint_ranges=clip_trajectory_to_joint_ranges)
+
+
+        mdp.load_trajectory(traj_params, warn=False)
 
         return mdp
-
-
-

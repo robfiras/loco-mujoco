@@ -21,7 +21,8 @@ class Atlas(BaseRobotHumanoid):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
-                                     data_types=["real"])
+                                     data_types=["real", "perfect"],
+                                     non_combinable=[("carry", None, "perfect")])
 
     def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
                  weight_mass=None, **kwargs):
@@ -185,7 +186,11 @@ class Atlas(BaseRobotHumanoid):
         check_validity_task_mode_dataset(Atlas.__name__, task, None, dataset_type,
                                          *Atlas.valid_task_confs.get_all())
 
-        path = "datasets/humanoids/02-constspeed_ATLAS.npz"
+        if dataset_type == "real":
+            path = "datasets/humanoids/real/02-constspeed_ATLAS.npz"
+        else:
+            path = "datasets/humanoids/perfect/atlas_walk/perfect_expert_dataset_det.npz"
+
         return BaseRobotHumanoid.generate(Atlas, path, task, dataset_type, **kwargs)
 
     @staticmethod

@@ -7,9 +7,10 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("Talos.carry")
+    mdp = LocoEnv.make("Talos.walk.perfect", disable_arms=True)
+    dataset = mdp.create_dataset()
 
-    mdp.play_trajectory_from_velocity(n_episodes=3, n_steps_per_episode=500)
+    mdp.play_trajectory(n_episodes=30, n_steps_per_episode=500)
 
 
 if __name__ == '__main__':

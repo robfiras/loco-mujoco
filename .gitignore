@@ -5,6 +5,6 @@ logs/
 None/
 .pytest_cache/
 .DS_Store
-datasets/
+loco_mujoco/datasets/
 mushroom_rl_recordings/
 record_all/

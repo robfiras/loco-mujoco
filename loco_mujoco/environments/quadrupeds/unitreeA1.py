@@ -24,7 +24,7 @@ class UnitreeA1(LocoEnv):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["simple", "hard"],
-                                     data_types=["real"])
+                                     data_types=["real", "perfect"])
 
     def __init__(self, action_mode="torque", setup_random_rot=False,
                  default_target_velocity=0.5, camera_params=None, **kwargs):
@@ -496,8 +496,11 @@ class UnitreeA1(LocoEnv):
         # Generate the MDP
         # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
-            path = "datasets/quadrupeds/walk_straight.npz"
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if dataset_type == "real":
+                path = "datasets/quadrupeds/real/walk_straight.npz"
+            elif dataset_type == "perfect":
+                path = "datasets/quadrupeds/perfect/unitreea1_simple/perfect_expert_dataset_det.npz"
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
@@ -506,10 +509,13 @@ class UnitreeA1(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / path
         elif task == "hard":
-            path = "datasets/quadrupeds/walk_8_dir.npz"
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if dataset_type == "real":
+                path = "datasets/quadrupeds/real/walk_8_dir.npz"
+            elif dataset_type == "perfect":
+                path = "datasets/quadrupeds/perfect/unitreea1_hard/perfect_expert_dataset_det.npz"
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
@@ -518,7 +524,7 @@ class UnitreeA1(LocoEnv):
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / path
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -531,8 +537,10 @@ class UnitreeA1(LocoEnv):
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
-            # todo: generate and add this dataset
-            raise ValueError(f"currently not implemented.")
+            traj_data_freq = 100  # hz
+            traj_params = dict(traj_path=traj_path,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq))
 
         mdp.load_trajectory(traj_params)
 

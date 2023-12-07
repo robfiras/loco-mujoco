@@ -21,9 +21,10 @@ class UnitreeH1(BaseRobotHumanoid):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["walk", "run", "carry"],
-                                     data_types=["real"])
+                                     data_types=["real", "perfect"],
+                                     non_combinable=[("carry", None, "perfect")])
 
-    def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
+    def __init__(self, disable_arms=True, disable_back_joint=False, hold_weight=False,
                  weight_mass=None, **kwargs):
         """
         Constructor.
@@ -189,11 +190,16 @@ class UnitreeH1(BaseRobotHumanoid):
         """
         check_validity_task_mode_dataset(UnitreeH1.__name__, task, None, dataset_type,
                                          *UnitreeH1.valid_task_confs.get_all())
-
-        if task == "run":
-            path = "datasets/humanoids/05-run_UnitreeH1.npz"
-        else:
-            path = "datasets/humanoids/02-constspeed_UnitreeH1.npz"
+        if dataset_type == "real":
+            if task == "run":
+                path = "datasets/humanoids/real/05-run_UnitreeH1.npz"
+            else:
+                path = "datasets/humanoids/real/02-constspeed_UnitreeH1.npz"
+        elif dataset_type == "perfect":
+            if task == "run":
+                path = "datasets/humanoids/perfect/unitreeh1_run/perfect_expert_dataset_det.npz"
+            else:
+                path = "datasets/humanoids/perfect/unitreeh1_walk/perfect_expert_dataset_det.npz"
 
         return BaseRobotHumanoid.generate(UnitreeH1, path, task, dataset_type,
                                           clip_trajectory_to_joint_ranges=True, **kwargs)

@@ -256,33 +256,6 @@ class LocoEnv(MultiMuJoCo):
 
         return np.arange(len(self.obs_helper.observation_spec) - 2)
 
-    def obs_to_kinematics_conversion(self, obs):
-        """
-        Calculates a dictionary containing the kinematics given the observation.
-
-        Args:
-            obs (np.array): Current observation;
-
-        Returns:
-            Dictionary containing the keys specified in observation_spec with the corresponding
-            values from the observation.
-
-        """
-
-        obs = np.atleast_2d(obs)
-        rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
-        num_data = len(obs)
-        dataset = dict()
-        for i, key in enumerate(rel_keys):
-            if i < 2:
-                # fill with zeros for x and y position
-                data = np.zeros(num_data)
-            else:
-                data = obs[:, i-2]
-            dataset[key] = data
-
-        return dataset
-
     def get_obs_idx(self, key):
         """
         Returns a list of indices corresponding to the respective key.
@@ -765,6 +738,56 @@ class LocoEnv(MultiMuJoCo):
 
         pass
 
+    def get_traj_files_from_dataset(self, dataset_path, freq=None):
+        """
+        Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
+        the x and z positions are calculated based on the velocity.
+
+        Args:
+            dataset_path (str): Path to the dataset.
+            freq (float): Frequency of the data in obs.
+
+        Returns:
+            Dictionary containing the keys specified in observation_spec with the corresponding
+            values from the dataset.
+
+        """
+
+        dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
+        states = dataset["states"]
+        last = dataset["last"]
+
+        states = np.atleast_2d(states)
+        rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
+        num_data = len(states)
+        dataset = dict()
+        for i, key in enumerate(rel_keys):
+            if i < 2:
+                if freq is None:
+                    # fill with zeros for x and y position
+                    data = np.zeros(num_data)
+                else:
+                    # compute positions from velocities
+                    dt = 1 / float(freq)
+                    assert len(states) > 2
+                    vel_idx = rel_keys.index("d" + key) - 2
+                    data = [0.0]
+                    for j, o in enumerate(states[:-1, vel_idx], 1):
+                        if last is not None and last[j - 1] == 1:
+                            data.append(0.0)
+                        else:
+                            data.append(data[-1] + dt * o)
+                    data = np.array(data)
+            else:
+                data = states[:, i - 2]
+            dataset[key] = data
+
+        # add split points
+        if len(states) > 2:
+            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
+
+        return dataset
+
     @classmethod
     def register(cls):
         """
@@ -916,20 +939,70 @@ class LocoEnv(MultiMuJoCo):
 
     _registered_envs = dict()
 
+<<<<<<< Updated upstream
+=======
+    @classmethod
+    def download_all_datasets(cls):
+        """
+        Download and installs all datasets.
+
+        """
+
+        dataset_path = Path(loco_mujoco.__file__).resolve().parent / "datasets"
+
+        print("Downloading Humanoid Datasets ...\n")
+        dataset_path_humanoid = dataset_path / "humanoids"
+        dataset_path_humanoid.mkdir(parents=True, exist_ok=True)
+        dataset_path_humanoid_str = str(dataset_path_humanoid)
+        humanoid_url = "https://zenodo.org/records/10102870/files/humanoid_datasets_v0.1.zip?download=1"
+        wget.download(humanoid_url, out=dataset_path_humanoid_str)
+        file_name = "humanoid_datasets_v0.1.zip"
+        file_path = str(dataset_path_humanoid / file_name)
+        with zipfile.ZipFile(file_path, "r") as zip_ref:
+            zip_ref.extractall(dataset_path_humanoid_str)
+        os.remove(file_path)
+
+        print("\nDownloading Quadruped Datasets ...\n")
+        dataset_path_quadrupeds = dataset_path / "quadrupeds"
+        dataset_path_quadrupeds.mkdir(parents=True, exist_ok=True)
+        dataset_path_quadrupeds_str = str(dataset_path_quadrupeds)
+        quadruped_url = "https://zenodo.org/records/10102870/files/quadruped_datasets_v0.1.zip?download=1"
+        wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
+        file_name = "quadruped_datasets_v0.1.zip"
+        file_path = str(dataset_path_quadrupeds / file_name)
+        with zipfile.ZipFile(file_path, "r") as zip_ref:
+            zip_ref.extractall(dataset_path_quadrupeds_str)
+        os.remove(file_path)
+
+>>>>>>> Stashed changes
 
 class ValidTaskConf:
 
     """ Simple class that holds all valid configurations of an environments. """
 
     def __init__(self, tasks=None, modes=None, data_types=None, non_combinable=None):
+        """
+
+        Args:
+            tasks (list): List of valid tasks.
+            modes (list): List of valid modes.
+            data_types (list): List of valid data_types.
+            non_combinable (list): List of tuples ("task", "mode", "dataset_type"),
+                which are NOT allowed to be combined. If one of them is None, it is neglected.
+
+        """
 
         self.tasks = tasks
         self.modes = modes
         self.data_types = data_types
-        self._non_combinable = non_combinable
+        self.non_combinable = non_combinable
+        if non_combinable is not None:
+            for nc in non_combinable:
+                assert len(nc) == 3
 
     def get_all(self):
-        return deepcopy(self.tasks), deepcopy(self.modes), deepcopy(self.data_types)
+        return deepcopy(self.tasks), deepcopy(self.modes),\
+               deepcopy(self.data_types), deepcopy(self.non_combinable)
 
     def get_all_combinations(self):
         """
@@ -961,6 +1034,15 @@ class ValidTaskConf:
             if dt is not None:
                 conf["data_type"] = dt
 
-            confs.append(conf)
+            # check for non-combinable
+            if self.non_combinable is not None:
+                for nc in self.non_combinable:
+                    bad_t, bad_m, bad_dt = nc
+                    if not((t == bad_t or bad_t is None) and
+                           (m == bad_m or bad_m is None) and
+                           (dt == bad_dt or bad_dt is None)):
+                        confs.append(conf)
+            else:
+                confs.append(conf)
 
         return confs

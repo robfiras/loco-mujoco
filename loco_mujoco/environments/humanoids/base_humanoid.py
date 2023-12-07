@@ -8,9 +8,7 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 
 import loco_mujoco
-from loco_mujoco.environments import ValidTaskConf
 from loco_mujoco.environments import LocoEnv
-from loco_mujoco.utils import check_validity_task_mode_dataset
 
 
 class BaseHumanoid(LocoEnv):
@@ -18,9 +16,6 @@ class BaseHumanoid(LocoEnv):
     MuJoCo simulation of a base humanoid model.
 
     """
-
-    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
-                                     data_types=["real"])
 
     def __init__(self, use_muscles=False, use_box_feet=True, disable_arms=True, alpha_box_feet=0.5, **kwargs):
         """
@@ -214,12 +209,13 @@ class BaseHumanoid(LocoEnv):
         return grf
 
     @staticmethod
-    def generate(env, task="walk", dataset_type="real", debug=False, **kwargs):
+    def generate(env, path, task="walk", dataset_type="real", debug=False, **kwargs):
         """
         Returns a Humanoid environment and a dataset corresponding to the specified task.
 
         Args:
             env (class): Humanoid class, either HumanoidTorque or HumanoidMuscle.
+            path (str): Path to the dataset.
             task (str): Main task to solve. Either "walk" or "run".
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
                 reference trajectory. This data does not perfectly match the kinematics
@@ -232,8 +228,6 @@ class BaseHumanoid(LocoEnv):
 
         """
 
-        check_validity_task_mode_dataset(BaseHumanoid.__name__, task, None, dataset_type,
-                                         *BaseHumanoid.valid_task_confs.get_all())
         if "reward_type" in kwargs.keys():
             reward_type = kwargs["reward_type"]
             del kwargs["reward_type"]
@@ -241,8 +235,7 @@ class BaseHumanoid(LocoEnv):
             reward_type = "target_velocity"
 
         if task == "walk":
-            path = "datasets/humanoids/02-constspeed_reduced_humanoid.npz"
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
@@ -250,15 +243,14 @@ class BaseHumanoid(LocoEnv):
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / path
             if "reward_params" in kwargs.keys():
                 reward_params = kwargs["reward_params"]
                 del kwargs["reward_params"]
             else:
                 reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            path = "datasets/humanoids/05-run_reduced_humanoid.npz"
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
@@ -266,7 +258,7 @@ class BaseHumanoid(LocoEnv):
                 path = path.split("/")
                 path.insert(2, "mini_datasets")
                 path = "/".join(path)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / path
             if "reward_params" in kwargs.keys():
                 reward_params = kwargs["reward_params"]
                 del kwargs["reward_params"]
@@ -287,8 +279,11 @@ class BaseHumanoid(LocoEnv):
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
-            # todo: generate and add this dataset
-            raise ValueError(f"currently not implemented.")
+            traj_data_freq = 100  # hz
+            traj_files = mdp.get_traj_files_from_dataset(path, traj_data_freq)
+            traj_params = dict(traj_files=traj_files,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq))
 
         mdp.load_trajectory(traj_params, warn=False)
 
