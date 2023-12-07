@@ -1,6 +1,9 @@
 import os
 
+import wget
+import zipfile
 import warnings
+from pathlib import Path
 from copy import deepcopy
 from tempfile import mkdtemp
 from itertools import product
@@ -15,6 +18,7 @@ from mushroom_rl.utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 from mushroom_rl.utils.record import VideoRecorder
 
+import loco_mujoco
 from loco_mujoco.utils import Trajectory
 from loco_mujoco.utils import NoReward, CustomReward,\
     TargetVelocityReward, PosReward, DomainRandomizationHandler
@@ -223,7 +227,7 @@ class LocoEnv(MultiMuJoCo):
                     sample = self.trajectories.reset_trajectory()
                 elif self._init_step_no:
                     traj_len = self.trajectories.trajectory_length
-                    n_traj = self.trajectories.nnumber_of_trajectories
+                    n_traj = self.trajectories.number_of_trajectories
                     assert self._init_step_no <= traj_len * n_traj
                     substep_no = int(self._init_step_no % traj_len)
                     traj_no = int(self._init_step_no / traj_len)
@@ -581,7 +585,7 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_substeps)
+        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_intermediate_steps)
 
         return mean_grf
 
@@ -939,20 +943,16 @@ class LocoEnv(MultiMuJoCo):
 
     _registered_envs = dict()
 
-<<<<<<< Updated upstream
-=======
     @classmethod
     def download_all_datasets(cls):
         """
         Download and installs all datasets.
 
         """
-
-        dataset_path = Path(loco_mujoco.__file__).resolve().parent / "datasets"
+        dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "datasets"
 
         print("Downloading Humanoid Datasets ...\n")
         dataset_path_humanoid = dataset_path / "humanoids"
-        dataset_path_humanoid.mkdir(parents=True, exist_ok=True)
         dataset_path_humanoid_str = str(dataset_path_humanoid)
         humanoid_url = "https://zenodo.org/records/10102870/files/humanoid_datasets_v0.1.zip?download=1"
         wget.download(humanoid_url, out=dataset_path_humanoid_str)
@@ -962,9 +962,8 @@ class LocoEnv(MultiMuJoCo):
             zip_ref.extractall(dataset_path_humanoid_str)
         os.remove(file_path)
 
-        print("\nDownloading Quadruped Datasets ...\n")
+        print("Downloading Quadruped Datasets ...\n")
         dataset_path_quadrupeds = dataset_path / "quadrupeds"
-        dataset_path_quadrupeds.mkdir(parents=True, exist_ok=True)
         dataset_path_quadrupeds_str = str(dataset_path_quadrupeds)
         quadruped_url = "https://zenodo.org/records/10102870/files/quadruped_datasets_v0.1.zip?download=1"
         wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
@@ -974,7 +973,6 @@ class LocoEnv(MultiMuJoCo):
             zip_ref.extractall(dataset_path_quadrupeds_str)
         os.remove(file_path)
 
->>>>>>> Stashed changes
 
 class ValidTaskConf:
 
