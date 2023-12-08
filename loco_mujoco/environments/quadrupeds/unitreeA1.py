@@ -257,14 +257,14 @@ class UnitreeA1(LocoEnv):
         if self._action_mode == "torque":
             unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
         elif self._action_mode == "position":
-            unnormalized_action =  ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
+            unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
         elif self._action_mode == "position_difference":
             q_pos = self._data.qpos[6:]
             normalized_qpos = (q_pos - self.norm_act_mean) / self.norm_act_delta
             new_normalized_qpos = normalized_qpos + action * 0.3
             unnormalized_action = ((new_normalized_qpos.copy() * self.norm_act_delta) + self.norm_act_mean)
         else:
-            raise ValueError(f"Unknown aciton mode: {self._action_mode}")
+            raise ValueError(f"Unknown action mode: {self._action_mode}")
 
         return unnormalized_action
 
