@@ -158,12 +158,7 @@ class UnitreeA1(LocoEnv):
 
         if self.trajectories is not None:
             rot_mat_idx_arrow = self._get_idx("dir_arrow")
-            trunk_euler_orientation_idx = self._get_idx(["q_trunk_list", "q_trunk_tilt", "q_trunk_rotation"])
-            trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
-                                                 "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
             state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
-                                         trunk_euler_orientation_idx=trunk_euler_orientation_idx,
-                                         trunk_euler_vel_idx=trunk_euler_vel_idx,
                                          goal_velocity_idx=self._goal_velocity_idx)
             dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
                                                        state_callback=self._modify_observation_callback,
@@ -182,43 +177,67 @@ class UnitreeA1(LocoEnv):
 
         return np.arange(len(self.obs_helper.observation_spec))
 
-    def obs_to_kinematics_conversion(self, obs):
+    def get_traj_files_from_dataset(self, dataset_path, freq=None):
         """
-        Calculates a dictionary containing the kinematics given the observation.
+        Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
+        the x and z positions are calculated based on the velocity.
 
         Args:
-            obs (np.array): observations; Shouldn't be more than one trajectory!
+            dataset_path (str): Path to the dataset.
+            freq (float): Frequency of the data in obs.
 
         Returns:
             Dictionary containing the keys specified in observation_spec with the corresponding
-            values from the observation. Additionally, the goal direction and speed are computed.
+            values from the dataset.
 
         """
 
-        obs = np.atleast_2d(obs)
+        dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
+        states = dataset["states"]
+        last = dataset["last"]
+
+        states = np.atleast_2d(states)
         rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
-        num_data = len(obs)
+        num_data = len(states)
         dataset = dict()
         for i, key in enumerate(rel_keys):
             if i < 2:
-                # fill with zeros for x and y position
-                dataset[key] = np.zeros(num_data)
-            elif key == "dir_arrow":
-                sin_cos = obs[:, i-2:i]
-                angle = np.arctan2(sin_cos[:, 0],sin_cos[:, 1]) + np.pi/2
-                if num_data > 1:
-                    dataset[key] = [angle2mat_xy(a).reshape((9,)) for a in angle]
+                if freq is None:
+                    # fill with zeros for x and y position
+                    data = np.zeros(num_data)
                 else:
-                    dataset[key] = angle2mat_xy(angle).reshape((9,))
+                    # compute positions from velocities
+                    dt = 1 / float(freq)
+                    assert len(states) > 2
+                    vel_idx = rel_keys.index("d" + key) - 2
+                    data = [0.0]
+                    for j, o in enumerate(states[:-1, vel_idx], 1):
+                        if last is not None and last[j - 1] == 1:
+                            data.append(0.0)
+                        else:
+                            data.append(data[-1] + dt * o)
+                    data = np.array(data)
+            elif key == "dir_arrow":
+                sin_cos = states[:, i-2:i]
+                angle = np.arctan2(sin_cos[:, 1], sin_cos[:, 0]) #+ np.pi/2
+                if num_data > 1:
+                    data = [angle2mat_xy(a).reshape((9,)) for a in angle]
+                else:
+                    data = angle2mat_xy(angle).reshape((9,))
                 # calculate goal_speed
-                dq_trunk_tx = obs[:, rel_keys.index("dq_trunk_tx")-2]
-                dq_trunk_ty = obs[:, rel_keys.index("dq_trunk_ty")-2]
+                dq_trunk_tx = states[:, rel_keys.index("dq_trunk_tx")-2]
+                dq_trunk_ty = states[:, rel_keys.index("dq_trunk_ty")-2]
                 vels = np.stack([dq_trunk_tx, dq_trunk_ty], axis=1)
                 goal_speed = np.linalg.norm(vels, axis=1)
                 goal_speed = np.mean(goal_speed) * np.ones_like(goal_speed)
                 dataset["goal_speed"] = goal_speed
             else:
-                dataset[key] = obs[:, i-2]
+                data = states[:, i - 2]
+            dataset[key] = data
+
+        # add split points
+        if len(states) > 2:
+            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
 
         return dataset
 
@@ -309,12 +328,8 @@ class UnitreeA1(LocoEnv):
         """
 
         rot_mat_idx_arrow = self._get_idx("dir_arrow")
-        trunk_euler_orientation_idx = self._get_idx(["q_trunk_list", "q_trunk_tilt", "q_trunk_rotation"])
-        trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
-                                             "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
 
-        obs = self._modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
-                                                 rot_mat_idx_arrow, self._goal_velocity_idx)
+        obs = self._modify_observation_callback(obs, rot_mat_idx_arrow, self._goal_velocity_idx)
 
         if self._use_foot_forces:
             obs = np.concatenate([obs,
@@ -534,7 +549,8 @@ class UnitreeA1(LocoEnv):
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
             traj_data_freq = 100  # hz
-            traj_params = dict(traj_path=traj_path,
+            traj_files = mdp.get_traj_files_from_dataset(path, traj_data_freq)
+            traj_params = dict(traj_files=traj_files,
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
 
@@ -552,8 +568,7 @@ class UnitreeA1(LocoEnv):
         return 43
 
     @staticmethod
-    def _modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
-                                     rot_mat_idx_arrow, goal_velocity_idx):
+    def _modify_observation_callback(obs, rot_mat_idx_arrow, goal_velocity_idx):
         """
         Transforms the rotation matrix from obs to a sin-cos feature.
 

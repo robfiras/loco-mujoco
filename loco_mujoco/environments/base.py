@@ -489,6 +489,56 @@ class LocoEnv(MultiMuJoCo):
             elif ot == ObservationType.SITE_ROT:
                 self._data.site(name).xmat = value
 
+    def get_traj_files_from_dataset(self, dataset_path, freq=None):
+        """
+        Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
+        the x and z positions are calculated based on the velocity.
+
+        Args:
+            dataset_path (str): Path to the dataset.
+            freq (float): Frequency of the data in obs.
+
+        Returns:
+            Dictionary containing the keys specified in observation_spec with the corresponding
+            values from the dataset.
+
+        """
+
+        dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
+        states = dataset["states"]
+        last = dataset["last"]
+
+        states = np.atleast_2d(states)
+        rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
+        num_data = len(states)
+        dataset = dict()
+        for i, key in enumerate(rel_keys):
+            if i < 2:
+                if freq is None:
+                    # fill with zeros for x and y position
+                    data = np.zeros(num_data)
+                else:
+                    # compute positions from velocities
+                    dt = 1 / float(freq)
+                    assert len(states) > 2
+                    vel_idx = rel_keys.index("d" + key) - 2
+                    data = [0.0]
+                    for j, o in enumerate(states[:-1, vel_idx], 1):
+                        if last is not None and last[j - 1] == 1:
+                            data.append(0.0)
+                        else:
+                            data.append(data[-1] + dt * o)
+                    data = np.array(data)
+            else:
+                data = states[:, i - 2]
+            dataset[key] = data
+
+        # add split points
+        if len(states) > 2:
+            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
+
+        return dataset
+
     def _get_observation_space(self):
         """
         Returns a tuple of the lows and highs (np.array) of the observation space.
@@ -742,56 +792,6 @@ class LocoEnv(MultiMuJoCo):
 
         pass
 
-    def get_traj_files_from_dataset(self, dataset_path, freq=None):
-        """
-        Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
-        the x and z positions are calculated based on the velocity.
-
-        Args:
-            dataset_path (str): Path to the dataset.
-            freq (float): Frequency of the data in obs.
-
-        Returns:
-            Dictionary containing the keys specified in observation_spec with the corresponding
-            values from the dataset.
-
-        """
-
-        dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
-        states = dataset["states"]
-        last = dataset["last"]
-
-        states = np.atleast_2d(states)
-        rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
-        num_data = len(states)
-        dataset = dict()
-        for i, key in enumerate(rel_keys):
-            if i < 2:
-                if freq is None:
-                    # fill with zeros for x and y position
-                    data = np.zeros(num_data)
-                else:
-                    # compute positions from velocities
-                    dt = 1 / float(freq)
-                    assert len(states) > 2
-                    vel_idx = rel_keys.index("d" + key) - 2
-                    data = [0.0]
-                    for j, o in enumerate(states[:-1, vel_idx], 1):
-                        if last is not None and last[j - 1] == 1:
-                            data.append(0.0)
-                        else:
-                            data.append(data[-1] + dt * o)
-                    data = np.array(data)
-            else:
-                data = states[:, i - 2]
-            dataset[key] = data
-
-        # add split points
-        if len(states) > 2:
-            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
-
-        return dataset
-
     @classmethod
     def register(cls):
         """
@@ -949,10 +949,10 @@ class LocoEnv(MultiMuJoCo):
         Download and installs all datasets.
 
         """
-        dataset_path = Path(loco_mujoco.__file__).resolve().parent.parent / "datasets"
+        dataset_path = Path(loco_mujoco.__file__).resolve().parent / "datasets"
 
         print("Downloading Humanoid Datasets ...\n")
-        dataset_path_humanoid = dataset_path / "humanoids"
+        dataset_path_humanoid = dataset_path / "humanoids/real"
         dataset_path_humanoid_str = str(dataset_path_humanoid)
         humanoid_url = "https://zenodo.org/records/10102870/files/humanoid_datasets_v0.1.zip?download=1"
         wget.download(humanoid_url, out=dataset_path_humanoid_str)
@@ -963,7 +963,7 @@ class LocoEnv(MultiMuJoCo):
         os.remove(file_path)
 
         print("Downloading Quadruped Datasets ...\n")
-        dataset_path_quadrupeds = dataset_path / "quadrupeds"
+        dataset_path_quadrupeds = dataset_path / "quadrupeds/real"
         dataset_path_quadrupeds_str = str(dataset_path_quadrupeds)
         quadruped_url = "https://zenodo.org/records/10102870/files/quadruped_datasets_v0.1.zip?download=1"
         wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
