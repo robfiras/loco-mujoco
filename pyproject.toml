@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools", "wheel", "wget"]
 
 [project]
 name = "loco-mujoco"
@@ -35,4 +35,6 @@ Repository = "https://github.com/robfiras/loco-mujoco"
 Issues = "https://github.com/robfiras/loco-mujoco/issues"
 
 [project.scripts]
-loco-mujoco-download = "loco_mujoco:download_all_datasets"
+loco-mujoco-download = "loco_mujoco.utils:download_all_datasets"
+loco-mujoco-download-real = "loco_mujoco.utils:download_real_datasets"
+loco-mujoco-download-perfect = "loco_mujoco.utils:download_perfect_datasets"

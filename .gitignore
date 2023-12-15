@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 logs/
 None/
+dist/
 .pytest_cache/
 .DS_Store
 loco_mujoco/datasets/

@@ -1,5 +1,4 @@
 from setuptools import setup, find_packages
-from os import path
 import glob
 from loco_mujoco import __version__
 
