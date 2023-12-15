@@ -1,5 +1,22 @@
-<mujoco model="biped_v2">
+<mujoco model="kuavo">
   <compiler angle="radian" autolimits="true"/>
+
+
+  <default>
+    <default class="kuavo">
+      <geom type="mesh"/>
+      <joint damping="1" armature="0.1"/>
+      <default class="visual">
+        <geom contype="0" conaffinity="0" group="0" material="black"/>
+      </default>
+      <default class="collision">
+        <geom group="1" mass="0" density="0"/>
+      </default>
+      <site size="0.001" rgba="0.5 0.5 0.5 0.3" group="4"/>
+    </default>
+    <motor ctrllimited="true" ctrlrange="-0.95 0.95"/>
+  </default>
+
   <statistic meansize="0.184451" extent="1.17263" center="0.0045332 6.59129e-07 -0.196869"/>
   <asset>
     <mesh name="torso" file="./meshes/torso.obj"/>
@@ -21,11 +38,33 @@
     <mesh name="r_uarm_z" file="./meshes/r_uarm_z.obj"/>
     <mesh name="r_uarm" file="./meshes/r_uarm.obj"/>
     <mesh name="r_larm" file="./meshes/r_larm.obj"/>
+
+    <texture builtin="gradient" height="100" rgb1=".4 .5 .6" rgb2="0 0 0" type="skybox" width="100"/>
+    <texture name="texplane" type="2d" builtin="checker" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" width="100" height="100"/>
+    <material name="MatPlane" reflectance="0.5" texture="texplane" texrepeat="1 1" texuniform="true"/>
+
   </asset>
   <worldbody>
-    <body name="torso">
+
+    <geom name="floor" friction="1 .1 .1" pos="0 0 0" size="500 500 0.125" type="plane" material="MatPlane" condim="3" conaffinity="1" contype="1" group="2" rgba="0.8 0.9 0.8 1"></geom>
+    <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1" castshadow="false"/>
+
+
+    <body name="torso" pos="0 0 0.85" childclass="kuavo">
+      
       <inertial pos="0.0089994 4.841e-05 0.0711" quat="0.700523 0.700511 -0.0962969 0.0963229" mass="13.13" diaginertia="0.0478848 0.0430132 0.024162"/>
-      <joint name="world_joint" type="free"/>
+      
+      
+      <!-- <joint name="world_joint" type="free"/> -->
+
+      <joint name="pelvis_tx" type="slide" pos="0 0 0" axis="       1        0        0" limited="false" range="      -500        500" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="pelvis_tz" type="slide" pos="0 0 0" axis="       0        1        0" limited="false" range="      -300        300" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="pelvis_ty" type="slide" pos="0 0 0" axis="       0        0        1" limited="false" range="      -100        200" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="pelvis_tilt" type="hinge" pos="0 0 0" axis="       0        -1        0" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="pelvis_list" type="hinge" pos="0 0 0" axis="       1        0        0" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
+      <joint name="pelvis_rotation" type="hinge" pos="0 0 0" axis="       0        0        1" limited="false" range=" -1.5708   1.5708" ref="0" armature="0" damping="0" stiffness="0"></joint>
+
+    
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="torso"/>
       <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="torso"/>
       <body name="l_uleg_z" pos="0 0.11 -0.0965">
@@ -138,4 +177,43 @@
       </body>
     </body>
   </worldbody>
+
+  <actuator>
+    <motor name='l_hip_z'     joint='l_hip_z'  gear="200"/>
+    <motor name='l_hip_x'    joint='l_hip_x'  gear="200"/>
+    <motor name='l_hip_y'   joint='l_hip_y'   gear="200"/>
+    <motor name='l_knee'  joint='l_knee'  gear="200"/>
+    <motor name='l_ankle' joint='l_ankle'   gear="200"/>
+    <motor name='r_hip_z'     joint='r_hip_z'      gear="200"/>
+    <motor name='r_hip_x'    joint='r_hip_x'      gear="200"/>
+    <motor name='r_hip_y'   joint='r_hip_y'   gear="200"/>
+    <motor name='r_knee'  joint='r_knee'   gear="200"/>
+    <motor name='r_ankle' joint='r_ankle'   gear="200"/>
+
+    <motor name='l_shoulder_y'     joint='l_shoulder_y'  gear="20"/>
+    <motor name='l_shoulder_z'    joint='l_shoulder_z'    gear="20"/>
+    <motor name='l_shoulder_x'   joint='l_shoulder_x'    gear="20"/>
+    <motor name='l_elbow'  joint='l_elbow'   gear="20"/>
+
+    <motor name='r_shoulder_y'     joint='r_shoulder_y'   gear="20"/>
+    <motor name='r_shoulder_z'    joint='r_shoulder_z'    gear="20"/>
+    <motor name='r_shoulder_x'   joint='r_shoulder_x'  gear="20"/>
+    <motor name='r_elbow'  joint='r_elbow'   gear="20"/>
+
+  </actuator>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 </mujoco>
