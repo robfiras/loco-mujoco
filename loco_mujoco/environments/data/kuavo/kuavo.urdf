@@ -1,0 +1,1177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="biped_v2">
+  <mujoco>
+    <compiler strippath="false" discardvisual="false"/>
+  </mujoco>
+  <link name="world"/>
+  <joint name="world_joint" type="floating">
+    <parent link="world"/>
+    <child link="torso"/>
+  </joint>
+  <link
+    name="torso">
+    <inertial>
+      <origin
+        xyz="0.0089994 4.841E-05 0.0711"
+        rpy="0 0 0" />
+      <mass
+        value="13.13" />
+      <inertia
+        ixx="0.04753"
+        ixy="8.2124E-07"
+        ixz="0.0012659"
+        iyy="0.024162"
+        iyz="4.7311E-07"
+        izz="0.043368" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/torso.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/torso.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="l_uleg_z">
+    <inertial>
+      <origin
+        xyz="-0.086894 1.1718E-10 -0.019971"
+        rpy="0 0 0" />
+      <mass
+        value="0.23915" />
+      <inertia
+        ixx="0.00019621"
+        ixy="2.8207E-08"
+        ixz="-0.00020599"
+        iyy="0.000693"
+        iyz="2.8208E-08"
+        izz="0.00052444" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uleg_z.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.86667 0.86667 0.8902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uleg_z.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_hip_z"
+    type="revolute">
+    <origin
+      xyz="0 0.11 -0.0965"
+      rpy="0 0 0" />
+    <parent
+      link="torso" />
+    <child
+      link="l_uleg_z" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.04"
+      upper="1.04"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_hip_z"/>
+    <actuator name="l_hip_z_motor"/>
+  </transmission>
+  <link
+    name="l_uleg_x">
+    <inertial>
+      <origin
+        xyz="0.091572 -0.03382 -4.1689E-05"
+        rpy="0 0 0" />
+      <mass
+        value="2.4984" />
+      <inertia
+        ixx="0.002874"
+        ixy="0.00028125"
+        ixz="7.8653E-07"
+        iyy="0.0035088"
+        iyz="1.2225E-07"
+        izz="0.0028211" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uleg_x.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uleg_x.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_hip_x"
+    type="revolute">
+    <origin
+      xyz="-0.1335 0 -0.08"
+      rpy="0 0 0" />
+    <parent
+      link="l_uleg_z" />
+    <child
+      link="l_uleg_x" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="-0.52"
+      upper="1.57"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_hip_x"/>
+    <actuator name="l_hip_x_motor"/>
+  </transmission>
+  <link
+    name="l_uleg">
+    <inertial>
+      <origin
+        xyz="0.00102 0.018509 -0.021513"
+        rpy="0 0 0" />
+      <mass
+        value="2.2508" />
+      <inertia
+        ixx="0.007381"
+        ixy="-3.1108E-05"
+        ixz="0.00037536"
+        iyy="0.0095158"
+        iyz="0.00052692"
+        izz="0.0025951" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uleg.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uleg.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_hip_y"
+    type="revolute">
+    <origin
+      xyz="0.1355 -0.0015484 0"
+      rpy="0 0 0" />
+    <parent
+      link="l_uleg_x" />
+    <child
+      link="l_uleg" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-1.74"
+      upper="0.52"
+      effort="74"
+      velocity="47" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_hip_y"/>
+    <actuator name="l_hip_y_motor"/>
+  </transmission>
+  <link
+    name="l_lleg">
+    <inertial>
+      <origin
+        xyz="-4.8585E-05 -0.03165 -0.018299"
+        rpy="0 0 0" />
+      <mass
+        value="1.3508" />
+      <inertia
+        ixx="0.0040885"
+        ixy="-1.8264E-07"
+        ixz="3.2084E-07"
+        iyy="0.0046773"
+        iyz="-5.8388E-05"
+        izz="0.0010996" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_lleg.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_lleg.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_knee"
+    type="revolute">
+    <origin
+      xyz="0 0.03365 -0.23"
+      rpy="0 0 0" />
+    <parent
+      link="l_uleg" />
+    <child
+      link="l_lleg" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-0.174"
+      upper="2.53"
+      effort="74"
+      velocity="47" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_knee"/>
+    <actuator name="l_knee_motor"/>
+  </transmission>
+  <link
+    name="l_foot">
+    <inertial>
+      <origin
+        xyz="-0.0017103 -0.0012414 -0.028758"
+        rpy="0 0 0" />
+      <mass
+        value="0.19291" />
+      <inertia
+        ixx="6.7544E-05"
+        ixy="-5.0585E-06"
+        ixz="1.3775E-05"
+        iyy="0.00030983"
+        iyz="9.9132E-06"
+        izz="0.00027205" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_foot.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_foot.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <frame link="l_foot" name="l_foot_sole" xyz="0 0 -0.05"/>
+  <frame link="l_foot" name="l_foot_toe" xyz="0.075 0 -0.05"/>
+  <frame link="l_foot" name="l_foot_heel" xyz="-0.075 0 -0.05"/>
+  <joint
+    name="l_ankle"
+    type="revolute">
+    <origin
+      xyz="0 -0.0239 -0.26"
+      rpy="0 0 0" />
+    <parent
+      link="l_lleg" />
+    <child
+      link="l_foot" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-1.39"
+      upper="0.52"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_ankle"/>
+    <actuator name="l_ankle_motor"/>
+  </transmission>
+  <link
+    name="r_uleg_z">
+    <inertial>
+      <origin
+        xyz="-0.086894 1.1718E-10 -0.019971"
+        rpy="0 0 0" />
+      <mass
+        value="0.23915" />
+      <inertia
+        ixx="0.00019621"
+        ixy="2.8207E-08"
+        ixz="-0.00020599"
+        iyy="0.000693"
+        iyz="2.8208E-08"
+        izz="0.00052444" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uleg_z.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.86667 0.86667 0.8902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uleg_z.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_hip_z"
+    type="revolute">
+    <origin
+      xyz="0 -0.11 -0.0965"
+      rpy="0 0 0" />
+    <parent
+      link="torso" />
+    <child
+      link="r_uleg_z" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.04"
+      upper="1.04"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_hip_z"/>
+    <actuator name="r_hip_z_motor"/>
+  </transmission>
+  <link
+    name="r_uleg_x">
+    <inertial>
+      <origin
+        xyz="0.091614 0.033814 -6.3136E-05"
+        rpy="0 0 0" />
+      <mass
+        value="2.4984" />
+      <inertia
+        ixx="0.0028694"
+        ixy="-0.00028224"
+        ixz="-2.7675E-06"
+        iyy="0.0035087"
+        iyz="6.8462E-07"
+        izz="0.0028259" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uleg_x.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uleg_x.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_hip_x"
+    type="revolute">
+    <origin
+      xyz="-0.1335 0 -0.08"
+      rpy="0 0 0" />
+    <parent
+      link="r_uleg_z" />
+    <child
+      link="r_uleg_x" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="-1.57"
+      upper="0.52"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_hip_x"/>
+    <actuator name="r_hip_x_motor"/>
+  </transmission>
+  <link
+    name="r_uleg">
+    <inertial>
+      <origin
+        xyz="0.00097425 -0.021838 -0.021516"
+        rpy="0 0 0" />
+      <mass
+        value="2.2508" />
+      <inertia
+        ixx="0.0073847"
+        ixy="3.0173E-05"
+        ixz="0.0003777"
+        iyy="0.0095158"
+        iyz="-0.00052695"
+        izz="0.0025913" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uleg.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uleg.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_hip_y"
+    type="revolute">
+    <origin
+      xyz="0.1355 0.0025484 0"
+      rpy="0 0 0" />
+    <parent
+      link="r_uleg_x" />
+    <child
+      link="r_uleg" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-1.74"
+      upper="0.52"
+      effort="74"
+      velocity="47" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_hip_y"/>
+    <actuator name="r_hip_y_motor"/>
+  </transmission>
+  <link
+    name="r_lleg">
+    <inertial>
+      <origin
+        xyz="1.503E-05 0.03165 -0.018335"
+        rpy="0 0 0" />
+      <mass
+        value="1.3508" />
+      <inertia
+        ixx="0.0040863"
+        ixy="-5.3705E-08"
+        ixz="-6.3356E-07"
+        iyy="0.0046773"
+        iyz="5.8528E-05"
+        izz="0.0011018" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_lleg.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_lleg.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_knee"
+    type="revolute">
+    <origin
+      xyz="0 -0.03365 -0.23"
+      rpy="0 0 0" />
+    <parent
+      link="r_uleg" />
+    <child
+      link="r_lleg" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-0.174"
+      upper="2.53"
+      effort="74"
+      velocity="47" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_knee"/>
+    <actuator name="r_knee_motor"/>
+  </transmission>
+  <link
+    name="r_foot">
+    <inertial>
+      <origin
+        xyz="-0.0017117 0.0012414 -0.028758"
+        rpy="0 0 0" />
+      <mass
+        value="0.19291" />
+      <inertia
+        ixx="6.7548E-05"
+        ixy="5.0585E-06"
+        ixz="1.3775E-05"
+        iyy="0.00030983"
+        iyz="-9.9127E-06"
+        izz="0.00027205" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_foot.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_foot.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <frame link="r_foot" name="r_foot_sole" xyz="0 0 -0.05"/>
+  <frame link="r_foot" name="r_foot_toe" xyz="0.075 0 -0.05"/>
+  <frame link="r_foot" name="r_foot_heel" xyz="-0.075 0 -0.05"/>
+  <joint
+    name="r_ankle"
+    type="revolute">
+    <origin
+      xyz="0 0.0239 -0.26"
+      rpy="0 0 0" />
+    <parent
+      link="r_lleg" />
+    <child
+      link="r_foot" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-1.39"
+      upper="0.52"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_ankle"/>
+    <actuator name="r_ankle_motor"/>
+  </transmission>
+  <link
+    name="l_uarm_y">
+    <inertial>
+      <origin
+        xyz="0.00028574 0.070052 0.028442"
+        rpy="0 0 0" />
+      <mass
+        value="1.9072" />
+      <inertia
+        ixx="0.0020789"
+        ixy="-3.3624E-06"
+        ixz="-8.463E-06"
+        iyy="0.0025249"
+        iyz="-0.00027283"
+        izz="0.0024093" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uarm_y.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uarm_y.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_shoulder_y"
+    type="revolute">
+    <origin
+      xyz="0 0.107 0.204"
+      rpy="0 0 0" />
+    <parent
+      link="torso" />
+    <child
+      link="l_uarm_y" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-3.14"
+      upper="1.57"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_shoulder_y"/>
+    <actuator name="l_shoulder_y_motor"/>
+  </transmission>
+  <link
+    name="l_uarm_z">
+    <inertial>
+      <origin
+        xyz="-0.0036271 -1.1381E-08 -0.052725"
+        rpy="0 0 0" />
+      <mass
+        value="0.68812" />
+      <inertia
+        ixx="0.00073442"
+        ixy="-8.1348E-11"
+        ixz="-1.8497E-05"
+        iyy="0.00050155"
+        iyz="6.5854E-09"
+        izz="0.00048799" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uarm_z.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uarm_z.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_shoulder_z"
+    type="revolute">
+    <origin
+      xyz="0 0.1265 0.05025"
+      rpy="0 0 0" />
+    <parent
+      link="l_uarm_y" />
+    <child
+      link="l_uarm_z" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="24.8"
+      velocity="42" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_shoulder_z"/>
+    <actuator name="l_shoulder_z_motor"/>
+  </transmission>
+  <link
+    name="l_uarm">
+    <inertial>
+      <origin
+        xyz="0.0090481 0.012219 -0.13528"
+        rpy="0 0 0" />
+      <mass
+        value="0.96113" />
+      <inertia
+        ixx="0.0024629"
+        ixy="-8.3685E-06"
+        ixz="2.2601E-05"
+        iyy="0.0028091"
+        iyz="0.00028922"
+        izz="0.00086343" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uarm.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_uarm.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_shoulder_x"
+    type="revolute">
+    <origin
+      xyz="-0.0194 0 -0.05425"
+      rpy="0 0 0" />
+    <parent
+      link="l_uarm_z" />
+    <child
+      link="l_uarm" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="-0.174"
+      upper="1.57"
+      effort="24.8"
+      velocity="42" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_shoulder_x"/>
+    <actuator name="l_shoulder_x_motor"/>
+  </transmission>
+  <link
+    name="l_larm">
+    <inertial>
+      <origin
+        xyz="-0.0047378 -0.017977 -0.071609"
+        rpy="0 0 0" />
+      <mass
+        value="0.35371" />
+      <inertia
+        ixx="0.0032935"
+        ixy="9.9505E-06"
+        ixz="-2.6429E-05"
+        iyy="0.0034588"
+        iyz="0.00023816"
+        izz="0.00023055" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_larm.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.86667 0.86667 0.8902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/l_larm.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="l_elbow"
+    type="revolute">
+    <origin
+      xyz="0.01115 0.010475 -0.192"
+      rpy="0 0 0" />
+    <parent
+      link="l_uarm" />
+    <child
+      link="l_larm" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-2.44"
+      upper="0.174"
+      effort="24.8"
+      velocity="42" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="l_elbow"/>
+    <actuator name="l_elbow_motor"/>
+  </transmission>
+  <link
+    name="r_uarm_y">
+    <inertial>
+      <origin
+        xyz="-0.00028574 -0.070052 0.028442"
+        rpy="0 0 0" />
+      <mass
+        value="1.9072" />
+      <inertia
+        ixx="0.0020789"
+        ixy="-3.3624E-06"
+        ixz="8.463E-06"
+        iyy="0.0025249"
+        iyz="0.00027283"
+        izz="0.0024093" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uarm_y.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uarm_y.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_shoulder_y"
+    type="revolute">
+    <origin
+      xyz="0 -0.107 0.204"
+      rpy="0 0 0" />
+    <parent
+      link="torso" />
+    <child
+      link="r_uarm_y" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-3.14"
+      upper="1.57"
+      effort="48"
+      velocity="25" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_shoulder_y"/>
+    <actuator name="r_shoulder_y_motor"/>
+  </transmission>
+  <link
+    name="r_uarm_z">
+    <inertial>
+      <origin
+        xyz="-0.0036271 -1.1381E-08 -0.052725"
+        rpy="0 0 0" />
+      <mass
+        value="0.68812" />
+      <inertia
+        ixx="0.00073442"
+        ixy="-8.1348E-11"
+        ixz="-1.8497E-05"
+        iyy="0.00050155"
+        iyz="6.5854E-09"
+        izz="0.00048799" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uarm_z.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uarm_z.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_shoulder_z"
+    type="revolute">
+    <origin
+      xyz="0 -0.1265 0.05025"
+      rpy="0 0 0" />
+    <parent
+      link="r_uarm_y" />
+    <child
+      link="r_uarm_z" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.57"
+      upper="1.57"
+      effort="24.8"
+      velocity="42" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_shoulder_z"/>
+    <actuator name="r_shoulder_z_motor"/>
+  </transmission>
+  <link
+    name="r_uarm">
+    <inertial>
+      <origin
+        xyz="0.0090297 -0.012326 -0.13605"
+        rpy="0 0 0" />
+      <mass
+        value="0.95281" />
+      <inertia
+        ixx="0.0024554"
+        ixy="8.7516E-06"
+        ixz="2.331E-05"
+        iyy="0.0028034"
+        iyz="-0.00028669"
+        izz="0.00085957" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uarm.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_uarm.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_shoulder_x"
+    type="revolute">
+    <origin
+      xyz="-0.0194 0 -0.05425"
+      rpy="0 0 0" />
+    <parent
+      link="r_uarm_z" />
+    <child
+      link="r_uarm" />
+    <axis
+      xyz="1 0 0" />
+    <limit
+      lower="-1.57"
+      upper="0.174"
+      effort="24.8"
+      velocity="42" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_shoulder_x"/>
+    <actuator name="r_shoulder_x_motor"/>
+  </transmission>
+  <link
+    name="r_larm">
+    <inertial>
+      <origin
+        xyz="-0.0047375 0.017977 -0.071609"
+        rpy="0 0 0" />
+      <mass
+        value="0.35371" />
+      <inertia
+        ixx="0.0032935"
+        ixy="-9.9509E-06"
+        ixz="-2.643E-05"
+        iyy="0.0034588"
+        iyz="-0.00023816"
+        izz="0.00023055" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_larm.obj" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.86667 0.86667 0.8902 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="./meshes/r_larm.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="r_elbow"
+    type="revolute">
+    <origin
+      xyz="0.01115 -0.010475 -0.192"
+      rpy="0 0 0" />
+    <parent
+      link="r_uarm" />
+    <child
+      link="r_larm" />
+    <axis
+      xyz="0 1 0" />
+    <limit
+      lower="-2.44"
+      upper="0.174"
+      effort="24.8"
+      velocity="42" />
+  </joint>
+  <transmission type="SimpleTransmission">
+    <joint name="r_elbow"/>
+    <actuator name="r_elbow_motor"/>
+  </transmission>
+</robot>
