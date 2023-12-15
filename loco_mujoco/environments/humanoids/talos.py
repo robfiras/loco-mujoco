@@ -198,7 +198,7 @@ class Talos(BaseRobotHumanoid):
 
         """
         if "disable_arms" in kwargs.keys():
-            assert  kwargs["disable_arms"] == True,\
+            assert kwargs["disable_arms"] is True,\
                 "Activating the arms in the Talos environment is currently not supported."
 
         check_validity_task_mode_dataset(Talos.__name__, task, None, dataset_type,
@@ -207,6 +207,15 @@ class Talos(BaseRobotHumanoid):
         if dataset_type == "real":
             path = "datasets/humanoids/real/02-constspeed_TALOS.npz"
         elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "disable_arms" in kwargs.keys():
+                assert kwargs["disable_arms"] is True
+            if "disable_back_joint" in kwargs.keys():
+                assert kwargs["disable_back_joint"] is False
+            if "hold_weight" in kwargs.keys():
+                assert kwargs["hold_weight"] is False
+
             path = "datasets/humanoids/perfect/talos_walk/perfect_expert_dataset_det.npz"
 
         return BaseRobotHumanoid.generate(Talos, path, task, dataset_type,

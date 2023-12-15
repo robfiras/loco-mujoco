@@ -129,6 +129,9 @@ class LocoEnv(MultiMuJoCo):
         # setup a running average window for the mean ground forces
         self.mean_grf = self._setup_ground_force_statistics()
 
+        # dataset dummy
+        self._dataset= None
+
         if traj_params:
             self.trajectories = None
             self.load_trajectory(traj_params)
@@ -287,22 +290,27 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        if self.trajectories is not None:
-            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys)
-            # check that all state in the dataset satisfy the has fallen method.
-            for state in dataset["states"]:
-                has_fallen, msg = self._has_fallen(state, return_err_msg=True)
-                if has_fallen:
-                    err_msg = "Some of the states in the created dataset are terminal states. " \
-                              "This should not happen.\n\nViolations:\n"
-                    err_msg += msg
-                    raise ValueError(err_msg)
+        if self._dataset is None:
+            if self.trajectories is not None:
+                dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys)
+                # check that all state in the dataset satisfy the has fallen method.
+                for state in dataset["states"]:
+                    has_fallen, msg = self._has_fallen(state, return_err_msg=True)
+                    if has_fallen:
+                        err_msg = "Some of the states in the created dataset are terminal states. " \
+                                  "This should not happen.\n\nViolations:\n"
+                        err_msg += msg
+                        raise ValueError(err_msg)
 
+            else:
+                raise ValueError("No trajectory was passed to the environment. "
+                                 "To create a dataset pass a trajectory first.")
+
+            self._dataset = deepcopy(dataset)
+
+            return dataset
         else:
-            raise ValueError("No trajectory was passed to the environment. "
-                             "To create a dataset pass a trajectory first.")
-
-        return dataset
+            return deepcopy(self._dataset)
 
     def play_trajectory(self, n_episodes=None, n_steps_per_episode=None, render=True,
                         record=False, recorder_params=None):
@@ -489,7 +497,7 @@ class LocoEnv(MultiMuJoCo):
             elif ot == ObservationType.SITE_ROT:
                 self._data.site(name).xmat = value
 
-    def get_traj_files_from_dataset(self, dataset_path, freq=None):
+    def load_dataset_and_get_traj_files(self, dataset_path, freq=None):
         """
         Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
         the x and z positions are calculated based on the velocity.
@@ -505,13 +513,15 @@ class LocoEnv(MultiMuJoCo):
         """
 
         dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
+        self._dataset = deepcopy({k: d for k, d in dataset.items()})
+
         states = dataset["states"]
         last = dataset["last"]
 
         states = np.atleast_2d(states)
         rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
         num_data = len(states)
-        dataset = dict()
+        trajectories = dict()
         for i, key in enumerate(rel_keys):
             if i < 2:
                 if freq is None:
@@ -531,13 +541,13 @@ class LocoEnv(MultiMuJoCo):
                     data = np.array(data)
             else:
                 data = states[:, i - 2]
-            dataset[key] = data
+            trajectories[key] = data
 
         # add split points
         if len(states) > 2:
-            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
+            trajectories["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
 
-        return dataset
+        return trajectories
 
     def _get_observation_space(self):
         """

@@ -189,7 +189,7 @@ class BaseRobotHumanoid(LocoEnv):
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
                                   "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
-                path.insert(2, "mini_datasets")
+                path.insert(3, "mini_datasets")
                 path = "/".join(path)
 
             traj_params = dict(traj_path=Path(loco_mujoco.__file__).resolve().parent / path,
@@ -199,7 +199,7 @@ class BaseRobotHumanoid(LocoEnv):
 
         elif dataset_type == "perfect":
             traj_data_freq = 100  # hz
-            traj_files = mdp.get_traj_files_from_dataset(path, traj_data_freq)
+            traj_files = mdp.load_dataset_and_get_traj_files(path, traj_data_freq)
             traj_params = dict(traj_files=traj_files,
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq),
@@ -210,7 +210,7 @@ class BaseRobotHumanoid(LocoEnv):
             infos = []
             all_paths = next(os.walk(Path(loco_mujoco.__file__).resolve().parent / path), (None, None, []))[2]
             for i, p in enumerate(all_paths):
-                traj_files = mdp.get_traj_files_from_dataset(path + p, traj_data_freq)
+                traj_files = mdp.load_dataset_and_get_traj_files(path + p, traj_data_freq)
                 if i == 0:
                     all_traj_files = traj_files
                 else:

@@ -1,6 +1,7 @@
 import os
 import warnings
 from pathlib import Path
+from copy import deepcopy
 
 from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
@@ -153,21 +154,28 @@ class UnitreeA1(LocoEnv):
 
         """
 
-        if ignore_keys is None:
-            ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
+        if self._dataset is None:
 
-        if self.trajectories is not None:
-            rot_mat_idx_arrow = self._get_idx("dir_arrow")
-            state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
-                                         goal_velocity_idx=self._goal_velocity_idx)
-            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
-                                                       state_callback=self._modify_observation_callback,
-                                                       state_callback_params=state_callback_params)
+            if ignore_keys is None:
+                ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
+
+            if self.trajectories is not None:
+                rot_mat_idx_arrow = self._get_idx("dir_arrow")
+                state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
+                                             goal_velocity_idx=self._goal_velocity_idx)
+                dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
+                                                           state_callback=self._modify_observation_callback,
+                                                           state_callback_params=state_callback_params)
+            else:
+                raise ValueError("No trajectory was passed to the environment. "
+                                 "To create a dataset pass a trajectory first.")
+
+            self._dataset = deepcopy(dataset)
+
+            return dataset
+
         else:
-            raise ValueError("No trajectory was passed to the environment. "
-                             "To create a dataset pass a trajectory first.")
-
-        return dataset
+            return deepcopy(self._dataset)
 
     def get_kinematic_obs_mask(self):
         """
@@ -177,7 +185,7 @@ class UnitreeA1(LocoEnv):
 
         return np.arange(len(self.obs_helper.observation_spec))
 
-    def get_traj_files_from_dataset(self, dataset_path, freq=None):
+    def load_dataset_and_get_traj_files(self, dataset_path, freq=None):
         """
         Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
         the x and z positions are calculated based on the velocity.
@@ -517,7 +525,7 @@ class UnitreeA1(LocoEnv):
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
                                   "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
-                path.insert(2, "mini_datasets")
+                path.insert(3, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
             traj_path = Path(loco_mujoco.__file__).resolve().parent / path
@@ -532,7 +540,7 @@ class UnitreeA1(LocoEnv):
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
                                   "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
-                path.insert(2, "mini_datasets")
+                path.insert(3, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
             traj_path = Path(loco_mujoco.__file__).resolve().parent / path
@@ -548,8 +556,14 @@ class UnitreeA1(LocoEnv):
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "action_mode" in kwargs.keys():
+                assert kwargs["action_mode"] == "torque"
+            if "default_target_velocity" in kwargs.keys():
+                assert kwargs["default_target_velocity"] == 0.5
             traj_data_freq = 100  # hz
-            traj_files = mdp.get_traj_files_from_dataset(path, traj_data_freq)
+            traj_files = mdp.load_dataset_and_get_traj_files(path, traj_data_freq)
             traj_params = dict(traj_files=traj_files,
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))

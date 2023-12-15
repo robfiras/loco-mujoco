@@ -196,6 +196,15 @@ class UnitreeH1(BaseRobotHumanoid):
             else:
                 path = "datasets/humanoids/real/02-constspeed_UnitreeH1.npz"
         elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "disable_arms" in kwargs.keys():
+                assert kwargs["disable_arms"] is True
+            if "disable_back_joint" in kwargs.keys():
+                assert kwargs["disable_back_joint"] is False
+            if "hold_weight" in kwargs.keys():
+                assert kwargs["hold_weight"] is False
+
             if task == "run":
                 path = "datasets/humanoids/perfect/unitreeh1_run/perfect_expert_dataset_det.npz"
             else:

@@ -37,6 +37,13 @@ class HumanoidTorque(BaseHumanoid):
             elif task == "run":
                 path = "datasets/humanoids/real/05-run_reduced_humanoid.npz"
         elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "disable_arms" in kwargs.keys():
+                assert kwargs["disable_arms"] is True
+            if "use_box_feet" in kwargs.keys():
+                assert kwargs["use_box_feet"] is True
+
             if task == "walk":
                 path = "datasets/humanoids/perfect/humanoid_torque_walk/perfect_expert_dataset_det.npz"
             elif task == "run":
@@ -79,6 +86,13 @@ class HumanoidMuscle(BaseHumanoid):
             elif task == "run":
                 path = "datasets/humanoids/real/05-run_reduced_humanoid.npz"
         elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "disable_arms" in kwargs.keys():
+                assert kwargs["disable_arms"] is True
+            if "use_box_feet" in kwargs.keys():
+                assert kwargs["use_box_feet"] is True
+
             if task == "walk":
                 path = "datasets/humanoids/perfect/humanoid_muscle_walk/perfect_expert_dataset_det.npz"
 

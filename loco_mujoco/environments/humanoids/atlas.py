@@ -188,7 +188,16 @@ class Atlas(BaseRobotHumanoid):
 
         if dataset_type == "real":
             path = "datasets/humanoids/real/02-constspeed_ATLAS.npz"
-        else:
+        elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "disable_arms" in kwargs.keys():
+                assert kwargs["disable_arms"] is True
+            if "disable_back_joint" in kwargs.keys():
+                assert kwargs["disable_back_joint"] is False
+            if "hold_weight" in kwargs.keys():
+                assert kwargs["hold_weight"] is False
+
             path = "datasets/humanoids/perfect/atlas_walk/perfect_expert_dataset_det.npz"
 
         return BaseRobotHumanoid.generate(Atlas, path, task, dataset_type, **kwargs)
