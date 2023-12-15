@@ -92,6 +92,7 @@
                 <joint name="l_ankle" pos="0 0 0" axis="0 1 0" range="-1.39 0.52"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="l_foot"/>
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="l_foot"/>
+                <geom name="left_foot" class="collision" mesh="l_foot"/>
               </body>
             </body>
           </body>
@@ -122,6 +123,7 @@
                 <joint name="r_ankle" pos="0 0 0" axis="0 1 0" range="-1.39 0.52"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.75294 0.75294 0.75294 1" mesh="r_foot"/>
                 <geom type="mesh" rgba="0.75294 0.75294 0.75294 1" mesh="r_foot"/>
+                <geom name="right_foot" class="collision" mesh="r_foot"/>
               </body>
             </body>
           </body>
@@ -184,7 +186,7 @@
     <motor name='l_hip_y'   joint='l_hip_y'   gear="200"/>
     <motor name='l_knee'  joint='l_knee'  gear="200"/>
     <motor name='l_ankle' joint='l_ankle'   gear="200"/>
-    
+
     <motor name='r_hip_z'     joint='r_hip_z'      gear="200"/>
     <motor name='r_hip_x'    joint='r_hip_x'      gear="200"/>
     <motor name='r_hip_y'   joint='r_hip_y'   gear="200"/>

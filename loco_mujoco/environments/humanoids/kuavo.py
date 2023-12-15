@@ -41,8 +41,8 @@ class Kuavo(BaseRobotHumanoid):
         observation_spec = self._get_observation_specification()
 
         collision_groups = [("floor", ["floor"]),
-                            ("foot_r", ["r_foot"]),
-                            ("foot_l", ["l_foot"])]
+                            ("foot_r", ["right_foot"]),
+                            ("foot_l", ["left_foot"])]
 
         self._hidable_obs = ("positions", "velocities", "foot_forces", "weight")
 
