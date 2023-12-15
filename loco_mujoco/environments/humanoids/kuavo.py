@@ -187,15 +187,15 @@ class Kuavo(BaseRobotHumanoid):
                 a perfect dataset.
 
         """
-        check_validity_task_mode_dataset(UnitreeH1.__name__, task, None, dataset_type,
-                                         *UnitreeH1.valid_task_confs.get_all())
+        check_validity_task_mode_dataset(Kuavo.__name__, task, None, dataset_type,
+                                         *Kuavo.valid_task_confs.get_all())
 
         if task == "run":
-            path = "datasets/humanoids/05-run_UnitreeH1.npz"
+            path = "datasets/humanoids/05-run_Kuavo.npz"
         else:
-            path = "datasets/humanoids/02-constspeed_UnitreeH1.npz"
+            path = "datasets/humanoids/02-constspeed_Kuavo.npz"
 
-        return BaseRobotHumanoid.generate(UnitreeH1, path, task, dataset_type,
+        return BaseRobotHumanoid.generate(Kuavo, path, task, dataset_type,
                                           clip_trajectory_to_joint_ranges=True, **kwargs)
 
     @staticmethod
@@ -213,7 +213,7 @@ class Kuavo(BaseRobotHumanoid):
 
         """
         # find pelvis handle
-        pelvis = xml_handle.find("body", "torso_link")
+        pelvis = xml_handle.find("body", "torso")
         pelvis.add("body", name="weight")
         weight = xml_handle.find("body", "weight")
         weight.add("geom", type="box", size="0.1 0.18 0.1", pos="0.35 0 0.1", group="0", rgba=color, mass=mass)
@@ -222,7 +222,7 @@ class Kuavo(BaseRobotHumanoid):
 
     @staticmethod
     def _reorient_arms(xml_handle):
-        """
+        """TODO:
         Reorients the elbow to not collide with the hip.
 
         Args:
@@ -233,14 +233,14 @@ class Kuavo(BaseRobotHumanoid):
 
         """
         # modify the arm orientation
-        left_shoulder_pitch_link = xml_handle.find("body", "left_shoulder_pitch_link")
-        left_shoulder_pitch_link.quat = [1.0, 0.25, 0.1, 0.0]
-        right_elbow_link = xml_handle.find("body", "right_elbow_link")
-        right_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
-        right_shoulder_pitch_link = xml_handle.find("body", "right_shoulder_pitch_link")
-        right_shoulder_pitch_link.quat = [1.0, -0.25, 0.1, 0.0]
-        left_elbow_link = xml_handle.find("body", "left_elbow_link")
-        left_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
+        # left_shoulder_pitch_link = xml_handle.find("body", "left_shoulder_pitch_link")
+        # left_shoulder_pitch_link.quat = [1.0, 0.25, 0.1, 0.0]
+        # right_elbow_link = xml_handle.find("body", "right_elbow_link")
+        # right_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
+        # right_shoulder_pitch_link = xml_handle.find("body", "right_shoulder_pitch_link")
+        # right_shoulder_pitch_link.quat = [1.0, -0.25, 0.1, 0.0]
+        # left_elbow_link = xml_handle.find("body", "left_elbow_link")
+        # left_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
 
         return xml_handle
 
@@ -262,52 +262,52 @@ class Kuavo(BaseRobotHumanoid):
                             ("q_pelvis_tilt", "pelvis_tilt", ObservationType.JOINT_POS),
                             ("q_pelvis_list", "pelvis_list", ObservationType.JOINT_POS),
                             ("q_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_POS),
-                            ("q_back_bkz", "back_bkz", ObservationType.JOINT_POS),
-                            ("q_l_arm_shy", "l_arm_shy", ObservationType.JOINT_POS),
-                            ("q_l_arm_shx", "l_arm_shx", ObservationType.JOINT_POS),
-                            ("q_l_arm_shz", "l_arm_shz", ObservationType.JOINT_POS),
-                            ("q_left_elbow", "left_elbow", ObservationType.JOINT_POS),
-                            ("q_r_arm_shy", "r_arm_shy", ObservationType.JOINT_POS),
-                            ("q_r_arm_shx", "r_arm_shx", ObservationType.JOINT_POS),
-                            ("q_r_arm_shz", "r_arm_shz", ObservationType.JOINT_POS),
-                            ("q_right_elbow", "right_elbow", ObservationType.JOINT_POS),
-                            ("q_hip_flexion_r", "hip_flexion_r", ObservationType.JOINT_POS),
-                            ("q_hip_adduction_r", "hip_adduction_r", ObservationType.JOINT_POS),
-                            ("q_hip_rotation_r", "hip_rotation_r", ObservationType.JOINT_POS),
-                            ("q_knee_angle_r", "knee_angle_r", ObservationType.JOINT_POS),
-                            ("q_ankle_angle_r", "ankle_angle_r", ObservationType.JOINT_POS),
-                            ("q_hip_flexion_l", "hip_flexion_l", ObservationType.JOINT_POS),
-                            ("q_hip_adduction_l", "hip_adduction_l", ObservationType.JOINT_POS),
-                            ("q_hip_rotation_l", "hip_rotation_l", ObservationType.JOINT_POS),
-                            ("q_knee_angle_l", "knee_angle_l", ObservationType.JOINT_POS),
-                            ("q_ankle_angle_l", "ankle_angle_l", ObservationType.JOINT_POS),
+                            ("q_l_shoulder_y", "l_shoulder_y", ObservationType.JOINT_POS),
+                            ("q_l_shoulder_x", "l_shoulder_x", ObservationType.JOINT_POS),
+                            ("q_l_shoulder_z", "l_shoulder_z", ObservationType.JOINT_POS),
+                            ("q_l_elbow", "l_elbow", ObservationType.JOINT_POS),
+                            ("q_r_shoulder_y", "r_shoulder_y", ObservationType.JOINT_POS),
+                            ("q_r_shoulder_x", "r_shoulder_x", ObservationType.JOINT_POS),
+                            ("q_r_shoulder_z", "r_shoulder_z", ObservationType.JOINT_POS),
+                            ("q_r_elbow", "r_elbow", ObservationType.JOINT_POS),
+                            ("q_r_hip_z", "r_hip_z", ObservationType.JOINT_POS),
+                            ("q_r_hip_x", "r_hip_x", ObservationType.JOINT_POS),
+                            ("q_r_hip_y", "r_hip_y", ObservationType.JOINT_POS),
+                            ("q_r_knee", "r_knee", ObservationType.JOINT_POS),
+                            ("q_r_ankle", "r_ankle", ObservationType.JOINT_POS),
+                            ("q_l_hip_z", "l_hip_z", ObservationType.JOINT_POS),
+                            ("q_l_hip_x", "l_hip_x", ObservationType.JOINT_POS),
+                            ("q_l_hip_y", "l_hip_y", ObservationType.JOINT_POS),
+                            ("q_l_knee", "l_knee", ObservationType.JOINT_POS),
+                            ("q_l_ankle", "l_ankle", ObservationType.JOINT_POS),
 
-                            # ------------- JOINT VEL -------------
+                            # ------------- JOINT VEL -------------  
                             ("dq_pelvis_tx", "pelvis_tx", ObservationType.JOINT_VEL),
                             ("dq_pelvis_tz", "pelvis_tz", ObservationType.JOINT_VEL),
                             ("dq_pelvis_ty", "pelvis_ty", ObservationType.JOINT_VEL),
                             ("dq_pelvis_tilt", "pelvis_tilt", ObservationType.JOINT_VEL),
                             ("dq_pelvis_list", "pelvis_list", ObservationType.JOINT_VEL),
                             ("dq_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_VEL),
-                            ("dq_back_bkz", "back_bkz", ObservationType.JOINT_VEL),
-                            ("dq_l_arm_shy", "l_arm_shy", ObservationType.JOINT_VEL),
-                            ("dq_l_arm_shx", "l_arm_shx", ObservationType.JOINT_VEL),
-                            ("dq_l_arm_shz", "l_arm_shz", ObservationType.JOINT_VEL),
-                            ("dq_left_elbow", "left_elbow", ObservationType.JOINT_VEL),
-                            ("dq_r_arm_shy", "r_arm_shy", ObservationType.JOINT_VEL),
-                            ("dq_r_arm_shx", "r_arm_shx", ObservationType.JOINT_VEL),
-                            ("dq_r_arm_shz", "r_arm_shz", ObservationType.JOINT_VEL),
-                            ("dq_right_elbow", "right_elbow", ObservationType.JOINT_VEL),
-                            ("dq_hip_flexion_r", "hip_flexion_r", ObservationType.JOINT_VEL),
-                            ("dq_hip_adduction_r", "hip_adduction_r", ObservationType.JOINT_VEL),
-                            ("dq_hip_rotation_r", "hip_rotation_r", ObservationType.JOINT_VEL),
-                            ("dq_knee_angle_r", "knee_angle_r", ObservationType.JOINT_VEL),
-                            ("dq_ankle_angle_r", "ankle_angle_r", ObservationType.JOINT_VEL),
-                            ("dq_hip_flexion_l", "hip_flexion_l", ObservationType.JOINT_VEL),
-                            ("dq_hip_adduction_l", "hip_adduction_l", ObservationType.JOINT_VEL),
-                            ("dq_hip_rotation_l", "hip_rotation_l", ObservationType.JOINT_VEL),
-                            ("dq_knee_angle_l", "knee_angle_l", ObservationType.JOINT_VEL),
-                            ("dq_ankle_angle_l", "ankle_angle_l", ObservationType.JOINT_VEL)]
+                            ("dq_l_shoulder_y", "l_shoulder_y", ObservationType.JOINT_VEL),
+                            ("dq_l_shoulder_x", "l_shoulder_x", ObservationType.JOINT_VEL),
+                            ("dq_l_shoulder_z", "l_shoulder_z", ObservationType.JOINT_VEL),
+                            ("dq_l_elbow", "l_elbow", ObservationType.JOINT_VEL),
+                            ("dq_r_shoulder_y", "r_shoulder_y", ObservationType.JOINT_VEL),
+                            ("dq_r_shoulder_x", "r_shoulder_x", ObservationType.JOINT_VEL),
+                            ("dq_r_shoulder_z", "r_shoulder_z", ObservationType.JOINT_VEL),
+                            ("dq_r_elbow", "r_elbow", ObservationType.JOINT_VEL),
+                            ("dq_r_hip_z", "r_hip_z", ObservationType.JOINT_VEL),
+                            ("dq_r_hip_x", "r_hip_x", ObservationType.JOINT_VEL),
+                            ("dq_r_hip_y", "r_hip_y", ObservationType.JOINT_VEL),
+                            ("dq_r_knee", "r_knee", ObservationType.JOINT_VEL),
+                            ("dq_r_ankle", "r_ankle", ObservationType.JOINT_VEL),
+                            ("dq_l_hip_z", "l_hip_z", ObservationType.JOINT_VEL),
+                            ("dq_l_hip_x", "l_hip_x", ObservationType.JOINT_VEL),
+                            ("dq_l_hip_y", "l_hip_y", ObservationType.JOINT_VEL),
+                            ("dq_l_knee", "l_knee", ObservationType.JOINT_VEL),
+                            ("dq_l_ankle", "l_ankle", ObservationType.JOINT_VEL)]
+        
+                            
 
         return observation_spec
 
@@ -321,12 +321,10 @@ class Kuavo(BaseRobotHumanoid):
             space entry.
 
         """
-
-        action_spec = ["back_bkz_actuator", "l_arm_shy_actuator", "l_arm_shx_actuator",
-                       "l_arm_shz_actuator", "left_elbow_actuator", "r_arm_shy_actuator", "r_arm_shx_actuator",
-                       "r_arm_shz_actuator", "right_elbow_actuator", "hip_flexion_r_actuator",
-                       "hip_adduction_r_actuator", "hip_rotation_r_actuator", "knee_angle_r_actuator",
-                       "ankle_angle_r_actuator", "hip_flexion_l_actuator", "hip_adduction_l_actuator",
-                       "hip_rotation_l_actuator", "knee_angle_l_actuator", "ankle_angle_l_actuator"]
+       
+        action_spec = ["l_shoulder_y", "l_shoulder_x", "l_shoulder_z", "l_elbow", 
+                       "r_shoulder_y", "r_shoulder_x", "r_shoulder_z", "r_elbow", 
+                       "r_hip_z", "r_hip_x", "r_hip_y", "r_knee", "r_ankle", 
+                       "l_hip_z", "l_hip_x", "l_hip_y", "l_knee", "l_ankle"]
 
         return action_spec

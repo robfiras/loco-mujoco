@@ -184,6 +184,7 @@
     <motor name='l_hip_y'   joint='l_hip_y'   gear="200"/>
     <motor name='l_knee'  joint='l_knee'  gear="200"/>
     <motor name='l_ankle' joint='l_ankle'   gear="200"/>
+    
     <motor name='r_hip_z'     joint='r_hip_z'      gear="200"/>
     <motor name='r_hip_x'    joint='r_hip_x'      gear="200"/>
     <motor name='r_hip_y'   joint='r_hip_y'   gear="200"/>
