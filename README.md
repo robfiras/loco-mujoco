@@ -20,19 +20,38 @@ enabling evaluation across a spectrum of difficulty levels.
 
 ## Installation
 
-To install this repository, clone it and then run:
+You have the choice to install the latest release via PyPI by running 
+
+```bash
+pip install loco-mujoco 
+```
+
+or you do an editable installation by cloning this repository and then running:
 
 ```bash
 cd loco-mujoco
 pip install -e . 
 ```
 
-Now you have to download and install the datasets by running
+### Download the Datasets
+You have the choice of downloading all datasets available or only the ones you need.
 
+To install all datasets run:  
 ```bash
-python download_datasets.py
+loco-mujoco-download
 ```
 
+To install only the real (motion capture, no actions) datasets run:  
+```bash
+loco-mujoco-download-real
+```
+
+To install only the perfect (ground-truth with actions) datasets run:  
+```bash
+loco-mujoco-download-perfect
+```
+
+### Installing the Baselines
 If you also want to run the baselines, you have to install our imitation learning library [imitation_lib](https://github.com/robfiras/ls-iq). You find example files for training the baselines for any LocoMuJoCo task [here](examples/imitation_learning).
 
 To verify that everything is installed correctly, run the examples such as:
