@@ -71,7 +71,8 @@ def test_all_environments():
 
     for task_name in task_names:
 
-        if "UnitreeH1" not in task_name:
+        # todo: include perfect datasets into tests
+        if "perfect" not in task_name:
             np.random.seed(0)
 
             print(f"Testing {task_name}...")
@@ -103,8 +104,8 @@ def test_replays():
 
     for task_name in task_names:
 
-        if "UnitreeH1" not in task_name:
-
+        # todo: include perfect datasets into test
+        if "perfect" not in task_name:
             np.random.seed(0)
 
             print(f"Testing Replay {task_name}...")

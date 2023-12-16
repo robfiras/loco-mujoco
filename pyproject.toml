@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools", "wheel", "wget"]
+
+[project]
+name = "loco-mujoco"
+dependencies = [
+    "mushroom-rl>=1.10.0",
+    "numpy",
+    "scipy",
+    "mujoco==2.3.6",
+    "gymnasium",
+    "dm_control",
+    "pyyaml",
+    "wget"]
+
+requires-python = ">=3.8"
+authors = [{name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
+
+maintainers = [{ name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
+description = 'Imitation learning benchmark focusing on complex locomotion tasks using MuJoCo.'
+readme = "README.md"
+license = { file= "LICENSE" }
+keywords = ["Imitation Learning", "Reinforcement Learning", "Locomotion"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dynamic = ["version", "optional-dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/robfiras/loco-mujoco"
+Repository = "https://github.com/robfiras/loco-mujoco"
+Issues = "https://github.com/robfiras/loco-mujoco/issues"
+
+[project.scripts]
+loco-mujoco-download = "loco_mujoco.utils:download_all_datasets"
+loco-mujoco-download-real = "loco_mujoco.utils:download_real_datasets"
+loco-mujoco-download-perfect = "loco_mujoco.utils:download_perfect_datasets"

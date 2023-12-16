@@ -1,9 +1,11 @@
-from .environments import LocoEnv
+__version__ = '0.1'
 
+try:
 
-def get_all_task_names():
-    return LocoEnv.get_all_task_names()
+    from .environments import LocoEnv
 
+    def get_all_task_names():
+        return LocoEnv.get_all_task_names()
 
-def download_all_datasets():
-    return LocoEnv.download_all_datasets()
+except ImportError as e:
+    print(e)

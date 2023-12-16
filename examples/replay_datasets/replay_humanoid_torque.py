@@ -7,7 +7,8 @@ def experiment(seed=0):
 
     np.random.seed(seed)
 
-    mdp = LocoEnv.make("HumanoidTorque")
+    mdp = LocoEnv.make("HumanoidTorque.walk.real")
+    dataset = mdp.create_dataset()
 
     mdp.play_trajectory_from_velocity(n_steps_per_episode=500)
 

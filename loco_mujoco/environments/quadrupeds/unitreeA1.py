@@ -1,6 +1,7 @@
 import os
 import warnings
 from pathlib import Path
+from copy import deepcopy
 
 from dm_control import mjcf
 from mushroom_rl.utils.running_stats import *
@@ -24,7 +25,7 @@ class UnitreeA1(LocoEnv):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["simple", "hard"],
-                                     data_types=["real"])
+                                     data_types=["real", "perfect"])
 
     def __init__(self, action_mode="torque", setup_random_rot=False,
                  default_target_velocity=0.5, camera_params=None, **kwargs):
@@ -153,26 +154,28 @@ class UnitreeA1(LocoEnv):
 
         """
 
-        if ignore_keys is None:
-            ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
+        if self._dataset is None:
 
-        if self.trajectories is not None:
-            rot_mat_idx_arrow = self._get_idx("dir_arrow")
-            trunk_euler_orientation_idx = self._get_idx(["q_trunk_list", "q_trunk_tilt", "q_trunk_rotation"])
-            trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
-                                                 "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
-            state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
-                                         trunk_euler_orientation_idx=trunk_euler_orientation_idx,
-                                         trunk_euler_vel_idx=trunk_euler_vel_idx,
-                                         goal_velocity_idx=self._goal_velocity_idx)
-            dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
-                                                       state_callback=self._modify_observation_callback,
-                                                       state_callback_params=state_callback_params)
+            if ignore_keys is None:
+                ignore_keys = ["q_trunk_tx", "q_trunk_ty"]
+
+            if self.trajectories is not None:
+                rot_mat_idx_arrow = self._get_idx("dir_arrow")
+                state_callback_params = dict(rot_mat_idx_arrow=rot_mat_idx_arrow,
+                                             goal_velocity_idx=self._goal_velocity_idx)
+                dataset = self.trajectories.create_dataset(ignore_keys=ignore_keys,
+                                                           state_callback=self._modify_observation_callback,
+                                                           state_callback_params=state_callback_params)
+            else:
+                raise ValueError("No trajectory was passed to the environment. "
+                                 "To create a dataset pass a trajectory first.")
+
+            self._dataset = deepcopy(dataset)
+
+            return dataset
+
         else:
-            raise ValueError("No trajectory was passed to the environment. "
-                             "To create a dataset pass a trajectory first.")
-
-        return dataset
+            return deepcopy(self._dataset)
 
     def get_kinematic_obs_mask(self):
         """
@@ -182,43 +185,67 @@ class UnitreeA1(LocoEnv):
 
         return np.arange(len(self.obs_helper.observation_spec))
 
-    def obs_to_kinematics_conversion(self, obs):
+    def load_dataset_and_get_traj_files(self, dataset_path, freq=None):
         """
-        Calculates a dictionary containing the kinematics given the observation.
+        Calculates a dictionary containing the kinematics given a dataset. If freq is provided,
+        the x and z positions are calculated based on the velocity.
 
         Args:
-            obs (np.array): observations; Shouldn't be more than one trajectory!
+            dataset_path (str): Path to the dataset.
+            freq (float): Frequency of the data in obs.
 
         Returns:
             Dictionary containing the keys specified in observation_spec with the corresponding
-            values from the observation. Additionally, the goal direction and speed are computed.
+            values from the dataset.
 
         """
 
-        obs = np.atleast_2d(obs)
+        dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
+        states = dataset["states"]
+        last = dataset["last"]
+
+        states = np.atleast_2d(states)
         rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
-        num_data = len(obs)
+        num_data = len(states)
         dataset = dict()
         for i, key in enumerate(rel_keys):
             if i < 2:
-                # fill with zeros for x and y position
-                dataset[key] = np.zeros(num_data)
-            elif key == "dir_arrow":
-                sin_cos = obs[:, i-2:i]
-                angle = np.arctan2(sin_cos[:, 0],sin_cos[:, 1]) + np.pi/2
-                if num_data > 1:
-                    dataset[key] = [angle2mat_xy(a).reshape((9,)) for a in angle]
+                if freq is None:
+                    # fill with zeros for x and y position
+                    data = np.zeros(num_data)
                 else:
-                    dataset[key] = angle2mat_xy(angle).reshape((9,))
+                    # compute positions from velocities
+                    dt = 1 / float(freq)
+                    assert len(states) > 2
+                    vel_idx = rel_keys.index("d" + key) - 2
+                    data = [0.0]
+                    for j, o in enumerate(states[:-1, vel_idx], 1):
+                        if last is not None and last[j - 1] == 1:
+                            data.append(0.0)
+                        else:
+                            data.append(data[-1] + dt * o)
+                    data = np.array(data)
+            elif key == "dir_arrow":
+                sin_cos = states[:, i-2:i]
+                angle = np.arctan2(sin_cos[:, 1], sin_cos[:, 0]) #+ np.pi/2
+                if num_data > 1:
+                    data = [angle2mat_xy(a).reshape((9,)) for a in angle]
+                else:
+                    data = angle2mat_xy(angle).reshape((9,))
                 # calculate goal_speed
-                dq_trunk_tx = obs[:, rel_keys.index("dq_trunk_tx")-2]
-                dq_trunk_ty = obs[:, rel_keys.index("dq_trunk_ty")-2]
+                dq_trunk_tx = states[:, rel_keys.index("dq_trunk_tx")-2]
+                dq_trunk_ty = states[:, rel_keys.index("dq_trunk_ty")-2]
                 vels = np.stack([dq_trunk_tx, dq_trunk_ty], axis=1)
                 goal_speed = np.linalg.norm(vels, axis=1)
                 goal_speed = np.mean(goal_speed) * np.ones_like(goal_speed)
                 dataset["goal_speed"] = goal_speed
             else:
-                dataset[key] = obs[:, i-2]
+                data = states[:, i - 2]
+            dataset[key] = data
+
+        # add split points
+        if len(states) > 2:
+            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
 
         return dataset
 
@@ -238,14 +265,14 @@ class UnitreeA1(LocoEnv):
         if self._action_mode == "torque":
             unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
         elif self._action_mode == "position":
-            unnormalized_action =  ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
+            unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
         elif self._action_mode == "position_difference":
             q_pos = self._data.qpos[6:]
             normalized_qpos = (q_pos - self.norm_act_mean) / self.norm_act_delta
             new_normalized_qpos = normalized_qpos + action * 0.3
             unnormalized_action = ((new_normalized_qpos.copy() * self.norm_act_delta) + self.norm_act_mean)
         else:
-            raise ValueError(f"Unknown aciton mode: {self._action_mode}")
+            raise ValueError(f"Unknown action mode: {self._action_mode}")
 
         return unnormalized_action
 
@@ -309,12 +336,8 @@ class UnitreeA1(LocoEnv):
         """
 
         rot_mat_idx_arrow = self._get_idx("dir_arrow")
-        trunk_euler_orientation_idx = self._get_idx(["q_trunk_list", "q_trunk_tilt", "q_trunk_rotation"])
-        trunk_euler_vel_idx = self._get_idx(["dq_trunk_tx", "dq_trunk_ty", "dq_trunk_tz",
-                                             "dq_trunk_list", "dq_trunk_tilt", "dq_trunk_rotation"])
 
-        obs = self._modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
-                                                 rot_mat_idx_arrow, self._goal_velocity_idx)
+        obs = self._modify_observation_callback(obs, rot_mat_idx_arrow, self._goal_velocity_idx)
 
         if self._use_foot_forces:
             obs = np.concatenate([obs,
@@ -492,29 +515,35 @@ class UnitreeA1(LocoEnv):
         # Generate the MDP
         # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
-            path = "datasets/quadrupeds/walk_straight.npz"
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if dataset_type == "real":
+                path = "datasets/quadrupeds/real/walk_straight.npz"
+            elif dataset_type == "perfect":
+                path = "datasets/quadrupeds/perfect/unitreea1_simple/perfect_expert_dataset_det.npz"
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
                                   "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
-                path.insert(2, "mini_datasets")
+                path.insert(3, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / path
         elif task == "hard":
-            path = "datasets/quadrupeds/walk_8_dir.npz"
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent.parent / path)
+            if dataset_type == "real":
+                path = "datasets/quadrupeds/real/walk_8_dir.npz"
+            elif dataset_type == "perfect":
+                path = "datasets/quadrupeds/perfect/unitreea1_hard/perfect_expert_dataset_det.npz"
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
                     warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
                                   "the datasets to use this environment for imitation learning!")
                 path = path.split("/")
-                path.insert(2, "mini_datasets")
+                path.insert(3, "mini_datasets")
                 path = "/".join(path)
             mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent.parent / path
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / path
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
@@ -527,8 +556,17 @@ class UnitreeA1(LocoEnv):
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
-            # todo: generate and add this dataset
-            raise ValueError(f"currently not implemented.")
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "action_mode" in kwargs.keys():
+                assert kwargs["action_mode"] == "torque"
+            if "default_target_velocity" in kwargs.keys():
+                assert kwargs["default_target_velocity"] == 0.5
+            traj_data_freq = 100  # hz
+            traj_files = mdp.load_dataset_and_get_traj_files(path, traj_data_freq)
+            traj_params = dict(traj_files=traj_files,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq))
 
         mdp.load_trajectory(traj_params)
 
@@ -544,8 +582,7 @@ class UnitreeA1(LocoEnv):
         return 43
 
     @staticmethod
-    def _modify_observation_callback(obs, trunk_euler_orientation_idx, trunk_euler_vel_idx,
-                                     rot_mat_idx_arrow, goal_velocity_idx):
+    def _modify_observation_callback(obs, rot_mat_idx_arrow, goal_velocity_idx):
         """
         Transforms the rotation matrix from obs to a sin-cos feature.
 
