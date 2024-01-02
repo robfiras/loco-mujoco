@@ -1,12 +1,21 @@
-# LocoMuJoCo
+<p align="center">
+  <img width="50%" src="https://github.com/robfiras/loco-mujoco/assets/69359729/4b689e50-1b43-45c0-8b1a-6a90260c2fb6">
+</p>
 
-![LocoMujoco7_small](https://github.com/robfiras/loco-mujoco/assets/69359729/6b3a6134-34e7-41a9-a75b-ce4f3e902601)
+</br>
 
+![continous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI](https://img.shields.io/pypi/v/loco-mujoco)](https://pypi.org/project/loco-mujoco/)
 
 **LocoMuJoCo** is an **imitation learning benchmark** specifically targeted towards **locomotion**. It encompasses a diverse set of environments, including quadrupeds, bipeds, and musculoskeletal human models, each accompanied by comprehensive datasets, such as real noisy motion capture data, ground truth expert data, and ground truth sub-optimal data,
 enabling evaluation across a spectrum of difficulty levels. 
 
 **LocoMuJoCo** also allows you to specify your own reward function to use this benchmark for **pure reinforcement learning**! Checkout the example below!
+
+<p align="center">
+  <img src="https://github.com/robfiras/loco-mujoco/assets/69359729/c16dfa4a-4fdb-4701-9a42-54cbf7644301">
+</p>
 
 ### Key Advantages 
 ✅ Easy to use with [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) or [Mushroom-RL](https://github.com/MushroomRL/mushroom-rl) interface \
@@ -54,6 +63,7 @@ loco-mujoco-download-perfect
 ### Installing the Baselines
 If you also want to run the baselines, you have to install our imitation learning library [imitation_lib](https://github.com/robfiras/ls-iq). You find example files for training the baselines for any LocoMuJoCo task [here](examples/imitation_learning).
 
+### First Test
 To verify that everything is installed correctly, run the examples such as:
 
 ```bash
@@ -69,7 +79,9 @@ python examples/replay_datasets/replay_Unitree.py
 ## Environments & Tasks
 You want a quick overview of all **environments**, **tasks** and **datasets** available? [Here](/loco_mujoco/environments) you can find it.
 
-![LocoMujoco7_2_compressed](https://github.com/robfiras/loco-mujoco/assets/69359729/73ca0cdd-3958-4d59-a1f7-0eba00fe373a)
+<p align="center">
+  <img src="https://github.com/robfiras/loco-mujoco/assets/69359729/73ca0cdd-3958-4d59-a1f7-0eba00fe373a">
+</p>
 
 And stay tuned! There are many more to come ...
 
