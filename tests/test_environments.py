@@ -17,7 +17,7 @@ def run_environment(env, n_episodes, n_steps):
     action_dim = env.info.action_space.shape[0]
     dataset = []
 
-    obs = env.reset()
+    obs, _ = env.reset()
     dataset.append(obs)
     absorbing = False
 

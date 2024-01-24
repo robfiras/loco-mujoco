@@ -3,7 +3,7 @@ import warnings
 from pathlib import Path
 from copy import deepcopy
 
-from mushroom_rl.utils.running_stats import *
+from mushroom_rl.rl_utils.running_stats import *
 
 import loco_mujoco
 from loco_mujoco.environments import LocoEnv

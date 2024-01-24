@@ -35,7 +35,7 @@ class GymnasiumWrapper(Env):
         if seed is not None:
             self._np_random, seed = seeding.np_random(seed)
 
-        return self._env.reset(), {}
+        return self._env.reset()
 
     def render(self):
         return self._env.render()

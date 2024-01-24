@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from dm_control import mjcf
 
-from mushroom_rl.utils.running_stats import *
+from mushroom_rl.rl_utils.running_stats import *
 
 import loco_mujoco
 from loco_mujoco.environments import ValidTaskConf

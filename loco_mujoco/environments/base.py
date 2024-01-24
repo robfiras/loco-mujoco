@@ -11,8 +11,8 @@ from dm_control import mjcf
 
 from mushroom_rl.core import Environment
 from mushroom_rl.environments import MultiMuJoCo
-from mushroom_rl.utils import spaces
-from mushroom_rl.utils.running_stats import *
+from mushroom_rl.rl_utils import spaces
+from mushroom_rl.rl_utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 from mushroom_rl.utils.record import VideoRecorder
 
@@ -199,7 +199,7 @@ class LocoEnv(MultiMuJoCo):
             self._viewer.load_new_model(self._model)
 
         self._obs = self._create_observation(self.obs_helper._build_obs(self._data))
-        return self._modify_observation(self._obs)
+        return self._modify_observation(self._obs), {}
 
     def setup(self, obs):
         """
@@ -643,7 +643,8 @@ class LocoEnv(MultiMuJoCo):
 
         """
 
-        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_intermediate_steps)
+        mean_grf = RunningAveragedWindow(shape=(self._get_grf_size(),), window_size=self._n_intermediate_steps,
+                                         backend="numpy")
 
         return mean_grf
 
@@ -799,6 +800,10 @@ class LocoEnv(MultiMuJoCo):
         """
 
         pass
+
+    @staticmethod
+    def generate(*args, **kwargs):
+        return LocoEnv.make(*args, **kwargs)
 
     @classmethod
     def register(cls):

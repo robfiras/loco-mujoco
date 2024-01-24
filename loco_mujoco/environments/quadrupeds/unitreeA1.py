@@ -4,7 +4,7 @@ from pathlib import Path
 from copy import deepcopy
 
 from dm_control import mjcf
-from mushroom_rl.utils.running_stats import *
+from mushroom_rl.rl_utils.running_stats import *
 from mushroom_rl.utils.mujoco import *
 from mushroom_rl.utils.angles import mat_to_euler, euler_to_mat
 

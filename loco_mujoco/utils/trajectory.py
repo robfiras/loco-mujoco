@@ -48,7 +48,6 @@ class Trajectory:
 
         assert (traj_path is not None) != (traj_files is not None), "Please specify either traj_path or " \
                                                                     "traj_files, but not both."
-
         # load data
         if traj_path is not None:
             self._trajectory_files = np.load(traj_path, allow_pickle=True)
