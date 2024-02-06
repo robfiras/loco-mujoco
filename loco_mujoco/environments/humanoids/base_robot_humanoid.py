@@ -164,17 +164,40 @@ class BaseRobotHumanoid(LocoEnv):
             An MDP of the Robot.
 
         """
+        
+        if "reward_type" in kwargs.keys():
+            reward_type = kwargs["reward_type"]
+            del kwargs["reward_type"]
+        else:
+            reward_type = "target_velocity"
 
         # Generate the MDP
         if task == "walk":
-            reward_params = dict(target_velocity=1.25)
-            mdp = env(reward_type="target_velocity", reward_params=reward_params, **kwargs)
+            if "reward_params" in kwargs.keys():
+                reward_params = kwargs["reward_params"]
+                del kwargs["reward_params"]
+            else:
+                reward_params = dict(target_velocity=1.25)
+            
+            mdp = env(reward_type=reward_type, reward_params=reward_params, **kwargs)
+        
         elif task == "carry":
-            reward_params = dict(target_velocity=1.25)
-            mdp = env(hold_weight=True, reward_type="target_velocity", reward_params=reward_params, **kwargs)
+            if "reward_params" in kwargs.keys():
+                reward_params = kwargs["reward_params"]
+                del kwargs["reward_params"]
+            else:
+                reward_params = dict(target_velocity=1.25)
+            
+            mdp = env(hold_weight=True, reward_type=reward_type, reward_params=reward_params, **kwargs)
+            
         elif task == "run":
-            reward_params = dict(target_velocity=2.5)
-            mdp = env(hold_weight=False, reward_type="target_velocity", reward_params=reward_params, **kwargs)
+            if "reward_params" in kwargs.keys():
+                reward_params = kwargs["reward_params"]
+                del kwargs["reward_params"]
+            else:
+                reward_params = dict(target_velocity=2.5)
+                
+            mdp = env(hold_weight=False, reward_type=reward_type, reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
