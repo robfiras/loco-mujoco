@@ -14,11 +14,11 @@ The status of a dataset can be seen down below. ✅ means it is already availabl
  | ![out3](https://github.com/robfiras/loco-mujoco/assets/69359729/5ec93baa-bed8-4d9f-b983-3bc12264b9b6) | HumanoidTorque4Ages.walk.1 </br> HumanoidTorque4Ages.run.1 | real: ✅  <br /> perfect: 🔶  <br /> preference: 🔶 | Task of a (~2 year old) **Torque** Humanoid Walking or Running Straight. |
  | ![out8](https://github.com/robfiras/loco-mujoco/assets/69359729/fed0315c-921e-4b2e-a9c2-54b85198ef65) | UnitreeH1.walk  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| UnitreeH1 Straight Walking Task. |
  | ![out9](https://github.com/robfiras/loco-mujoco/assets/69359729/ab0dec59-fc24-4763-8ff6-38d58ac3b3de) | UnitreeH1.run  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| UnitreeH1 Straight Running Task. |
- | ![out3](https://github.com/robfiras/loco-mujoco/assets/69359729/851ff3c0-d05f-4de1-a00b-7b3204056e2f) | UnitreeH1.carry | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| UnitreeH1 Carry Task. |
+ | ![out3](https://github.com/robfiras/loco-mujoco/assets/69359729/851ff3c0-d05f-4de1-a00b-7b3204056e2f) | UnitreeH1.carry | real: ✅  <br /> perfect: 🔶   <br /> preference: 🔶| UnitreeH1 Carry Task. |
  | ![out7](https://github.com/robfiras/loco-mujoco/assets/69359729/22c7bb0c-ff92-4e99-a964-7654df6d22c4) | Talos.walk  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| Talos Straight Walking Task. |
- | ![out3](https://github.com/robfiras/loco-mujoco/assets/69359729/0ba1f0e7-1f3d-4088-a44f-0a53bec1cf3a) | Talos.carry  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| Talos Carry Task. |
+ | ![out3](https://github.com/robfiras/loco-mujoco/assets/69359729/0ba1f0e7-1f3d-4088-a44f-0a53bec1cf3a) | Talos.carry  | real: ✅  <br /> perfect: 🔶   <br /> preference: 🔶| Talos Carry Task. |
  | ![out13](https://github.com/robfiras/loco-mujoco/assets/69359729/1ff09d98-e46b-429c-ac07-87de58853d28) | Atlas.walk  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| Atlas Straight Walking Task. |
- | ![out10](https://github.com/robfiras/loco-mujoco/assets/69359729/3c433333-3466-445b-b39f-2f990553d5ff) | Atlas.carry  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| Atlas Carry Task. |
+ | ![out10](https://github.com/robfiras/loco-mujoco/assets/69359729/3c433333-3466-445b-b39f-2f990553d5ff) | Atlas.carry  | real: ✅  <br /> perfect: 🔶   <br /> preference: 🔶| Atlas Carry Task. |
  | ![out4](https://github.com/robfiras/loco-mujoco/assets/69359729/b722bb42-a26c-4692-b1a8-c6f71a78e37b) | UnitreeA1.simple  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| UnitreeA1 Straight Walking Task. |
  | ![out47](https://github.com/robfiras/loco-mujoco/assets/69359729/5a1f783e-8b52-4680-a22b-d96f89faf9b3) | UnitreeA1.hard  | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| UnitreeA1 Walking in 8 Different Direction Task. |
 
