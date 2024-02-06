@@ -1,8 +1,6 @@
 <p align="center">
-  <img width="50%" src="https://github.com/robfiras/loco-mujoco/assets/69359729/4b689e50-1b43-45c0-8b1a-6a90260c2fb6">
+  <img width="70%" src="https://github.com/robfiras/loco-mujoco/assets/69359729/bd2a219e-ddfd-4355-8024-d9af921fb92a">
 </p>
-
-</br>
 
 ![continous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
