@@ -1,4 +1,4 @@
-# here a default randomizaiton can be set for all joints.
+# here a default randomization can be set for all joints.
 Default:
   # these joints will not be included during domain randomization.
   exclude: ["pelvis_tx", "pelvis_ty", "pelvis_tz", "pelvis_tilt", "pelvis_list", "pelvis_rotation"]
@@ -12,7 +12,7 @@ Default:
 
 # here joint specific configurations can be made
 Joints:
-  # set either a sigma for sampling from a normal distirbution or set a delta-range for uniform sampling, but not both!
+  # set either a sigma for sampling from a normal distribution or set a delta-range for uniform sampling, but not both!
   hip_adduction_r:
       damping:
         uniform_range: [4.0, 6.0]

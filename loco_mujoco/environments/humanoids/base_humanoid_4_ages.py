@@ -192,7 +192,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
 
         Args:
             obs_to_hide (tuple): A tuple of strings with names of objects to hide.
-            Hidable objects are "positions", "velocities", "foot_forces", and "env_type".
+             Hidable objects are "positions", "velocities", "foot_forces", and "env_type".
 
         Returns:
             Mask in form of a np.array of booleans. True means that that the obs should be
