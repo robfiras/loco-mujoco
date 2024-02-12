@@ -283,7 +283,7 @@ class Trajectory:
             # check if they are in range
             for i, item in enumerate(self._trajectory_files.items()):
                 k, d = item
-                if i in j_idx:
+                if i in j_idx and k in keys:
                     if warn:
                         clip_message = "Clipping the trajectory into range!" if clip_trajectory_to_joint_ranges else ""
                         if np.max(d) > highs[k]:
