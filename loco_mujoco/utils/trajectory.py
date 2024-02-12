@@ -277,27 +277,27 @@ class Trajectory:
 
             # get q_pos indices
             j_idx = j_idx[2:]   # exclude x and y
+            highs = dict(zip(keys[2:], high))
+            lows = dict(zip(keys[2:], low))
 
             # check if they are in range
             for i, item in enumerate(self._trajectory_files.items()):
                 k, d = item
                 if i in j_idx:
-                    high_i = high[i-2]
-                    low_i = low[i-2]
                     if warn:
                         clip_message = "Clipping the trajectory into range!" if clip_trajectory_to_joint_ranges else ""
-                        if np.max(d) > high_i:
+                        if np.max(d) > highs[k]:
                             warnings.warn("Trajectory violates joint range in %s. Maximum in trajectory is %f "
                                           "and maximum range is %f. %s"
-                                          % (keys[i], np.max(d), high_i, clip_message), RuntimeWarning)
-                        elif np.min(d) < low_i:
+                                          % (k, np.max(d), highs[k], clip_message), RuntimeWarning)
+                        elif np.min(d) < lows[k]:
                             warnings.warn("Trajectory violates joint range in %s. Minimum in trajectory is %f "
                                           "and minimum range is %f. %s"
-                                          % (keys[i], np.min(d), low_i, clip_message), RuntimeWarning)
+                                          % (k, np.min(d), lows[k], clip_message), RuntimeWarning)
 
                     # clip trajectory to min & max
                     if clip_trajectory_to_joint_ranges:
-                        self._trajectory_files[k] = np.clip(self._trajectory_files[k], low_i, high_i)
+                        self._trajectory_files[k] = np.clip(self._trajectory_files[k], lows[k], highs[k])
 
     def get_current_sample(self):
         """
