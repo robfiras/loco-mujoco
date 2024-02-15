@@ -1,21 +1,10 @@
-loco\_mujoco.environments.quadrupeds package
+Quadrupeds
 ============================================
 
-Submodules
-----------
-
-loco\_mujoco.environments.quadrupeds.unitreeA1 module
+Unitree A1
 -----------------------------------------------------
 
 .. automodule:: loco_mujoco.environments.quadrupeds.unitreeA1
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Module contents
----------------
-
-.. automodule:: loco_mujoco.environments.quadrupeds
    :members:
    :undoc-members:
    :show-inheritance:

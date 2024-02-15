@@ -1,42 +1,7 @@
-loco\_mujoco.environments.humanoids package
+Humanoids
 ===========================================
 
-Submodules
-----------
-
-loco\_mujoco.environments.humanoids.atlas module
-------------------------------------------------
-
-.. automodule:: loco_mujoco.environments.humanoids.atlas
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-loco\_mujoco.environments.humanoids.base\_humanoid module
----------------------------------------------------------
-
-.. automodule:: loco_mujoco.environments.humanoids.base_humanoid
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-loco\_mujoco.environments.humanoids.base\_humanoid\_4\_ages module
-------------------------------------------------------------------
-
-.. automodule:: loco_mujoco.environments.humanoids.base_humanoid_4_ages
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-loco\_mujoco.environments.humanoids.base\_robot\_humanoid module
-----------------------------------------------------------------
-
-.. automodule:: loco_mujoco.environments.humanoids.base_robot_humanoid
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-loco\_mujoco.environments.humanoids.humanoids module
+Human Models
 ----------------------------------------------------
 
 .. automodule:: loco_mujoco.environments.humanoids.humanoids
@@ -44,7 +9,15 @@ loco\_mujoco.environments.humanoids.humanoids module
    :undoc-members:
    :show-inheritance:
 
-loco\_mujoco.environments.humanoids.talos module
+Atlas
+------------------------------------------------
+
+.. automodule:: loco_mujoco.environments.humanoids.atlas
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Talos
 ------------------------------------------------
 
 .. automodule:: loco_mujoco.environments.humanoids.talos
@@ -52,7 +25,7 @@ loco\_mujoco.environments.humanoids.talos module
    :undoc-members:
    :show-inheritance:
 
-loco\_mujoco.environments.humanoids.unitreeH1 module
+Unitree H1
 ----------------------------------------------------
 
 .. automodule:: loco_mujoco.environments.humanoids.unitreeH1
@@ -60,10 +33,23 @@ loco\_mujoco.environments.humanoids.unitreeH1 module
    :undoc-members:
    :show-inheritance:
 
-Module contents
----------------
 
-.. automodule:: loco_mujoco.environments.humanoids
+
+Base Environments
+---------------------------------------------------------
+
+.. automodule:: loco_mujoco.environments.humanoids.base_humanoid
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+.. automodule:: loco_mujoco.environments.humanoids.base_humanoid_4_ages
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: loco_mujoco.environments.humanoids.base_robot_humanoid
    :members:
    :undoc-members:
    :show-inheritance:
