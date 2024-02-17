@@ -108,8 +108,8 @@ class BaseHumanoid(LocoEnv):
                                 ("foot_l", ["foot_box_l"])]
         else:
             collision_groups = [("floor", ["floor"]),
-                                ("foot_r", ["foot"]),
-                                ("front_foot_r", ["bofoot"]),
+                                ("foot_r", ["r_foot"]),
+                                ("front_foot_r", ["r_bofoot"]),
                                 ("foot_l", ["l_foot"]),
                                 ("front_foot_l", ["l_bofoot"])]
 
