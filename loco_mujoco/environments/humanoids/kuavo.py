@@ -21,7 +21,8 @@ class Kuavo(BaseRobotHumanoid):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["walk", "run", "carry"],
-                                     data_types=["real"])
+                                     data_types=["real", "perfect"],
+                                     non_combinable=[("carry", None, "perfect")])
 
     def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
                  weight_mass=None, **kwargs):
@@ -123,11 +124,12 @@ class Kuavo(BaseRobotHumanoid):
         equ_constr_to_remove = []
 
         if self._disable_arms:
-            joints_to_remove += ["l_shoulder_y", "l_shoulder_z", "l_shoulder_x", "l_elbow", 
-                                 "r_shoulder_y", "r_shoulder_z", "r_shoulder_x", "r_elbow"]
+            joints_to_remove += ["l_arm_pitch", "l_arm_roll", "l_arm_yaw", "l_forearm_pitch", "l_forearm_yaw", "l_hand_pitch", "l_hand_roll",
+                                 "r_arm_pitch", "r_arm_roll", "r_arm_yaw", "r_forearm_pitch", "r_forearm_yaw", "r_hand_pitch", "r_hand_roll"]
             
-            motors_to_remove += ["l_shoulder_y", "l_shoulder_z", "l_shoulder_x", "l_elbow", 
-                                 "r_shoulder_y", "r_shoulder_z", "r_shoulder_x", "r_elbow"]
+            motors_to_remove += ["l_arm_pitch_actuator", "l_arm_roll_actuator", "l_arm_yaw_actuator", "l_forearm_pitch_actuator", "l_forearm_yaw_actuator", "l_hand_pitch_actuator", "l_hand_roll_actuator",
+                                 "r_arm_pitch_actuator", "r_arm_roll_actuator", "r_arm_yaw_actuator", "r_forearm_pitch_actuator", "r_forearm_yaw_actuator", "r_hand_pitch_actuator", "r_hand_roll_actuator"]
+
             
         if self._disable_back_joint:
             # kuavo has no back joints
@@ -189,14 +191,29 @@ class Kuavo(BaseRobotHumanoid):
         """
         check_validity_task_mode_dataset(Kuavo.__name__, task, None, dataset_type,
                                          *Kuavo.valid_task_confs.get_all())
+        if dataset_type == "real":
+            if task == "run":
+                path = "datasets/humanoids/real/05-run_Kuavo.npz"
+            else:
+                path = "datasets/humanoids/real/02-constspeed_Kuavo.npz"
+        elif dataset_type == "perfect":
+            if "use_foot_forces" in kwargs.keys():
+                assert kwargs["use_foot_forces"] is False
+            if "disable_arms" in kwargs.keys():
+                assert kwargs["disable_arms"] is True
+            if "disable_back_joint" in kwargs.keys():
+                assert kwargs["disable_back_joint"] is False
+            if "hold_weight" in kwargs.keys():
+                assert kwargs["hold_weight"] is False
 
-        if task == "run":
-            path = "datasets/humanoids/05-run_Kuavo.npz"
-        else:
-            path = "datasets/humanoids/02-constspeed_Kuavo.npz"
+            if task == "run":
+                path = "datasets/humanoids/perfect/kuavo_run/perfect_expert_dataset_det.npz"
+            else:
+                path = "datasets/humanoids/perfect/kuavo_walk/perfect_expert_dataset_det.npz"
 
         return BaseRobotHumanoid.generate(Kuavo, path, task, dataset_type,
                                           clip_trajectory_to_joint_ranges=True, **kwargs)
+
 
     @staticmethod
     def _add_weight(xml_handle, mass, color):
@@ -255,59 +272,82 @@ class Kuavo(BaseRobotHumanoid):
 
         """
 
-        observation_spec = [# ------------- JOINT POS -------------
+        observation_spec = [
+                            # ------------- JOINT POS -------------
                             ("q_pelvis_tx", "pelvis_tx", ObservationType.JOINT_POS),
                             ("q_pelvis_tz", "pelvis_tz", ObservationType.JOINT_POS),
                             ("q_pelvis_ty", "pelvis_ty", ObservationType.JOINT_POS),
                             ("q_pelvis_tilt", "pelvis_tilt", ObservationType.JOINT_POS),
                             ("q_pelvis_list", "pelvis_list", ObservationType.JOINT_POS),
                             ("q_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_POS),
-                            ("q_l_shoulder_y", "l_shoulder_y", ObservationType.JOINT_POS),
-                            ("q_l_shoulder_x", "l_shoulder_x", ObservationType.JOINT_POS),
-                            ("q_l_shoulder_z", "l_shoulder_z", ObservationType.JOINT_POS),
-                            ("q_l_elbow", "l_elbow", ObservationType.JOINT_POS),
-                            ("q_r_shoulder_y", "r_shoulder_y", ObservationType.JOINT_POS),
-                            ("q_r_shoulder_x", "r_shoulder_x", ObservationType.JOINT_POS),
-                            ("q_r_shoulder_z", "r_shoulder_z", ObservationType.JOINT_POS),
-                            ("q_r_elbow", "r_elbow", ObservationType.JOINT_POS),
-                            ("q_r_hip_z", "r_hip_z", ObservationType.JOINT_POS),
-                            ("q_r_hip_x", "r_hip_x", ObservationType.JOINT_POS),
-                            ("q_r_hip_y", "r_hip_y", ObservationType.JOINT_POS),
+                            ("q_r_leg_pitch", "r_leg_pitch", ObservationType.JOINT_POS),
+                            ("q_r_leg_roll", "r_leg_roll", ObservationType.JOINT_POS),
+                            ("q_r_leg_yaw", "r_leg_yaw", ObservationType.JOINT_POS),
                             ("q_r_knee", "r_knee", ObservationType.JOINT_POS),
-                            ("q_r_ankle", "r_ankle", ObservationType.JOINT_POS),
-                            ("q_l_hip_z", "l_hip_z", ObservationType.JOINT_POS),
-                            ("q_l_hip_x", "l_hip_x", ObservationType.JOINT_POS),
-                            ("q_l_hip_y", "l_hip_y", ObservationType.JOINT_POS),
+                            ("q_r_foot_pitch", "r_foot_pitch", ObservationType.JOINT_POS),
+                            ("q_r_foot_roll", "r_foot_roll", ObservationType.JOINT_POS),
+                            ("q_l_leg_pitch", "", ObservationType.JOINT_POS),
+                            ("q_l_leg_roll", "l_leg_roll", ObservationType.JOINT_POS),
+                            ("q_l_leg_yaw", "l_leg_yaw", ObservationType.JOINT_POS),
                             ("q_l_knee", "l_knee", ObservationType.JOINT_POS),
-                            ("q_l_ankle", "l_ankle", ObservationType.JOINT_POS),
+                            ("q_l_foot_pitch", "l_foot_pitch", ObservationType.JOINT_POS),
+                            ("q_l_foot_roll", "l_foot_roll", ObservationType.JOINT_POS),
+                            ("q_r_arm_pitch", "r_arm_pitch", ObservationType.JOINT_POS),
+                            ("q_r_arm_roll", "r_arm_roll", ObservationType.JOINT_POS),
+                            ("q_r_arm_yaw", "", ObservationType.JOINT_POS),
+                            ("q_r_forearm_pitch", "r_forearm_pitch", ObservationType.JOINT_POS),
+                            ("q_r_forearm_yaw", "r_forearm_yaw", ObservationType.JOINT_POS),
+                            ("q_r_hand_pitch", "r_hand_pitch", ObservationType.JOINT_POS),
+                            ("q_r_hand_roll", "r_hand_roll", ObservationType.JOINT_POS),
+                            ("q_l_arm_pitch", "l_arm_pitch", ObservationType.JOINT_POS),
+                            ("q_l_arm_roll", "l_arm_roll", ObservationType.JOINT_POS),
+                            ("q_r_hand_pitch", "r_hand_pitch", ObservationType.JOINT_POS),
+                            ("q_r_hand_roll", "r_hand_roll", ObservationType.JOINT_POS),
+                            ("q_l_arm_pitch", "l_arm_pitch", ObservationType.JOINT_POS),
+                            ("q_l_arm_roll", "l_arm_roll", ObservationType.JOINT_POS),
+                            ("q_l_arm_yaw", "l_arm_yaw", ObservationType.JOINT_POS),
+                            ("q_l_forearm_pitch", "l_forearm_pitch", ObservationType.JOINT_POS),
+                            ("q_l_forearm_yaw", "l_forearm_yaw", ObservationType.JOINT_POS),
+                            ("q_l_hand_pitch", "l_hand_pitch", ObservationType.JOINT_POS),
+                            ("q_l_hand_roll", "l_hand_roll", ObservationType.JOINT_POS),
 
-                            # ------------- JOINT VEL -------------  
+                            # ------------- JOINT VEL -------------
                             ("dq_pelvis_tx", "pelvis_tx", ObservationType.JOINT_VEL),
                             ("dq_pelvis_tz", "pelvis_tz", ObservationType.JOINT_VEL),
                             ("dq_pelvis_ty", "pelvis_ty", ObservationType.JOINT_VEL),
                             ("dq_pelvis_tilt", "pelvis_tilt", ObservationType.JOINT_VEL),
                             ("dq_pelvis_list", "pelvis_list", ObservationType.JOINT_VEL),
                             ("dq_pelvis_rotation", "pelvis_rotation", ObservationType.JOINT_VEL),
-                            ("dq_l_shoulder_y", "l_shoulder_y", ObservationType.JOINT_VEL),
-                            ("dq_l_shoulder_x", "l_shoulder_x", ObservationType.JOINT_VEL),
-                            ("dq_l_shoulder_z", "l_shoulder_z", ObservationType.JOINT_VEL),
-                            ("dq_l_elbow", "l_elbow", ObservationType.JOINT_VEL),
-                            ("dq_r_shoulder_y", "r_shoulder_y", ObservationType.JOINT_VEL),
-                            ("dq_r_shoulder_x", "r_shoulder_x", ObservationType.JOINT_VEL),
-                            ("dq_r_shoulder_z", "r_shoulder_z", ObservationType.JOINT_VEL),
-                            ("dq_r_elbow", "r_elbow", ObservationType.JOINT_VEL),
-                            ("dq_r_hip_z", "r_hip_z", ObservationType.JOINT_VEL),
-                            ("dq_r_hip_x", "r_hip_x", ObservationType.JOINT_VEL),
-                            ("dq_r_hip_y", "r_hip_y", ObservationType.JOINT_VEL),
+                            ("dq_r_leg_pitch", "r_leg_pitch", ObservationType.JOINT_VEL),
+                            ("dq_r_leg_roll", "r_leg_roll", ObservationType.JOINT_VEL),
+                            ("dq_r_leg_yaw", "r_leg_yaw", ObservationType.JOINT_VEL),
                             ("dq_r_knee", "r_knee", ObservationType.JOINT_VEL),
-                            ("dq_r_ankle", "r_ankle", ObservationType.JOINT_VEL),
-                            ("dq_l_hip_z", "l_hip_z", ObservationType.JOINT_VEL),
-                            ("dq_l_hip_x", "l_hip_x", ObservationType.JOINT_VEL),
-                            ("dq_l_hip_y", "l_hip_y", ObservationType.JOINT_VEL),
+                            ("dq_r_foot_pitch", "r_foot_pitch", ObservationType.JOINT_VEL),
+                            ("dq_r_foot_roll", "r_foot_roll", ObservationType.JOINT_VEL),
+                            ("dq_l_leg_pitch", "", ObservationType.JOINT_VEL),
+                            ("dq_l_leg_roll", "l_leg_roll", ObservationType.JOINT_VEL),
+                            ("dq_l_leg_yaw", "l_leg_yaw", ObservationType.JOINT_VEL),
                             ("dq_l_knee", "l_knee", ObservationType.JOINT_VEL),
-                            ("dq_l_ankle", "l_ankle", ObservationType.JOINT_VEL)]
-        
-                            
+                            ("dq_l_foot_pitch", "l_foot_pitch", ObservationType.JOINT_VEL),
+                            ("dq_l_foot_roll", "l_foot_roll", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_pitch", "r_arm_pitch", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_roll", "r_arm_roll", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_yaw", "", ObservationType.JOINT_VEL),
+                            ("dq_r_forearm_pitch", "r_forearm_pitch", ObservationType.JOINT_VEL),
+                            ("dq_r_forearm_yaw", "r_forearm_yaw", ObservationType.JOINT_VEL),
+                            ("dq_r_hand_pitch", "r_hand_pitch", ObservationType.JOINT_VEL),
+                            ("dq_r_hand_roll", "r_hand_roll", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_pitch", "l_arm_pitch", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_roll", "l_arm_roll", ObservationType.JOINT_VEL),
+                            ("dq_r_hand_pitch", "r_hand_pitch", ObservationType.JOINT_VEL),
+                            ("dq_r_hand_roll", "r_hand_roll", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_pitch", "l_arm_pitch", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_roll", "l_arm_roll", ObservationType.JOINT_VEL),
+                            ("dq_l_arm_yaw", "l_arm_yaw", ObservationType.JOINT_VEL),
+                            ("dq_l_forearm_pitch", "l_forearm_pitch", ObservationType.JOINT_VEL),
+                            ("dq_l_forearm_yaw", "l_forearm_yaw", ObservationType.JOINT_VEL),
+                            ("dq_l_hand_pitch", "l_hand_pitch", ObservationType.JOINT_VEL),
+                            ("dq_l_hand_roll", "l_hand_roll", ObservationType.JOINT_VEL)]
 
         return observation_spec
 
@@ -322,9 +362,12 @@ class Kuavo(BaseRobotHumanoid):
 
         """
        
-        action_spec = ["l_shoulder_y", "l_shoulder_x", "l_shoulder_z", "l_elbow", 
-                       "r_shoulder_y", "r_shoulder_x", "r_shoulder_z", "r_elbow", 
-                       "r_hip_z", "r_hip_x", "r_hip_y", "r_knee", "r_ankle", 
-                       "l_hip_z", "l_hip_x", "l_hip_y", "l_knee", "l_ankle"]
+        action_spec = ["l_leg_roll_actuator", "l_leg_yaw_actuator", "l_leg_pitch", "l_knee_actuator",
+                       "l_foot_pitch_actuator", "l_foot_roll_actuator", "r_leg_roll_actuator", "r_leg_yaw_actuator",
+                       "r_leg_pitch_actuator", "r_knee_actuator", "r_foot_pitch_actuator", "r_foot_roll_actuator",
+                       "l_arm_pitch_actuator", "l_arm_roll_actuator", "l_arm_yaw_actuator", "l_forearm_pitch_actuator",
+                       "l_forearm_yaw_actuator", "l_hand_roll_actuator", "l_hand_pitch_actuator", "r_arm_pitch_actuator",
+                       "r_arm_roll_actuator", "r_arm_yaw_actuator", "r_forearm_pitch_actuator", "r_forearm_yaw_actuator",
+                       "r_hand_roll_actuator", "r_hand_pitch_actuator"]
 
         return action_spec
