@@ -32,7 +32,7 @@ class Kuavo(BaseRobotHumanoid):
         """
 
         if hold_weight:
-            assert disable_arms is True, "If you want Unitree H1 to carry a weight, please disable the arms. " \
+            assert disable_arms is True, "If you want Kuavo to carry a weight, please disable the arms. " \
                                          "They will be kept fixed."
 
         xml_path = (Path(__file__).resolve().parent.parent / "data" / "kuavo" / "kuavo.xml").as_posix()
@@ -94,8 +94,8 @@ class Kuavo(BaseRobotHumanoid):
 
         """
 
-        grf = np.concatenate([self._get_collision_force("floor", "right_foot")[:3],
-                              self._get_collision_force("floor", "left_foot")[:3]])
+        grf = np.concatenate([self._get_collision_force("floor", "foot_r")[:3],
+                              self._get_collision_force("floor", "foot_l")[:3]])
 
         return grf
 
@@ -130,7 +130,6 @@ class Kuavo(BaseRobotHumanoid):
             motors_to_remove += ["l_arm_pitch_actuator", "l_arm_roll_actuator", "l_arm_yaw_actuator", "l_forearm_pitch_actuator", "l_forearm_yaw_actuator", "l_hand_pitch_actuator", "l_hand_roll_actuator",
                                  "r_arm_pitch_actuator", "r_arm_roll_actuator", "r_arm_yaw_actuator", "r_forearm_pitch_actuator", "r_forearm_yaw_actuator", "r_hand_pitch_actuator", "r_hand_roll_actuator"]
 
-            
         if self._disable_back_joint:
             # kuavo has no back joints
             pass
@@ -213,7 +212,6 @@ class Kuavo(BaseRobotHumanoid):
 
         return BaseRobotHumanoid.generate(Kuavo, path, task, dataset_type,
                                           clip_trajectory_to_joint_ranges=True, **kwargs)
-
 
     @staticmethod
     def _add_weight(xml_handle, mass, color):
