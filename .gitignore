@@ -10,3 +10,5 @@ loco_mujoco/datasets/data_generation/generated_data
 *.mat
 mushroom_rl_recordings/
 record_all/
+loco_mujoco/datasets/quadrupeds/
+loco_mujoco/datasets/humanoids/
