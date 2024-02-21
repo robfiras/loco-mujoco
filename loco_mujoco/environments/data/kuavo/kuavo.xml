@@ -113,7 +113,7 @@
                                 <body name="l_foot_roll" pos="0.021 -0.021 0.000142422">
                                     <inertial pos="-0.0432253 -8.83109e-06 -0.02319" quat="5.30343e-05 0.70865 2.4785e-05 0.70556" mass="0.485953" diaginertia="0.000765599 0.000645275 0.000157862" />
                                     <joint name="l_foot_roll" pos="0 0 0" axis="-1 0 0" />
-                                    <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_foot_roll" />
+                                    <geom name="left_foot" class="collision" type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_foot_roll" />
                                 </body>
                             </body>
     <!--                        <body name="l_l_bar" pos="9.39839e-05 0.0295 -0.09">-->
@@ -163,7 +163,7 @@
                                 <body name="r_foot_roll" pos="0.021 0.021 0">
                                     <inertial pos="-0.0480333 6.50582e-06 -0.02084" quat="-6.19557e-05 0.711387 -6.76251e-06 0.7028" mass="0.235882" diaginertia="0.000291968 0.000241939 7.44384e-05" />
                                     <joint name="r_foot_roll" pos="0 0 0" axis="-1 0 0" />
-                                    <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_foot_roll" />
+                                    <geom name="right_foot" class="collision" type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_foot_roll" />
                                 </body>
                             </body>
     <!--                        <body name="r_r_bar" pos="0 -0.0295 -0.09">-->

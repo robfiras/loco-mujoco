@@ -94,8 +94,8 @@ class Kuavo(BaseRobotHumanoid):
 
         """
 
-        grf = np.concatenate([self._get_collision_force("floor", "foot_r")[:3],
-                              self._get_collision_force("floor", "foot_l")[:3]])
+        grf = np.concatenate([self._get_collision_force("floor", "right_foot")[:3],
+                              self._get_collision_force("floor", "left_foot")[:3]])
 
         return grf
 
@@ -193,7 +193,7 @@ class Kuavo(BaseRobotHumanoid):
                                          *Kuavo.valid_task_confs.get_all())
         if dataset_type == "real":
             if task == "run":
-                path = "datasets/humanoids/real/05-run_Kuavo.npz"
+                path = "datasets/data_generation/generated_data/05-run_Kuavo.npz"
             else:
                 path = "datasets/humanoids/real/02-constspeed_Kuavo.npz"
         elif dataset_type == "perfect":
@@ -286,7 +286,7 @@ class Kuavo(BaseRobotHumanoid):
                             ("q_r_knee", "r_knee", ObservationType.JOINT_POS),
                             ("q_r_foot_pitch", "r_foot_pitch", ObservationType.JOINT_POS),
                             ("q_r_foot_roll", "r_foot_roll", ObservationType.JOINT_POS),
-                            ("q_l_leg_pitch", "", ObservationType.JOINT_POS),
+                            ("q_l_leg_pitch", "l_leg_pitch", ObservationType.JOINT_POS),
                             ("q_l_leg_roll", "l_leg_roll", ObservationType.JOINT_POS),
                             ("q_l_leg_yaw", "l_leg_yaw", ObservationType.JOINT_POS),
                             ("q_l_knee", "l_knee", ObservationType.JOINT_POS),
@@ -294,7 +294,7 @@ class Kuavo(BaseRobotHumanoid):
                             ("q_l_foot_roll", "l_foot_roll", ObservationType.JOINT_POS),
                             ("q_r_arm_pitch", "r_arm_pitch", ObservationType.JOINT_POS),
                             ("q_r_arm_roll", "r_arm_roll", ObservationType.JOINT_POS),
-                            ("q_r_arm_yaw", "", ObservationType.JOINT_POS),
+                            ("q_r_arm_yaw", "r_arm_yaw", ObservationType.JOINT_POS),
                             ("q_r_forearm_pitch", "r_forearm_pitch", ObservationType.JOINT_POS),
                             ("q_r_forearm_yaw", "r_forearm_yaw", ObservationType.JOINT_POS),
                             ("q_r_hand_pitch", "r_hand_pitch", ObservationType.JOINT_POS),
@@ -324,7 +324,7 @@ class Kuavo(BaseRobotHumanoid):
                             ("dq_r_knee", "r_knee", ObservationType.JOINT_VEL),
                             ("dq_r_foot_pitch", "r_foot_pitch", ObservationType.JOINT_VEL),
                             ("dq_r_foot_roll", "r_foot_roll", ObservationType.JOINT_VEL),
-                            ("dq_l_leg_pitch", "", ObservationType.JOINT_VEL),
+                            ("dq_l_leg_pitch", "l_leg_pitch", ObservationType.JOINT_VEL),
                             ("dq_l_leg_roll", "l_leg_roll", ObservationType.JOINT_VEL),
                             ("dq_l_leg_yaw", "l_leg_yaw", ObservationType.JOINT_VEL),
                             ("dq_l_knee", "l_knee", ObservationType.JOINT_VEL),
@@ -332,7 +332,7 @@ class Kuavo(BaseRobotHumanoid):
                             ("dq_l_foot_roll", "l_foot_roll", ObservationType.JOINT_VEL),
                             ("dq_r_arm_pitch", "r_arm_pitch", ObservationType.JOINT_VEL),
                             ("dq_r_arm_roll", "r_arm_roll", ObservationType.JOINT_VEL),
-                            ("dq_r_arm_yaw", "", ObservationType.JOINT_VEL),
+                            ("dq_r_arm_yaw", "r_arm_yaw", ObservationType.JOINT_VEL),
                             ("dq_r_forearm_pitch", "r_forearm_pitch", ObservationType.JOINT_VEL),
                             ("dq_r_forearm_yaw", "r_forearm_yaw", ObservationType.JOINT_VEL),
                             ("dq_r_hand_pitch", "r_hand_pitch", ObservationType.JOINT_VEL),
