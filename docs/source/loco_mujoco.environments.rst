@@ -1,3 +1,4 @@
+.. _env-label:
 Overview of Environments and Tasks
 =================================
 
@@ -6,6 +7,11 @@ different datasets. The real dataset contains real (noisy) motion capture datase
 contains ground truth states and actions form an expert policy. The preference dataset
 contains preferences of an ground truth expert with states and action (only available on an few tasks). The status of a
 dataset can be seen down below. ✅ means it is already available, and 🔶 means pending.
+
+.. note::
+    The **perfect** and **preference** datasets are only available for the *default* settings of an environment.
+    By default, arms are not included in the observation space. Hence, these datasets are only available
+    for tasks without arms. In comparison, the real dataset also contains arm observations.
 
 .. list-table::
    :widths: 25 30 15 30

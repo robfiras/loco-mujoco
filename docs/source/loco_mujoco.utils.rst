@@ -1,30 +1,11 @@
 loco\_mujoco.utils package
 ==========================
 
-Submodules
-----------
-
-loco\_mujoco.utils.checks module
---------------------------------
-
-.. automodule:: loco_mujoco.utils.checks
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-loco\_mujoco.utils.dataset module
----------------------------------
-
-.. automodule:: loco_mujoco.utils.dataset
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 loco\_mujoco.utils.domain\_randomization module
 -----------------------------------------------
 
-.. automodule:: loco_mujoco.utils.domain_randomization
-   :members:
+.. automodule:: loco_mujoco.utils.domain_randomization   :members:
    :undoc-members:
    :show-inheritance:
 
@@ -36,15 +17,8 @@ loco\_mujoco.utils.goals module
    :undoc-members:
    :show-inheritance:
 
-loco\_mujoco.utils.math module
-------------------------------
 
-.. automodule:: loco_mujoco.utils.math
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-loco\_mujoco.utils.reward module
+Rewards
 --------------------------------
 
 .. automodule:: loco_mujoco.utils.reward
@@ -52,7 +26,7 @@ loco\_mujoco.utils.reward module
    :undoc-members:
    :show-inheritance:
 
-loco\_mujoco.utils.trajectory module
+Trajectory
 ------------------------------------
 
 .. automodule:: loco_mujoco.utils.trajectory
@@ -60,18 +34,3 @@ loco\_mujoco.utils.trajectory module
    :undoc-members:
    :show-inheritance:
 
-loco\_mujoco.utils.video module
--------------------------------
-
-.. automodule:: loco_mujoco.utils.video
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Module contents
----------------
-
-.. automodule:: loco_mujoco.utils
-   :members:
-   :undoc-members:
-   :show-inheritance:

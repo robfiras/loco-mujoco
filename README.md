@@ -41,9 +41,10 @@ pip install -e .
 ```
 
 ### Download the Datasets
+After installing LocoMuJoCo, new commands for downloading the datasets will be setup for you.
 You have the choice of downloading all datasets available or only the ones you need.
 
-To install all datasets run:  
+For example, to install all datasets run:  
 ```bash
 loco-mujoco-download
 ```

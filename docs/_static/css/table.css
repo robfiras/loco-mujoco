@@ -46,3 +46,12 @@ table td {
 a:hover {
     text-decoration: underline !important;
 }
+
+.wy-nav-content {
+    max-width: 950px !important;
+}
+
+.h2 {
+   margin-top: 200px; /* Adjust as needed */
+   margin-bottom: 10px; /* Adjust as needed */
+}

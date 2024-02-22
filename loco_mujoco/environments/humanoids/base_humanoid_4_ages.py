@@ -154,10 +154,10 @@ class BaseHumanoid4Ages(BaseHumanoid):
         Args:
             traj_params (dict): Dictionary of parameters needed to load trajectories;
             scaling_trajectory_map (list): A list that contains tuples of two integers
-                for each scaling. Given a set of trajectories, they define the range of
-                the valid trajectory numbers for each scaling factor.
+            for each scaling. Given a set of trajectories, they define the range of
+            the valid trajectory numbers for each scaling factor.
             warn (bool): If True, a warning will be raised if scaling_trajectory_map is not set
-                or the trajectory ranges are violated.
+            or the trajectory ranges are violated.
 
         """
 
@@ -368,11 +368,11 @@ class BaseHumanoid4Ages(BaseHumanoid):
             env (class): Humanoid class, either HumanoidTorque4Ages or HumanoidMuscle4Ages.
             task (str): Main task to solve. Either "walk" or "run".
             mode (str): Mode of the environment. Either "all" (sample between all humanoid envs), "1"
-                (smallest humanoid), "2" (second smallest humanoid), "3" (teenage humanoid), and "4" (adult humanoid).
+            (smallest humanoid), "2" (second smallest humanoid), "3" (teenage humanoid), and "4" (adult humanoid).
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
-                reference trajectory. This data does not perfectly match the kinematics
-                and dynamics of this environment, hence it is more challenging. "perfect" uses
-                a perfect dataset.
+            reference trajectory. This data does not perfectly match the kinematics
+            and dynamics of this environment, hence it is more challenging. "perfect" uses
+            a perfect dataset.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
 
         Returns:

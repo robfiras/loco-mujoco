@@ -218,9 +218,9 @@ class BaseHumanoid(LocoEnv):
             path (str): Path to the dataset.
             task (str): Main task to solve. Either "walk" or "run".
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
-                reference trajectory. This data does not perfectly match the kinematics
-                and dynamics of this environment, hence it is more challenging. "perfect" uses
-                a perfect dataset.
+            reference trajectory. This data does not perfectly match the kinematics
+            and dynamics of this environment, hence it is more challenging. "perfect" uses
+            a perfect dataset.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
 
         Returns:

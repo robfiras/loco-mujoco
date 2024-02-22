@@ -38,6 +38,9 @@ Datasets
 -----------
 
 
-Utils
+Rewards
 -----------
+.. toctree::
+    :hidden:
 
+    ./loco_mujoco.rewards.rst

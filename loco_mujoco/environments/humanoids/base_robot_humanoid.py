@@ -152,11 +152,11 @@ class BaseRobotHumanoid(LocoEnv):
             env (class): Humanoid class, either HumanoidTorque or HumanoidMuscle.
             path (str): Path to the dataset.
             task (str): Main task to solve. Either "walk" or "carry". The latter is walking while carrying
-                an unknown weight, which makes the task partially observable.
+            an unknown weight, which makes the task partially observable.
             dataset_type (str): "real" or "perfect". "real" uses real motion capture data as the
-                reference trajectory. This data does not perfectly match the kinematics
-                and dynamics of this environment, hence it is more challenging. "perfect" uses
-                a perfect dataset.
+            reference trajectory. This data does not perfectly match the kinematics
+            and dynamics of this environment, hence it is more challenging. "perfect" uses
+            a perfect dataset.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
             clip_trajectory_to_joint_ranges (bool): If True, trajectory is clipped to joint ranges.
 
