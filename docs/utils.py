@@ -1,5 +1,6 @@
 import inspect
 import loco_mujoco
+from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle
 from mushroom_rl.utils.mujoco import *
 
 
@@ -57,10 +58,16 @@ def get_obs_space_table_docs(env, additional_info):
 
     if "disable_arms" in default_args.keys():
         env._disable_arms = default_args["disable_arms"]
+    elif type(env) == HumanoidTorque or type(env) == HumanoidMuscle:
+        env._disable_arms = True
+        env._use_box_feet = True
     if "disable_back_joint" in default_args.keys():
         env._disable_back_joint = default_args["disable_back_joint"]
 
-    joints_to_remove, _, _ = env._get_xml_modifications()
+    try:
+        joints_to_remove, _, _ = env._get_xml_modifications()
+    except ValueError:
+        joints_to_remove, _, _, _ = env._get_xml_modifications()
 
     header = ["Index", "Description", "Min", "Max", "Disabled", "Dim", "Units"]
     grid = [header]
@@ -110,11 +117,14 @@ def get_obs_space_table_docs(env, additional_info):
     return make_table(grid), n_on_by_default
 
 
-def get_action_space_table_docs(env):
+def get_action_space_table_docs(env, use_muscles=False):
 
-    action_spec = env._get_action_specification()
-
-    _, motors_to_remove, _ = env._get_xml_modifications()
+    try:
+        action_spec = env._get_action_specification()
+        _, motors_to_remove, _ = env._get_xml_modifications()
+    except :
+        action_spec = env._get_action_specification(use_muscles)
+        _, motors_to_remove, _, _ = env._get_xml_modifications()
 
     header = ["Index", "Name in XML", "Control Min", "Control Max", "Disabled"]
     grid = [header]
@@ -158,12 +168,40 @@ if __name__ == "__main__":
     # print(get_action_space_table_docs(env)[0],
     #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
 
-    # UnitreeH1
-    env = loco_mujoco.LocoEnv.make("UnitreeH1", disable_back=False, disable_arms=False)
-    additional_info = [["Mass of the Weight", "0.0", "inf", "Only Enabled for Carry Task", "1", "Mass [kg]"],
-                       ["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
+    # # UnitreeH1
+    # env = loco_mujoco.LocoEnv.make("UnitreeH1", disable_back=False, disable_arms=False)
+    # additional_info = [["Mass of the Weight", "0.0", "inf", "Only Enabled for Carry Task", "1", "Mass [kg]"],
+    #                    ["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
+    # print(get_obs_space_table_docs(env, additional_info)[0],
+    #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    # print(get_action_space_table_docs(env)[0],
+    #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
+
+    # Torque Humanoid
+    # env = loco_mujoco.LocoEnv.make("HumanoidTorque", disable_back=False, disable_arms=False)
+    # additional_info = [["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Front Right Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Back Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Front Left Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"]]
+    # print(get_obs_space_table_docs(env, additional_info)[0],
+    #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    # print(get_action_space_table_docs(env)[0],
+    #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
+    #
+    # Torque and Muscle Humanoids4Ages
+    # additional_info = [["Index", "Description", "Min", "Max", "Disabled", "Dim", "Units"],
+    #                    ["77", "Binary number identifying the humanoid scaling.", "0", "1", "False", "2", "None"]]
+    # print(make_table(additional_info))
+
+    # Muscle Humanoid
+    env = loco_mujoco.LocoEnv.make("HumanoidMuscle", disable_back=False, disable_arms=False)
+    additional_info = [["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+                       ["3D linear Forces between Front Right Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"],
+                       ["3D linear Forces between Back Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+                       ["3D linear Forces between Front Left Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"]]
     print(get_obs_space_table_docs(env, additional_info)[0],
           "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
-    print(get_action_space_table_docs(env)[0],
-          "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
+    print(get_action_space_table_docs(env, use_muscles=True)[0],
+          "\nNumber of actions that are on by default: ", get_action_space_table_docs(env, use_muscles=True)[1])
+

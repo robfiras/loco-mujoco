@@ -376,7 +376,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
 
         Returns:
-            An MDP of a set of Torque Humanoid of different sizes.
+            An MDP of a set of Torque or Muscle Humanoid of different sizes.
 
         """
 
