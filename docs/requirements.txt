@@ -1,0 +1,8 @@
+mushroom-rl>=1.10.0
+numpy
+scipy
+mujoco==2.3.6
+gymnasium
+dm_control
+pyyaml
+wget
