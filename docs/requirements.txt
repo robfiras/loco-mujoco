@@ -6,3 +6,4 @@ gymnasium
 dm_control
 pyyaml
 wget
+m2r2
