@@ -1,6 +1,6 @@
 import inspect
 import loco_mujoco
-from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle
+from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle, UnitreeA1
 from mushroom_rl.utils.mujoco import *
 
 
@@ -42,6 +42,8 @@ def get_obs_space_table_docs(env, additional_info):
     obs_spec = env.obs_helper.observation_spec[2:] # remove the first two
     low = env.info.observation_space.low
     high = env.info.observation_space.high
+    if type(env) == UnitreeA1:
+        low, high = low[:-2], high[:-2]
     assert len(obs_spec) == len(low) == len(high)
 
     linear_joints = ["pelvis_tx", "pelvis_tz", "pelvis_ty"]
@@ -66,8 +68,11 @@ def get_obs_space_table_docs(env, additional_info):
 
     try:
         joints_to_remove, _, _ = env._get_xml_modifications()
-    except ValueError:
-        joints_to_remove, _, _, _ = env._get_xml_modifications()
+    except:
+        if type(env) != UnitreeA1:
+            joints_to_remove, _, _, _ = env._get_xml_modifications()
+        else:
+            joints_to_remove = []
 
     header = ["Index", "Description", "Min", "Max", "Disabled", "Dim", "Units"]
     grid = [header]
@@ -121,7 +126,10 @@ def get_action_space_table_docs(env, use_muscles=False):
 
     try:
         action_spec = env._get_action_specification()
-        _, motors_to_remove, _ = env._get_xml_modifications()
+        if type(env) != UnitreeA1:
+            _, motors_to_remove, _ = env._get_xml_modifications()
+        else:
+            motors_to_remove = []
     except :
         action_spec = env._get_action_specification(use_muscles)
         _, motors_to_remove, _, _ = env._get_xml_modifications()
@@ -194,12 +202,25 @@ if __name__ == "__main__":
     #                    ["77", "Binary number identifying the humanoid scaling.", "0", "1", "False", "2", "None"]]
     # print(make_table(additional_info))
 
-    # Muscle Humanoid
-    env = loco_mujoco.LocoEnv.make("HumanoidMuscle", disable_back=False, disable_arms=False)
-    additional_info = [["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Front Right Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"],
+    # # Muscle Humanoid
+    # env = loco_mujoco.LocoEnv.make("HumanoidMuscle", disable_back=False, disable_arms=False)
+    # additional_info = [["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Front Right Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Back Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Front Left Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"]]
+    # print(get_obs_space_table_docs(env, additional_info)[0],
+    #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    # print(get_action_space_table_docs(env, use_muscles=True)[0],
+    #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env, use_muscles=True)[1])
+
+    # Unitree A1
+    env = loco_mujoco.LocoEnv.make("UnitreeA1")
+    additional_info = [["Desired Velocity Angle represented as Sine-Cosine Feature", "0.0", "1", "False", "2", "None"],
+                       ["Desired Velocity", "0.0", "inf", "False", "1", "Velocity [m/s]"],
+                       ["3D linear Forces between Front Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+                       ["3D linear Forces between Front Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
                        ["3D linear Forces between Back Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Front Left Foot and Floor (If box feet is disabled)", "0.0", "inf", "True", "3", "Force [N]"]]
+                       ["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
     print(get_obs_space_table_docs(env, additional_info)[0],
           "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
     print(get_action_space_table_docs(env, use_muscles=True)[0],

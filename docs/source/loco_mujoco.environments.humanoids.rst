@@ -1,6 +1,8 @@
 Humanoids
 ===========================================
 
+Here you find an overview of the API of all Humanoid environments.
+
 .. toctree::
 
     ./humanoids/talos.rst

@@ -158,7 +158,7 @@ class UnitreeH1(BaseRobotHumanoid):
     | The action space has the following properties *by default* (i.e., only actions with Disabled == False):
     | :code:`(min=-1, max=1, dim=11, dtype=float32)`
 
-    Some actions aer **disabled by default**, but can be turned on. The detailed action space is:
+    Some actions are **disabled by default**, but can be turned on. The detailed action space is:
 
     ===== ======================== =========== =========== ========
     Index Name in XML              Control Min Control Max Disabled

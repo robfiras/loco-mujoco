@@ -31,7 +31,7 @@ for the Unitree H1 robot:
     ./loco_mujoco.environments.rst
     ./loco_mujoco.environments.humanoids.rst
     ./loco_mujoco.environments.quadrupeds.rst
-
+    ./loco_mujoco.environments.base.rst
 
 
 Datasets
