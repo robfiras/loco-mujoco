@@ -25,6 +25,22 @@ for the Unitree H1 robot:
     :language: python
 
 
+.. note:: As can be seen in the example above *Task-IDs* (e.g., "UnitreeH1.run.real") are used to choose what environment,
+    task and dataset type to use. The general structure of a Task-Id is `<environment>.<task>.<dataset_type>`.
+    For the Task-ID, you have to choose *at least* the environment name. Missing
+    information will be filled with default settings, which are "walk" for the task and "real" for the dataset type for the
+    Unitree H1 robot. A list of all available *Task-IDs* in LocoMuJoCo is given in the :doc:`./loco_mujoco.environments`.
+    Alternatively, you can use the following code:
+
+    .. code-block:: python
+
+        from loco_mujoco import LocoEnv
+
+        task_ids = LocoEnv.get_all_task_names()
+
+
+
+
 .. toctree::
     :hidden:
 
@@ -36,10 +52,36 @@ for the Unitree H1 robot:
 
 Datasets
 -----------
+LocoMuJoCo comes with three different types of datasets: *real* , *perfect*, *preference*. The *real* dataset consists of
+motion capture datasets for the humanoids environment and an MPC control for the Unitree A1 quadruped. These datasets
+do not contain actions, and might suffer from mismatches (e.g., floating feet, inacturate foot forces etc.). The *perfect*
+datasets are datasets generated from a policy trained with the best performing baseline algorithm. This dataset comes
+with actions and is perfect in the sense that it is generated in the same environment, i.e., no mismatches. The *preference*
+datasets are similar to the *perfect* datasets, but they are generated from a policy trained which are not the best performing.
+This dataset contains multiple ranked sets of trajectories. While the real dataset is available on all environments, the
+perfect and preference datasets are only available for some environments. A detailed overview is given at: :ref:`env-label`.
+The main class that is handling datasets in LocoMuJoCo is the :doc:`Trajectory <./loco_mujoco.trajectory>` class.
+
+.. toctree::
+    :hidden:
+
+    ./loco_mujoco.trajectory.rst
+
+Below you can find the pipeline of LocoMuJoCo. First an environment is chosen. Then a task to be solved is chosen.
+Afterwards, a dataset type is chosen. During training domain randomization can be applied. Finally, the trained model
+can be compared to the baseline algorithms. The environment, task, and dataset type define the difficulty. Training
+on real dataset is generally more challenging due to the lack of actions and mismatches.
+
+.. image:: ./images/locomujoco_pipeline.png
 
 
 Rewards
 -----------
+When doing imitation learning, rewards are only used for evaluation purposes. The rewards are not used during training.
+Each environment comes with a default reward function. However, the user can easily change the reward function to another
+one, or even provide a default reward function as shown in the :doc:`./tutorials/reinforcement_learning` tutorials.
+:doc:`Here <./loco_mujoco.rewards>` you find all reward functions that are available in LocoMuJoCo.
+
 .. toctree::
     :hidden:
 

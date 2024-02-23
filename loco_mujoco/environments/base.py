@@ -284,7 +284,7 @@ class LocoEnv(MultiMuJoCo):
         Returns:
             Dictionary containing states, next_states and absorbing flags. For the states the shape is
             (N_traj x N_samples_per_traj, dim_state), while the absorbing flag has the shape is
-            (N_traj x N_samples_per_traj).
+            (N_traj x N_samples_per_traj). For perfect and preference datasets, the actions are also provided.
 
         """
 

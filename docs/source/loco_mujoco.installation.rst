@@ -43,7 +43,7 @@ Run the following command to install only the perfect (ground-truth with actions
 
     loco-mujoco-download-perfect
 
-
+.. _install-baseline-label:
 Installing the Baselines
 -----------------------
 If you also want to run the baselines, you have to install our imitation learning library `imitation_lib <https://github.com/robfiras/ls-iq>`__.
@@ -123,8 +123,7 @@ LocoMuJoCo *natively* supports `MushroomRL <https://github.com/MushroomRL/mushro
     dataset = env.create_dataset()
 
 
-You can find many more examples [here](examples)
-
+You can find many more examples `here <https://github.com/robfiras/loco-mujoco/tree/master/examples>`__.
 
 
 Citation

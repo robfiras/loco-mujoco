@@ -1,12 +1,78 @@
 .. _env-label:
-Overview of Environments and Tasks
+Basics
 =================================
 
-Here you can find an overview of all tasks. Each Task is represented by its own ID. For each task, you can choose between
-different datasets. The real dataset contains real (noisy) motion capture datasets without actions. The perfect dataset
-contains ground truth states and actions form an expert policy. The preference dataset
-contains preferences of an ground truth expert with states and action (only available on an few tasks). The status of a
-dataset can be seen down below. ✅ means it is already available, and 🔶 means pending.
+Task-IDs
+-----------------------------------
+Tasks are chosen by defining Task-IDs. The general structure of a Task-Id is `<environment>.<task>.<dataset_type>`.
+For the Task-ID, you have to choose *at least* the environment name. Missing information will be filled with default setting
+specific to the respective environment. Default settings can be seen in the :code:`generate()` method of the
+respective environment class. A list of all available *Task-IDs* in LocoMuJoCo is given below.
+Alternatively, you can use the following code:
+
+.. code-block:: python
+
+    from loco_mujoco import LocoEnv
+
+    task_ids = LocoEnv.get_all_task_names()
+
+Some environments have additional information in the Task-ID. For example, the HumanoidTorque4Ages and
+HumanoidMuscle4Ages environments have different `modes` for different ages, where an index is added to the task
+name to chose which of the 4 Humanoids to choose. The general structure there is
+`<environment>.<task>.<mode>.<dataset_type>`. The smallest humanoid is indexed by 1 while the adult is indexed
+by 4; e.g. :code:`"HumanoidMuscle4Ages.walk.1.real"` or :code:`"HumanoidMuscle4Ages.run.4.real"`.
+
+Given a Task-ID, it is very straightforward to create an environment. For example, for a MushrooRL environment:
+
+
+.. code-block:: python
+
+    from loco_mujoco import LocoEnv
+
+    # create an environment with a Muscle Humanoid running with motion capture data (real dataset type)
+    env = LocoEnv("HumanoidMuscle.run.real")
+
+
+You can do the same for a Gymnasium environment:
+
+.. code-block:: python
+
+    import loco_mujoco  # needed to register the environments
+    import gym
+
+    # create an environment with a Muscle Humanoid running with motion capture data (real dataset type)
+    env = gym.make("LocoMujoco", env_name="HumanoidMuscle.run.real")
+
+Replay Datasets
+-----------------------------------
+
+If you would like to visualize the datasets, you can replay them using the following code:
+
+.. literalinclude:: ../../examples/replay_datasets/replay_humanoid_muscle.py
+    :language: python
+
+This method will read the joint positions in the dataset and set the joint positions of the humanoid accordingly
+at each time step. Alternatively, you can also replay the dataset from the velocities. To do so, the first state of a
+trajectory is sampled and all following states will be calculated from velocities using numerical integration.
+This method is useful to verify that the velocities in the dataset are consistent with the positions. Here is an example:
+
+.. literalinclude:: ../../examples/replay_datasets/replay_talos.py
+    :language: python
+
+Both, the :code:`play_trajectory` and :code:`play_trajectory_from_velocity` methods are available
+for the Gymnasium interface as well.
+
+.. note:: Dynamics are disregard when replaying a dataset!
+
+.. _env-label:
+Overview of Environments, Tasks and Datasets
+-----------------------------------
+
+Here you can find an overview of all tasks. For each task, you can choose between different datasets. The real dataset
+contains real (noisy) motion capture datasets without actions. The perfect dataset contains ground truth states and
+actions form an expert policy. The preference dataset contains preferences of an ground truth expert with states and
+action (only available on an few tasks). The status of a dataset can be seen down below. ✅ means it is already
+available, and 🔶 means pending.
 
 .. note::
     The **perfect** and **preference** datasets are only available for the *default* settings of an environment.
@@ -19,7 +85,7 @@ dataset can be seen down below. ✅ means it is already available, and 🔶 mean
 
    * - **Image**
      - **Task-IDs**
-     - **Status of Datasets**
+     - **Status Datasets**
      - **Description**
    * - .. image:: https://github.com/robfiras/loco-mujoco/assets/69359729/cdcd4617-c18a-448d-b42a-ea01384016b0
      - | HumanoidMuscle.walk

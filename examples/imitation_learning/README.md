@@ -47,7 +47,7 @@ for env_id, critic_lr in product(env_ids, critic_lrs):
 The trailing underscores are important to have a separate logging directory for each experiment when looping 
 over a parameter.
 
-**Important**: You have to specify the new parameter with the type declaration to the `experiment.py` file.
+**Important**: You have to specify the new parameter with the type declaration in the `experiment.py` file.
 Hence, the experiment file changes from:
 
 ```python
