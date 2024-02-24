@@ -86,3 +86,21 @@ one, or even provide a default reward function as shown in the :doc:`./tutorials
     :hidden:
 
     ./loco_mujoco.rewards.rst
+
+Domain Randomization
+--------------------
+
+LocoMuJoCo comes with build-in domain randomization. In contrast to others, LocoMuJoCo randomizes parameters
+in the XML and recompiles the complete model whenever needed. We do so to ensure that the randomization is consistent
+across all parameters, as some parameters are calculated based on others *during compilation*. An example is the the
+default inertia from geometries. The latter is calculated based on the shape and mass of the geometry. When just randomizing
+the mass *of the model*, the inertia will remain unchanged resulting in inconsistent randomization. However, if the mass
+is randomized *in the XML* and the model is recompiled, the inertia will be recalculated based on the new mass resulting
+in consistent randomization. :doc:`Here <./loco_mujoco.domain_randomization>`, you find the API for domain randomization.
+Also take a look at the :doc:`./tutorials/domain_randomization` tutorials to see how to use domain randomization in
+LocoMuJoCo.
+
+.. toctree::
+    :hidden:
+
+    ./loco_mujoco.domain_randomization.rst
