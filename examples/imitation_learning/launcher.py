@@ -21,14 +21,17 @@ if __name__ == '__main__':
                         use_timestamp=True,
                         )
 
-    default_params = dict(n_epochs=1,
-                          n_steps_per_epoch=10000,
+    default_params = dict(n_epochs=400,
+                          n_steps_per_epoch=100000,
                           n_epochs_save=25,
                           n_eval_episodes=10,
                           n_steps_per_fit=1000,
                           use_cuda=USE_CUDA)
 
-    env_ids = [
+    env_ids = ["Atlas.walk", "Atlas.carry",
+               "Talos.walk", "Talos.carry",
+               "UnitreeH1.walk", "UnitreeH1.run", "UnitreeH1.carry",
+               "HumanoidTorque.walk", "HumanoidTorque.run",
                "HumanoidMuscle.walk", "HumanoidMuscle.run",
                "UnitreeA1.simple", "UnitreeA1.hard"]
 
