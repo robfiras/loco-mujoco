@@ -156,7 +156,7 @@ def set_joint_conf(conf, jh):
                                                         param["sigma"]), 0.0, np.Inf)
             else:
                 raise ValueError(f"Parameter {param_name} currently nor supported "
-                                 f"for domain randomizaiton.")
+                                 f"for domain randomization.")
         elif "uniform_range" in param.keys():
             low, high = check_uniform_range_conf(jh, param["uniform_range"])
             if param_name == "damping":

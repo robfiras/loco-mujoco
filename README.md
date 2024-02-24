@@ -3,6 +3,7 @@
 </p>
 
 ![continous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
+[![Documentation Status](https://readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI](https://img.shields.io/pypi/v/loco-mujoco)](https://pypi.org/project/loco-mujoco/)
 
@@ -41,9 +42,10 @@ pip install -e .
 ```
 
 ### Download the Datasets
+After installing LocoMuJoCo, new commands for downloading the datasets will be setup for you.
 You have the choice of downloading all datasets available or only the ones you need.
 
-To install all datasets run:  
+For example, to install all datasets run:  
 ```bash
 loco-mujoco-download
 ```

@@ -1,0 +1,153 @@
+# Configuration files for imitation learning examples
+
+Atlas:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+Talos:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+HumanoidTorque:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+HumanoidTorque4Ages:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+HumanoidMuscle:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+HumanoidMuscle4Ages:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+UnitreeH1:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"
+
+UnitreeA1:
+  algorithm: "VAIL"
+  algorithm_config:
+    std_0: 1.0
+    info_constraint: 0.5
+    lr_beta: 00001
+    z_dim: 128
+    disc_only_states: True
+    disc_use_next_states: True
+    train_disc_n_th_epoch: 3
+    disc_batch_size: 2048
+    learning_rate_critic: 1.0e-3
+    learning_rate_disc: 3.0e-4
+    policy_entr_coef: 0.0
+    max_kl: 5.0e-3
+    n_epochs_cg: 25
+    use_noisy_targets: False
+    last_policy_activation: "identity"

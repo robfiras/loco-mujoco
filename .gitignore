@@ -12,3 +12,5 @@ mushroom_rl_recordings/
 record_all/
 loco_mujoco/datasets/quadrupeds/
 loco_mujoco/datasets/humanoids/
+_build/
+

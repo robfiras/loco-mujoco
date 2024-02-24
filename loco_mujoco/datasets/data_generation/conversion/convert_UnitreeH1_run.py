@@ -41,7 +41,7 @@ if __name__ == "__main__":
         os.makedirs(dir_target_path)
     target_path = os.path.join(dir_target_path, "05-run_UnitreeH1.npz")
 
-    # do seme renaming of the joint names
+    # do some renaming of the joint names
     rename_map = dict(lumbar_extension="back_bky",
                       lumbar_bending="back_bkx",
                       lumbar_rotation="back_bkz",

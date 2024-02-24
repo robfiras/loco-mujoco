@@ -19,8 +19,181 @@ from loco_mujoco.utils.checks import check_validity_task_mode_dataset
 
 
 class UnitreeA1(LocoEnv):
+
     """
+    Description
+    ------------
+
     Mujoco simulation of Unitree A1 model.
+
+    Tasks
+    -----------------
+    * **Simple**: The robot has to walk forward with a fixed speed of 0.5 m/s.
+    * **Hard**: The robot has to walk in 8 different directions with a fixed speed of 0.5 m/s.
+
+
+    Dataset Types
+    -----------------
+    The available dataset types for this environment can be found at: :ref:`env-label`.
+
+
+    Observation Space
+    -----------------
+
+    The observation space has the following properties *by default* (i.e., only obs with Disabled == False):
+
+    | For simple task: :code:`(min=-inf, max=inf, dim=35, dtype=float32)`
+    | For hard task: :code:`(min=-inf, max=inf, dim=35, dtype=float32)`
+
+    Some observations are **disabled by default**, but can be turned on. The detailed observation space is:
+
+    ===== ========================================================= ========= ========= ======== === ========================
+    Index Description                                               Min       Max       Disabled Dim Units
+    ===== ========================================================= ========= ========= ======== === ========================
+    0     Position of Joint trunk_tz                                -inf      inf       False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    1     Position of Joint trunk_list                              -inf      inf       False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    2     Position of Joint trunk_tilt                              -inf      inf       False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    3     Position of Joint trunk_rotation                          -inf      inf       False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    4     Position of Joint FR_hip_joint                            -0.802851 0.802851  False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    5     Position of Joint FR_thigh_joint                          -1.0472   4.18879   False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    6     Position of Joint FR_calf_joint                           -2.69653  -0.916298 False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    7     Position of Joint FL_hip_joint                            -0.802851 0.802851  False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    8     Position of Joint FL_thigh_joint                          -1.0472   4.18879   False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    9     Position of Joint FL_calf_joint                           -2.69653  -0.916298 False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    10    Position of Joint RR_hip_joint                            -0.802851 0.802851  False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    11    Position of Joint RR_thigh_joint                          -1.0472   4.18879   False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    12    Position of Joint RR_calf_joint                           -2.69653  -0.916298 False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    13    Position of Joint RL_hip_joint                            -0.802851 0.802851  False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    14    Position of Joint RL_thigh_joint                          -1.0472   4.18879   False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    15    Position of Joint RL_calf_joint                           -2.69653  -0.916298 False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    16    Velocity of Joint trunk_tx                                -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    17    Velocity of Joint trunk_ty                                -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    18    Velocity of Joint trunk_tz                                -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    19    Velocity of Joint trunk_list                              -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    20    Velocity of Joint trunk_tilt                              -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    21    Velocity of Joint trunk_rotation                          -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    22    Velocity of Joint FR_hip_joint                            -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    23    Velocity of Joint FR_thigh_joint                          -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    24    Velocity of Joint FR_calf_joint                           -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    25    Velocity of Joint FL_hip_joint                            -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    26    Velocity of Joint FL_thigh_joint                          -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    27    Velocity of Joint FL_calf_joint                           -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    28    Velocity of Joint RR_hip_joint                            -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    29    Velocity of Joint RR_thigh_joint                          -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    30    Velocity of Joint RR_calf_joint                           -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    31    Velocity of Joint RL_hip_joint                            -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    32    Velocity of Joint RL_thigh_joint                          -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    33    Velocity of Joint RL_calf_joint                           -inf      inf       False    1   Angular Velocity [rad/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    34    Position of Joint dir_arrow                               -1.0      1.0       False    1   Angle [rad]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    36    Desired Velocity Angle represented as Sine-Cosine Feature 0.0       1         False    2   None
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    38    Desired Velocity                                          0.0       inf       False    1   Velocity [m/s]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    39    3D linear Forces between Front Left Foot and Floor        0.0       inf       True     3   Force [N]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    42    3D linear Forces between Front Right Foot and Floor       0.0       inf       True     3   Force [N]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    45    3D linear Forces between Back Left Foot and Floor         0.0       inf       True     3   Force [N]
+    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
+    48    3D linear Forces between Back Right Foot and Floor        0.0       inf       True     3   Force [N]
+    ===== ========================================================= ========= ========= ======== === ========================
+
+    Action Space
+    ------------
+
+    | The action space has the following properties *by default* (i.e., only actions with Disabled == False):
+    | :code:`(min=-1, max=1, dim=12, dtype=float32)`
+
+    ===== =========== =========== =========== ========
+    Index Name in XML Control Min Control Max Disabled
+    ===== =========== =========== =========== ========
+    0     FR_hip      -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    1     FR_thigh    -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    2     FR_calf     -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    3     FL_hip      -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    4     FL_thigh    -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    5     FL_calf     -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    6     RR_hip      -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    7     RR_thigh    -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    8     RR_calf     -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    9     RL_hip      -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    10    RL_thigh    -1.0        1.0         False
+    ----- ----------- ----------- ----------- --------
+    11    RL_calf     -1.0        1.0         False
+    ===== =========== =========== =========== ========
+
+
+    Rewards
+    --------
+
+    Reward function based on the difference between the desired velocity vector and the actual center of mass velocity
+    vector in horizontal plane. The desired velocity vector is given by the dataset to imitate.
+
+    **Class**: :class:`loco_mujoco.utils.reward.VelocityVectorReward`
+
+    .. note:: This reward function takes an *unmodified* observation as input. This obervsation is not equal to the
+     one defined above, but includes the desired velocity direction as a rotation matrix. Hence, this reward function
+     is not directly compatible with the observation space defined above.
+
+    Initial States
+    ---------------
+
+    The initial state is sampled by default from the dataset to imitate.
+
+    Terminal States
+    ----------------
+
+    The terminal state is reached when the robot falls, or rather starts falling. The condition to check if the robot
+    is falling is based on the orientation of the robot and the height of the center of mass. More details can be found
+    in the  :code:`_has_fallen` method of the environment.
+
+    Methods
+    ------------
 
     """
 
