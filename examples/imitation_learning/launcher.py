@@ -12,26 +12,23 @@ if __name__ == '__main__':
     launcher = Launcher(exp_name='loco_mujoco_evalution',
                         exp_file='experiment',
                         n_seeds=N_SEEDS,
-                        n_cores=3,
-                        memory_per_core=1500,
-                        days=2,
-                        hours=0,
-                        minutes=0,
-                        seconds=0,
+                        n_cores=1,  # only used for slurm
+                        memory_per_core=1500,   # only used for slurm
+                        n_exps_in_parallel=10,  # should not be used in slurm
+                        days=2,     # only used for slurm
+                        hours=0,    # only used for slurm
+                        minutes=0,  # only used for slurm
                         use_timestamp=True,
                         )
 
     default_params = dict(n_epochs=1,
-                          n_steps_per_epoch=100000,
+                          n_steps_per_epoch=10000,
                           n_epochs_save=25,
                           n_eval_episodes=10,
                           n_steps_per_fit=1000,
                           use_cuda=USE_CUDA)
 
-    env_ids = ["Atlas.walk", "Atlas.carry",
-               "Talos.walk", "Talos.carry",
-               "UnitreeH1.walk", "UnitreeH1.run", "UnitreeH1.carry",
-               "HumanoidTorque.walk", "HumanoidTorque.run",
+    env_ids = [
                "HumanoidMuscle.walk", "HumanoidMuscle.run",
                "UnitreeA1.simple", "UnitreeA1.hard"]
 
