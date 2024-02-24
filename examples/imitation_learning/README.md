@@ -84,4 +84,35 @@ def experiment(env_id: str = None,
 ```
 
 
+### Load and Evaluate a Trained Agent
+
+The best agents are saved every `n_epochs_save` epochs at your specified directory or at the default directory
+`./logs`. To load and evaluate a trained agent, you can use the following code:
+
+```python
+from mushroom_rl.core import Core, Agent
+from loco_mujoco import LocoEnv
+
+
+env = LocoEnv.make("Atlas.walk")
+
+agent = Agent.load("./path/to/agent.msh")
+
+core = Core(agent, env)
+
+core.evaluate(n_episodes=10, render=True)
+```
+
+In the example above, first an Atlas environment is created. Then, the agent is loaded from the specified path. Finally,
+the agent is evaluated for 10 episodes with rendering enabled.
+
+### Continue Training from a Checkpoint
+
+
+Similarly to above, if you want to continue training from a checkpoint, you can replace the line
+`agent = get_agent(env_id, mdp, use_cuda, sw)` in the `experiment.py` file with the following line
+`agent = Agent.load("./path/to/agent.msh")`. In that case, you will continue training from the specified
+checkpoint.
+
+
 

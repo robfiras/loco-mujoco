@@ -8,7 +8,183 @@ from multiprocessing import Queue, Pool
 
 class DomainRandomizationHandler:
     """
+    Description
+    -----------
+
     Class for handling domain randomization.
+
+    Right now, LocoMujoco support domain randomization for the Properties of the joints, geometries, and
+    the inertials of the bodies. The domain randomization is done by modifying the Mujoco XML file of the respective
+    environment. The domain randomization is done based on a config file that specifies what parameters to randomize
+    and what kind of domain randomization distribution to choose. An example of such a file is given below.
+
+    Randomization Distributions
+    ---------------------------
+
+    The following tags are support to specify randomization distributions:
+
+    :code:`sigma`: Specifies a zero-mean Gaussian distribution with a specified standard deviation.
+        | Either a float or a list of floats can be provided. If a list is provided, the randomization will be done with
+        | a multivariate Gaussian distribution.
+
+    :code:`uniform_range`: Specifies a uniform distribution with a specified range.
+        | Only a list can be provided. The first element of the list specifies the lower bound and the second element
+        | specifies the upper bound. **This type does not support multivariate distributions.**
+
+    :code:`uniform_range_delta`: Specifies a uniform distribution centered around a specified the default parameter with a specified delta range.
+        | Either a float or a list of floats can be provided. If a list is provided, the randomization will be done with
+        | a multivariate uniform distribution.
+
+    Supported Components to Randomize
+    ----------------------------------
+
+    Here are the supported components in the XML and their parameters that can be randomized.
+
+    .. note:: Click on the respective links to jump to the Mujoco XML reference for the components!
+
+    `Joint <https://mujoco.readthedocs.io/en/latest/XMLreference.html#body-joint>`__
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    *damping*: The damping coefficient of the joint.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    *frictionloss*: The frictionloss coefficient of the joint.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    *armature*: The armature coefficient of the joint.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    *stiffness*: The stiffness coefficient of the joint.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    `Geom <https://mujoco.readthedocs.io/en/latest/XMLreference.html#body-geom>`__
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    *mass*: The mass of the geometry.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    *friction*: The friction coefficient of the geometry.
+        | Supported Randomization Distributions: Gaussian, UniformDelta
+        | **Allowed Tags**: :code:`sigma``, :code:`uniform_range_delta`
+        | *Specialty*: Need to be provided as a 3D list as the friction parameters are 3D.
+        | The first number is the sliding friction, acting along both axes of the tangent plane. The second number is
+        | the torsional friction, acting around the contact normal. The third number is the rolling friction, acting
+        | around both axes of the tangent plane.
+        | Only **multivariate** distributions are supported.
+
+    *density*: The density of the geometry.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    `Inertial <https://mujoco.readthedocs.io/en/latest/XMLreference.html#body-inertial>`__
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    *mass*: The mass of the geometry.
+        | Supported Randomization Distributions: Gaussian, Uniform, UniformDelta
+        | **Allowed Tags**: :code:`sigma`, :code:`uniform_range`, :code:`uniform_range_delta`
+        | Only univariate distributions are supported.
+
+    *diaginertia*: Diagonal inertia matrix, expressing the body inertia relative to the inertial frame.
+        | Supported Randomization  UniformDelta
+        | **Allowed Tags**:  :code:`uniform_range_delta`
+        | *Specialty*: All diagonal elements of the inertia matrix are randomized uniformly with the same
+        | delta range. Hence, only a single number is required to specify the delta range.
+        | Only univariate distributions are supported.
+
+    *fullinertia*: Full inertia matrix M, expressing the body inertia relative to the inertial frame.
+        | Supported Randomization  UniformDelta
+        | **Allowed Tags**:  :code:`uniform_range_delta`
+        | *Specialty*: A SVD is conducted and all *singular values* are randomized uniformly with the same
+        | delta range. Afterwards, the full inertial matrix is calculated again. Hence, only a single number
+        | is required to specify the delta range.
+        | Only univariate distributions are supported.
+
+
+    Parallelization
+    ---------------
+
+    Compilation of a model given its XML file can be time-consuming. To speed up the domain randomization process, the
+    domain randomization can be done in parallel. Then, models with randomized parameters will be compiled *while the
+    training of another model is running*. To enable parallel compilation, set the parameter :code:`parallel` to :code:`True`.
+    Instead of compiling just one model in parallel, we allow to compile multiple models in parallel for to speed up even
+    further. To do so, set the :code:`N_worker_per_xml` parameter to the number of workers you want to use for each XML file.
+
+    .. note:: Parallelization is done using :code:`multiprocessing`. If this is interfering with your code, we suggest
+     to disable parallelization.
+
+    Example
+    -------
+
+    Here is an example of how to use the domain randomization configuration file. Note that it is also possible
+    to set a default randomization for all components and then override the default for specific components (e.g., the
+    joint). If you would like to exclude certain components from randomization, you can do so by setting the
+    :code:`exclude` parameter.
+
+    .. code-block:: yaml
+
+        # here a default randomization can be set for all joints.
+        Default:
+          # these joints will not be included during domain randomization.
+          exclude: ["pelvis_tx", "pelvis_ty", "pelvis_tz", "pelvis_tilt", "pelvis_list", "pelvis_rotation"]
+          Joints:
+            damping:
+              sigma: 0.0
+            stiffness:
+              sigma: 0.0
+            frictionloss:
+              sigma: 0.0
+
+        # here joint specific configurations can be made
+        Joints:
+          # set either a sigma for sampling from a normal distribution, or set a range or delta-range for uniform sampling.
+          back_bkz:
+            damping:
+              uniform_range: [4.0, 6.0]
+            stiffness:
+              sigma: 0.0
+            armature:
+              sigma: 0.0
+            frictionloss:
+              sigma: 0.0
+          back_bkx:
+            damping:
+              uniform_range: [4.0, 6.0]
+            stiffness:
+              sigma: 0.0
+            armature:
+              sigma: 0.0
+            frictionloss:
+              sigma: 0.0
+
+        Inertial:
+          leg_right_6_link:
+            mass:
+              uniform_range_delta: 0.5
+            diaginertia:
+              uniform_range_delta: 0.001
+          leg_right_5_link:
+            fullinertia:
+                uniform_range_delta: 0.001
+
+
+    Tutorial
+    --------
+
+    If you would like to see a complete example, please refer to check out the Tutorial on :ref:`dom-rand-tutorial`.
+
+    Methods
+    -------
 
     """
 
@@ -325,7 +501,7 @@ def set_inertial_conf(conf, ih):
             elif param_name == "fullinertia":
                 assert ih.fullinertia is not None, "Randomizing fullinertia not allowed if not specified in the xml."
                 delta = check_uniform_range_delta_conf(ih, param["uniform_range_delta"])
-                # Do svd and apply randomization only on signular values
+                # Do svd and apply randomization only on singular values
                 fi = ih.fullinertia
                 triu = np.array([[fi[0], fi[3], fi[4]], [0.0, fi[1], fi[5]], [0.0, 0.0, fi[2]]])
                 U, sing_val, Vh = np.linalg.svd(triu, compute_uv=True)
