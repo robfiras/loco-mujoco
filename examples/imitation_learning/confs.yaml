@@ -79,16 +79,16 @@ HumanoidTorque4Ages:
 HumanoidMuscle:
   algorithm: "GAIL"
   algorithm_config:
-    std_0: 1.0
+    std_0: 0.8
     disc_only_states: True
-    disc_use_next_states: True
+    disc_use_next_states: False
     train_disc_n_th_epoch: 3
     disc_batch_size: 2048
-    learning_rate_critic: 1.0e-3
-    learning_rate_disc: 3.0e-4
+    learning_rate_critic: 5.0e-5
+    learning_rate_disc: 5.0e-6
     policy_entr_coef: 1.0e-3
     d_entr_coef: 1.0e-3
-    max_kl: 5.0e-3
+    max_kl: 1.0e-2
     n_epochs_cg: 25
     use_noisy_targets: False
     last_policy_activation: "identity"
@@ -96,16 +96,16 @@ HumanoidMuscle:
 HumanoidMuscle4Ages:
   algorithm: "GAIL"
   algorithm_config:
-    std_0: 1.0
+    std_0: 0.8
     disc_only_states: True
-    disc_use_next_states: True
+    disc_use_next_states: False
     train_disc_n_th_epoch: 3
     disc_batch_size: 2048
-    learning_rate_critic: 1.0e-3
-    learning_rate_disc: 3.0e-4
+    learning_rate_critic: 5.0e-5
+    learning_rate_disc: 5.0e-6
     policy_entr_coef: 1.0e-3
     d_entr_coef: 1.0e-3
-    max_kl: 5.0e-3
+    max_kl: 1.0e-2
     n_epochs_cg: 25
     use_noisy_targets: False
     last_policy_activation: "identity"
