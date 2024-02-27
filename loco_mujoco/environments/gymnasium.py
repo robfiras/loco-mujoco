@@ -15,8 +15,32 @@ class GymnasiumWrapper(Env):
 
     """
 
-    def __init__(self, env_name, **kwargs):
+    metadata = {
+        "render_modes": [
+            "human",
+            "rgb_array",
+        ]
+    }
+
+    def __init__(self, env_name, render_mode=None, **kwargs):
         self.spec = EnvSpec(env_name)
+
+        key_render_mode = "render_modes"
+        assert "headless" not in kwargs.keys(), f"headless parameter is not allowed in Gymnasium environment. " \
+                                                f"Please use the render_mode parameter. Supported modes are: " \
+                                                f"{self.metadata[key_render_mode]}"
+        if render_mode is not None:
+            assert render_mode in self.metadata["render_modes"], f"Unsupported render mode: {render_mode}. " \
+                                                                 f"Supported modes are: " \
+                                                                 f"{self.metadata[key_render_mode]}."
+
+        self.render_mode = render_mode
+
+        # specify the headless based on render mode to initialize the LocoMuJoCo environment
+        if render_mode == "human":
+            kwargs["headless"] = False
+        else:
+            kwargs["headless"] = True
 
         self._env = LocoEnv.make(env_name, **kwargs)
 
@@ -60,7 +84,11 @@ class GymnasiumWrapper(Env):
         Renders the environment.
 
         """
-        return self._env.render()
+        if self.render_mode == "human":
+            self._env.render()
+        elif self.render_mode == "rgb_array":
+            img = self._env.render(True)
+            return np.swapaxes(img, 0, 1)
 
     def close(self):
         """

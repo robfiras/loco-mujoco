@@ -3,7 +3,7 @@ from loco_mujoco import LocoEnv
 import gymnasium as gym
 
 # create the environment and task
-env = gym.make("LocoMujoco", env_name="UnitreeH1.run.real")
+env = gym.make("LocoMujoco", env_name="UnitreeH1.run.real", render_mode="human")
 
 # get the dataset for the chosen environment and task
 expert_data = env.create_dataset()
