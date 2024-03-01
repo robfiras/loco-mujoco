@@ -37,10 +37,21 @@ Key Advantages
 
 
 .. toctree::
+   :caption: Documentation
    :maxdepth: 3
    :hidden:
 
    source/loco_mujoco.installation.rst
    source/loco_mujoco.api.rst
-   source/loco_mujoco.tutorials.rst
+
+
+.. toctree::
+   :caption: Tutorials
+   :hidden:
+
+   source/tutorials/interfaces.rst
+   source/tutorials/imitation_learning.rst
+   source/tutorials/reinforcement_learning.rst
+   source/tutorials/domain_randomization.rst
+
 

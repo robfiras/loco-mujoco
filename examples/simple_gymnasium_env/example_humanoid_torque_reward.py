@@ -8,8 +8,8 @@ def my_reward_function(state, action, next_state):
     return -np.mean(action)
 
 
-env = gym.make("LocoMujoco", env_name="HumanoidTorque.run", reward_type="custom", reward_params=dict(reward_callback=my_reward_function))
-
+env = gym.make("LocoMujoco", env_name="HumanoidTorque.run", reward_type="custom",
+               reward_params=dict(reward_callback=my_reward_function), render_mode="human")
 
 action_dim = env.action_space.shape[0]
 

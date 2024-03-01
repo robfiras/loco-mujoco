@@ -20,11 +20,17 @@ def get_agent(env_id, mdp, use_cuda, sw, conf_path=None):
         confs = yaml.safe_load(f)
 
     # get conf for environment
-    env_id = env_id.split('.')[0]
-    conf = confs[env_id]
+    try:
+        # get the default conf (task agnostic)
+        env_id_short = env_id.split('.')[0]
+        conf = confs[env_id_short]
+    except KeyError:
+        # get the conf for the specific environment and task
+        env_id_short = ".".join(env_id.split('.')[:2])
+        conf = confs[env_id_short]
 
     if conf["algorithm"] == "GAIL":
-        agent = create_vail_agent(mdp, sw, use_cuda, **conf["algorithm_config"])
+        agent = create_gail_agent(mdp, sw, use_cuda, **conf["algorithm_config"])
     elif conf["algorithm"] == "VAIL":
         agent = create_vail_agent(mdp, sw, use_cuda, **conf["algorithm_config"])
     else:
@@ -33,11 +39,12 @@ def get_agent(env_id, mdp, use_cuda, sw, conf_path=None):
     return agent
 
 
-def create_gail_agent(mdp, sw, use_cuda, expert_data, train_D_n_th_epoch=3, lrc=1e-3, lrD=0.0003,
-                       policy_entr_coef=0.0, use_noisy_targets=False, last_policy_activation="identity",
-                       use_next_states=True, std_0=0.5, max_kl=5e-3, d_entr_coef=1e-3):
+def create_gail_agent(mdp, sw, use_cuda, train_disc_n_th_epoch, learning_rate_disc, n_epochs_cg,
+                      learning_rate_critic, policy_entr_coef, use_noisy_targets, last_policy_activation,
+                      disc_batch_size, disc_use_next_states, std_0, disc_only_states, max_kl, d_entr_coef):
 
     mdp_info = deepcopy(mdp.info)
+    expert_data = mdp.create_dataset()
 
     trpo_standardizer = Standardizer(use_cuda=use_cuda)
 
@@ -55,7 +62,7 @@ def create_gail_agent(mdp, sw, use_cuda, expert_data, train_D_n_th_epoch=3, lrc=
 
     critic_params = dict(network=FullyConnectedNetwork,
                          optimizer={'class': optim.Adam,
-                                    'params': {'lr': lrc,
+                                    'params': {'lr': learning_rate_critic,
                                                'weight_decay': 0.0}},
                          loss=F.mse_loss,
                          batch_size=256,
@@ -70,15 +77,15 @@ def create_gail_agent(mdp, sw, use_cuda, expert_data, train_D_n_th_epoch=3, lrc=
 
     # remove hip rotations
     discrim_obs_mask = mdp.get_kinematic_obs_mask()
-    discrim_act_mask = []  # if disc_only_state else np.arange(mdp_info.action_space.shape[0])
-    discrim_input_shape = (2 * len(discrim_obs_mask),) if use_next_states else (len(discrim_obs_mask),)
+    discrim_act_mask = [] if disc_only_states else np.arange(mdp_info.action_space.shape[0])
+    discrim_input_shape = (2 * len(discrim_obs_mask),) if disc_use_next_states else (len(discrim_obs_mask),)
     discrim_standardizer = Standardizer()
     discriminator_params = dict(optimizer={'class': optim.Adam,
-                                           'params': {'lr': lrD,
+                                           'params': {'lr': learning_rate_disc,
                                                       'weight_decay': 0.0}},
-                                batch_size=2000,
+                                batch_size=disc_batch_size,
                                 network=DiscriminatorNetwork,
-                                use_next_states=use_next_states,
+                                use_next_states=disc_use_next_states,
                                 input_shape=discrim_input_shape,
                                 output_shape=(1,),
                                 squeeze_out=False,
@@ -89,17 +96,17 @@ def create_gail_agent(mdp, sw, use_cuda, expert_data, train_D_n_th_epoch=3, lrc=
                                 use_actions=False,
                                 use_cuda=use_cuda)
 
-    alg_params = dict(train_D_n_th_epoch=train_D_n_th_epoch,
+    alg_params = dict(train_D_n_th_epoch=train_disc_n_th_epoch,
                       state_mask=discrim_obs_mask,
                       act_mask=discrim_act_mask,
-                      n_epochs_cg=25,
+                      n_epochs_cg=n_epochs_cg,
                       trpo_standardizer=trpo_standardizer,
                       D_standardizer=discrim_standardizer,
                       loss=GailDiscriminatorLoss(entcoeff=d_entr_coef),
                       ent_coeff=policy_entr_coef,
                       use_noisy_targets=use_noisy_targets,
                       max_kl=max_kl,
-                      use_next_states=use_next_states)
+                      use_next_states=disc_use_next_states)
 
     agent = GAIL_TRPO(mdp_info=mdp_info, policy_class=GaussianTorchPolicy, policy_params=policy_params, sw=sw,
                       discriminator_params=discriminator_params, critic_params=critic_params,
@@ -108,7 +115,7 @@ def create_gail_agent(mdp, sw, use_cuda, expert_data, train_D_n_th_epoch=3, lrc=
 
 
 def create_vail_agent(mdp, sw, use_cuda, std_0, info_constraint, lr_beta, z_dim, disc_only_states,
-                      disc_use_next_states,   train_disc_n_th_epoch, disc_batch_size, learning_rate_critic,
+                      disc_use_next_states, train_disc_n_th_epoch, disc_batch_size, learning_rate_critic,
                       learning_rate_disc, policy_entr_coef, max_kl, n_epochs_cg, use_noisy_targets,
                       last_policy_activation):
 

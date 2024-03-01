@@ -22,7 +22,8 @@ enabling evaluation across a spectrum of difficulty levels.
 ✅ Diverse set of datasets --> e.g., noisy motion capture or ground truth datasets with actions \
 ✅ Wide spectrum spectrum of difficulty levels \
 ✅ Built-in domain randomization \
-✅ Many baseline algorithms for quick benchmarking 
+✅ Many baseline algorithms for quick benchmarking \
+✅ [Documentation](https://loco-mujoco.readthedocs.io/)
 
 ---
 
@@ -77,7 +78,8 @@ python examples/replay_datasets/replay_Unitree.py
 ```
 ---
 ## Environments & Tasks
-You want a quick overview of all **environments**, **tasks** and **datasets** available? [Here](/loco_mujoco/environments) you can find it.
+You want a quick overview of all **environments**, **tasks** and **datasets** available? You can find it 
+[here](/loco_mujoco/environments) and more detailed in the [Documentation](https://loco-mujoco.readthedocs.io/).
 
 <p align="center">
   <img src="https://github.com/robfiras/loco-mujoco/assets/69359729/73ca0cdd-3958-4d59-a1f7-0eba00fe373a">
@@ -86,7 +88,7 @@ You want a quick overview of all **environments**, **tasks** and **datasets** av
 And stay tuned! There are many more to come ...
 
 ---
-## Examples
+## Quick Examples
 LocoMuJoCo is very easy to use. Just choose and create the environment, and generate the dataset belonging to this task and you are ready to go! 
 ```python
 import numpy as np
@@ -125,7 +127,9 @@ env = LocoEnv.make("HumanoidTorque.run")
 dataset = env.create_dataset()
 ```
 
-You can find many more examples [here](examples)
+You can find many more examples [here](examples).
+
+Detailed Tutorials are given in the [Documentation](https://loco-mujoco.readthedocs.io/).
 
 ---
 ## Citation

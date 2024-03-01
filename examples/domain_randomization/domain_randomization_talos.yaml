@@ -10,9 +10,9 @@ Default:
     frictionloss:
       sigma: 0.0
 
-# here joint specific configurations can be made 
+# here joint specific configurations can be made
 Joints:
-  # set either a sigma for sampling from a normal distribution or set a delta-range for uniform sampling.
+  # set either a sigma for sampling from a normal distribution, or set a range or delta-range for uniform sampling.
   back_bkz:
     damping:
       uniform_range: [4.0, 6.0]
@@ -31,4 +31,13 @@ Joints:
       sigma: 0.0
     frictionloss:
       sigma: 0.0
-  
+
+Inertial:
+  leg_right_6_link:
+    mass:
+      uniform_range_delta: 0.5
+    diaginertia:
+      uniform_range_delta: 0.001
+  leg_right_5_link:
+    fullinertia:
+        uniform_range_delta: 0.001
