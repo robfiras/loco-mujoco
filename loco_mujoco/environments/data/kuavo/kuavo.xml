@@ -1,3 +1,22 @@
+<!-- *
+ * Copyright (c) 2024 Leju Robotics
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+Modified by Song Wang 2024.
+ -->
+
+
 <mujoco model="kuavo">
     <compiler angle="radian" meshdir="meshes/"/>
     <size njmax="500" nconmax="100" />
@@ -29,9 +48,7 @@
         <mesh name="l_foot_pitch" file="l_foot_pitch.STL" />
         <mesh name="l_foot_roll" file="l_foot_roll.STL" />
         <mesh name="l_l_bar" file="l_l_bar.STL" />
-<!--        <mesh name="l_l_tendon" file="l_l_tendon.STL" />-->
-<!--        <mesh name="l_r_bar" file="l_r_bar.STL" />-->
-<!--        <mesh name="l_r_tendon" file="l_r_tendon.STL" />-->
+
         <mesh name="r_leg_roll" file="r_leg_roll.STL" />
         <mesh name="r_leg_yaw" file="r_leg_yaw.STL" />
         <mesh name="r_leg_pitch" file="r_leg_pitch.STL" />
@@ -39,9 +56,7 @@
         <mesh name="r_foot_pitch" file="r_foot_pitch.STL" />
         <mesh name="r_foot_roll" file="r_foot_roll.STL" />
         <mesh name="r_r_bar" file="r_r_bar.STL" />
-<!--        <mesh name="r_r_tendon" file="r_r_tendon.STL" />-->
-<!--        <mesh name="r_l_bar" file="r_l_bar.STL" />-->
-<!--        <mesh name="r_l_tendon" file="r_l_tendon.STL" />-->
+
         <mesh name="l_arm_pitch" file="l_arm_pitch.STL" />
         <mesh name="l_arm_roll" file="l_arm_roll.STL" />
         <mesh name="l_arm_yaw" file="l_arm_yaw.STL" />
@@ -49,10 +64,7 @@
         <mesh name="l_forearm_yaw" file="l_forearm_yaw.STL" />
         <mesh name="l_hand_roll" file="l_hand_roll.STL" />
         <mesh name="l_hand_pitch" file="l_hand_pitch.STL" />
-<!--        <mesh name="l_l_arm_bar" file="l_l_arm_bar.STL" />-->
-<!--        <mesh name="l_l_arm_tendon" file="l_l_arm_tendon.STL" />-->
-<!--        <mesh name="l_r_arm_bar" file="l_r_arm_bar.STL" />-->
-<!--        <mesh name="l_r_arm_tendon" file="l_r_arm_tendon.STL" />-->
+
         <mesh name="r_arm_pitch" file="r_arm_pitch.STL" />
         <mesh name="r_arm_roll" file="r_arm_roll.STL" />
         <mesh name="r_arm_yaw" file="r_arm_yaw.STL" />
@@ -60,10 +72,7 @@
         <mesh name="r_forearm_yaw" file="r_forearm_yaw.STL" />
         <mesh name="r_hand_roll" file="r_hand_roll.STL" />
         <mesh name="r_hand_pitch" file="r_hand_pitch.STL" />
-<!--        <mesh name="r_r_arm_bar" file="r_r_arm_bar.STL" />-->
-<!--        <mesh name="r_r_arm_tendon" file="r_r_arm_tendon.STL" />-->
-<!--        <mesh name="r_l_arm_bar" file="r_l_arm_bar.STL" />-->
-<!--        <mesh name="r_l_arm_tendon" file="r_l_arm_tendon.STL" />-->
+
         <mesh name="real_camera_link" file="real_camera_link.STL" />
 
         <texture builtin="gradient" height="100" rgb1=".4 .5 .6" rgb2="0 0 0" type="skybox" width="100"/>
@@ -116,26 +125,7 @@
                                     <geom name="left_foot" type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_foot_roll" />
                                 </body>
                             </body>
-    <!--                        <body name="l_l_bar" pos="9.39839e-05 0.0295 -0.09">-->
-    <!--                            <inertial pos="-0.0181621 0.00538551 0.00188897" quat="0.441585 0.496347 0.552271 0.503626" mass="0.0087483" diaginertia="6.07044e-06 5.23712e-06 9.92419e-07" />-->
-    <!--                            <joint name="l_l_bar" pos="0 0 0" axis="0 -1 0" />-->
-    <!--                            <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_l_bar" />-->
-    <!--                            <body name="l_l_tendon" pos="-0.0576888 -0.0045 0.006">-->
-    <!--                                <inertial pos="0.00118322 3.75294e-06 -0.207445" quat="1 -0.000244449 -1.52847e-05 3.73633e-09" mass="0.0835221" diaginertia="0.000108458 0.000108257 3.33661e-06" />-->
-    <!--                                <joint name="l_l_tendon" pos="0 0 0" axis="0 1 0" />-->
-    <!--                                <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_l_tendon" />-->
-    <!--                            </body>-->
-    <!--                        </body>-->
-    <!--                        <body name="l_r_bar" pos="9.39839e-05 -0.0295 -0.153">-->
-    <!--                            <inertial pos="-0.018162 -0.00340146 0.00188896" quat="0.503626 0.55227 0.496347 0.441585" mass="0.0087483" diaginertia="6.07044e-06 5.23712e-06 9.92419e-07" />-->
-    <!--                            <joint name="l_r_bar" pos="0 0 0" axis="0 1 0" />-->
-    <!--                            <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_r_bar" />-->
-    <!--                            <body name="l_r_tendon" pos="-0.0576888 0.00508602 0.006">-->
-    <!--                                <inertial pos="0.00127016 -0.000442399 -0.157756" quat="0.994888 0.000421209 7.41716e-05 -0.100987" mass="0.0780669" diaginertia="4.62226e-05 4.61239e-05 3.15484e-06" />-->
-    <!--                                <joint name="l_r_tendon" pos="0 0 0" axis="0 -1 0" />-->
-    <!--                                <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="l_r_tendon" />-->
-    <!--                            </body>-->
-    <!--                        </body>-->
+
                         </body>
                     </body>
                 </body>
@@ -166,26 +156,7 @@
                                     <geom name="right_foot" type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_foot_roll" />
                                 </body>
                             </body>
-    <!--                        <body name="r_r_bar" pos="0 -0.0295 -0.09">-->
-    <!--                            <inertial pos="-0.0181621 -0.00545024 0.00188898" quat="0.503626 0.552271 0.496347 0.441585" mass="0.0087483" diaginertia="6.07044e-06 5.23712e-06 9.92419e-07" />-->
-    <!--                            <joint name="r_r_bar" pos="0 0 0" axis="0 -1 0" />-->
-    <!--                            <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_r_bar" />-->
-    <!--                            <body name="r_r_tendon" pos="-0.0576888 0.0045 0.006">-->
-    <!--                                <inertial pos="0.000958289 -8.67056e-06 -0.188485" quat="1 0.000247682 -1.54685e-05 -3.83127e-09" mass="0.0538027" diaginertia="0.000105952 0.000105646 2.09501e-06" />-->
-    <!--                                <joint name="r_r_tendon" pos="0 0 0" axis="0 1 0" />-->
-    <!--                                <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_r_tendon" />-->
-    <!--                            </body>-->
-    <!--                        </body>-->
-    <!--                        <body name="r_l_bar" pos="0 0.0295 -0.153">-->
-    <!--                            <inertial pos="-0.018162 0.00326676 0.00188896" quat="0.441585 0.496347 0.55227 0.503626" mass="0.0087483" diaginertia="6.07043e-06 5.23712e-06 9.92419e-07" />-->
-    <!--                            <joint name="r_l_bar" pos="0 0 0" axis="0 -1 0" />-->
-    <!--                            <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_l_bar" />-->
-    <!--                            <body name="r_l_tendon" pos="-0.0576888 -0.0045 0.006">-->
-    <!--                                <inertial pos="0.0010651 9.64944e-06 -0.144839" quat="1 -0.000440563 3.2404e-05 3.91062e-06" mass="0.0483474" diaginertia="4.37091e-05 4.35209e-05 1.91325e-06" />-->
-    <!--                                <joint name="r_l_tendon" pos="0 0 0" axis="0 1 0" />-->
-    <!--                                <geom type="mesh" rgba="0.807843 0.843137 0.905882 1" mesh="r_l_tendon" />-->
-    <!--                            </body>-->
-    <!--                        </body>-->
+
                         </body>
                     </body>
                 </body>
@@ -308,35 +279,34 @@
     </worldbody>
 
     <actuator>
-        <motor name="l_leg_roll_actuator"  joint="l_leg_roll" gear="100"/>
-        <motor name="l_leg_yaw_actuator"  joint="l_leg_yaw" gear="100"/>
-        <motor name="l_leg_pitch"  joint="l_leg_pitch" gear="100"/>
-        <motor name="l_knee_actuator"  joint="l_knee" gear="100"/>
-        <motor name="l_foot_pitch_actuator"  joint="l_foot_pitch" gear="100"/>
-        <motor name="l_foot_roll_actuator"  joint="l_foot_roll" gear="100"/>
+        <motor name="l_leg_roll_actuator"  joint="l_leg_roll" gear="48"/>
+        <motor name="l_leg_yaw_actuator"  joint="l_leg_yaw" gear="37.44"/>
+        <motor name="l_leg_pitch"  joint="l_leg_pitch" gear="69.6"/>
+        <motor name="l_knee_actuator"  joint="l_knee" gear="69.6"/>
+        <motor name="l_foot_pitch_actuator"  joint="l_foot_pitch" gear="43.05"/>
+        <motor name="l_foot_roll_actuator"  joint="l_foot_roll" gear="43.05"/>
 
-        <motor name="r_leg_roll_actuator"  joint="r_leg_roll" gear="100"/>
-        <motor name="r_leg_yaw_actuator"  joint="r_leg_yaw" gear="100"/>
-        <motor name="r_leg_pitch_actuator"  joint="r_leg_pitch" gear="100"/>
-        <motor name="r_knee_actuator"  joint="r_knee" gear="100"/>
-        <motor name="r_foot_pitch_actuator"  joint="r_foot_pitch" gear="100"/>
-        <motor name="r_foot_roll_actuator"  joint="r_foot_roll" gear="100"/>
+        <motor name="r_leg_roll_actuator"  joint="r_leg_roll" gear="48"/>
+        <motor name="r_leg_yaw_actuator"  joint="r_leg_yaw" gear="37.44"/>
+        <motor name="r_leg_pitch_actuator"  joint="r_leg_pitch" gear="69.6"/>
+        <motor name="r_knee_actuator"  joint="r_knee" gear="69.6"/>
+        <motor name="r_foot_pitch_actuator"  joint="r_foot_pitch" gear="43.05"/>
+        <motor name="r_foot_roll_actuator"  joint="r_foot_roll" gear="43.05"/>
 
-        <motor name="l_arm_pitch_actuator"  joint="l_arm_pitch" gear="100"/>
-        <motor name="l_arm_roll_actuator"  joint="l_arm_roll" gear="100"/>
-        <motor name="l_arm_yaw_actuator"  joint="l_arm_yaw" gear="100"/>
-        <motor name="l_forearm_pitch_actuator"  joint="l_forearm_pitch" gear="100"/>
-        <motor name="l_forearm_yaw_actuator"  joint="l_forearm_yaw" gear="100"/>
-        <motor name="l_hand_roll_actuator"  joint="l_hand_roll" gear="100"/>
-        <motor name="l_hand_pitch_actuator"  joint="l_hand_pitch" gear="100"/>
+        <motor name="l_arm_pitch_actuator"  joint="l_arm_pitch" gear="50.568"/>
+        <motor name="l_arm_roll_actuator"  joint="l_arm_roll" gear="80"/>
+        <motor name="l_arm_yaw_actuator"  joint="l_arm_yaw" gear="43.05"/>
+        <motor name="l_forearm_pitch_actuator"  joint="l_forearm_pitch" gear="43.05"/>
+        <motor name="l_forearm_yaw_actuator"  joint="l_forearm_yaw" gear="4"/>
+        <motor name="l_hand_roll_actuator"  joint="l_hand_roll" gear="4"/>
+        <motor name="l_hand_pitch_actuator"  joint="l_hand_pitch" gear="4"/>
 
-        <motor name="r_arm_pitch_actuator"  joint="r_arm_pitch" gear="100"/>
-        <motor name="r_arm_roll_actuator"  joint="r_arm_roll" gear="100"/>
-        <motor name="r_arm_yaw_actuator"  joint="r_arm_yaw" gear="100"/>
-        <motor name="r_forearm_pitch_actuator"  joint="r_forearm_pitch" gear="100"/>
-        <motor name="r_forearm_yaw_actuator"  joint="r_forearm_yaw" gear="100"/>
-        <motor name="r_hand_roll_actuator"  joint="r_hand_roll" gear="100"/>
-        <motor name="r_hand_pitch_actuator"  joint="r_hand_pitch" gear="100"/>
-
+        <motor name="r_arm_pitch_actuator"  joint="r_arm_pitch" gear="50.568"/>
+        <motor name="r_arm_roll_actuator"  joint="r_arm_roll" gear="80"/>
+        <motor name="r_arm_yaw_actuator"  joint="r_arm_yaw" gear="43.05"/>
+        <motor name="r_forearm_pitch_actuator"  joint="r_forearm_pitch" gear="43.05"/>
+        <motor name="r_forearm_yaw_actuator"  joint="r_forearm_yaw" gear="4"/>
+        <motor name="r_hand_roll_actuator"  joint="r_hand_roll" gear="4"/>
+        <motor name="r_hand_pitch_actuator"  joint="r_hand_pitch" gear="4"/>
     </actuator>
 </mujoco>
