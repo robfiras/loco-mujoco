@@ -835,6 +835,10 @@ class HumanoidTorque4Ages(BaseHumanoid4Ages):
 
     """
 
+    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
+                                     modes=["all", "1", "2", "3", "4"],
+                                     data_types=["real", "perfect"])
+
     def __init__(self, **kwargs):
         """
         Constructor.
@@ -848,13 +852,11 @@ class HumanoidTorque4Ages(BaseHumanoid4Ages):
         super(HumanoidTorque4Ages, self).__init__(use_muscles=False, **kwargs)
 
     @staticmethod
-    def generate(*args, **kwargs):
+    def generate(task="walk", mode="all", dataset_type="real", **kwargs):
         """
         Returns a HumanoidTorque4Ages environment corresponding to the specified task.
 
         Args:
-            env (class):
-                Humanoid class, here HumanoidTorque4Ages.
             task (str):
                 Main task to solve. Either "walk" or "run".
             mode (str):
@@ -865,14 +867,29 @@ class HumanoidTorque4Ages(BaseHumanoid4Ages):
                 reference trajectory. This data does not perfectly match the kinematics
                 and dynamics of this environment, hence it is more challenging. "perfect" uses
                 a perfect dataset.
-            debug (bool):
-                If True, the smaller test datasets are used for debugging purposes.
 
         Returns:
             An MDP of a set of Torque Humanoid of different sizes.
 
          """
-        return BaseHumanoid4Ages.generate(HumanoidTorque4Ages, *args, **kwargs)
+
+        check_validity_task_mode_dataset(HumanoidTorque4Ages.__name__, task, mode, dataset_type,
+                                         *HumanoidTorque4Ages.valid_task_confs.get_all())
+
+        if task == "walk":
+            if dataset_type == "real":
+                path = "datasets/humanoids/real/02-constspeed_reduced_humanoid_POMDP"
+            elif dataset_type == "perfect":
+                path = "datasets/humanoids/perfect/humanoid4ages_torque_walk/" \
+                       "HumanoidTorque4Ages_walk_stochastic_dataset"
+        elif task == "run":
+            if dataset_type == "real":
+                path = "datasets/humanoids/real/05-run_reduced_humanoid_POMDP"
+            elif dataset_type == "perfect":
+                path = "datasets/humanoids/perfect/humanoid4ages_torque_run/" \
+                       "HumanoidTorque4Ages_run_stochastic_dataset"
+
+        return BaseHumanoid4Ages.generate(HumanoidTorque4Ages, path, task, mode, dataset_type, **kwargs)
 
 
 class HumanoidMuscle4Ages(BaseHumanoid4Ages):
@@ -925,6 +942,10 @@ class HumanoidMuscle4Ages(BaseHumanoid4Ages):
 
     """
 
+    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
+                                     modes=["all", "1", "2", "3", "4"],
+                                     data_types=["real"])
+
     def __init__(self, **kwargs):
         """
                 Constructor.
@@ -938,13 +959,11 @@ class HumanoidMuscle4Ages(BaseHumanoid4Ages):
         super(HumanoidMuscle4Ages, self).__init__(use_muscles=True, **kwargs)
 
     @staticmethod
-    def generate(*args, **kwargs):
+    def generate(task="walk", mode="all", dataset_type="real", **kwargs):
         """
          Returns a HumanoidMuscle4Ages environment corresponding to the specified task.
 
         Args:
-            env (class):
-                Humanoid class, here HumanoidMuscle4Ages.
             task (str):
                 Main task to solve. Either "walk" or "run".
             mode (str):
@@ -955,10 +974,19 @@ class HumanoidMuscle4Ages(BaseHumanoid4Ages):
                 reference trajectory. This data does not perfectly match the kinematics
                 and dynamics of this environment, hence it is more challenging. "perfect" uses
                 a perfect dataset.
-            debug (bool):
-                If True, the smaller test datasets are used for debugging purposes.
 
         Returns:
             An MDP of a set of Muscle Humanoid of different sizes.
          """
-        return BaseHumanoid4Ages.generate(HumanoidMuscle4Ages, *args, **kwargs)
+
+        check_validity_task_mode_dataset(HumanoidMuscle4Ages.__name__, task, mode, dataset_type,
+                                         *HumanoidMuscle4Ages.valid_task_confs.get_all())
+
+        if task == "walk":
+            if dataset_type == "real":
+                path = "datasets/humanoids/real/02-constspeed_reduced_humanoid_POMDP"
+        elif task == "run":
+            if dataset_type == "real":
+                path = "datasets/humanoids/real/05-run_reduced_humanoid_POMDP"
+
+        return BaseHumanoid4Ages.generate(HumanoidMuscle4Ages, path, task, mode, dataset_type, **kwargs)

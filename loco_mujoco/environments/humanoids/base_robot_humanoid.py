@@ -61,29 +61,29 @@ class BaseRobotHumanoid(LocoEnv):
 
         mask = []
         if "positions" not in obs_to_hide:
-            mask += [np.ones(pos_dim, dtype=np.bool)]
+            mask += [np.ones(pos_dim-2, dtype=bool)]
         else:
-            mask += [np.zeros(pos_dim, dtype=np.bool)]
+            mask += [np.zeros(pos_dim-2, dtype=bool)]
 
         if "velocities" not in obs_to_hide:
-            mask += [np.ones(vel_dim, dtype=np.bool)]
+            mask += [np.ones(vel_dim, dtype=bool)]
         else:
-            mask += [np.zeros(vel_dim, dtype=np.bool)]
+            mask += [np.zeros(vel_dim, dtype=bool)]
 
         if self._use_foot_forces:
             if "foot_forces" not in obs_to_hide:
-                mask += [np.ones(force_dim, dtype=np.bool)]
+                mask += [np.ones(force_dim, dtype=bool)]
             else:
-                mask += [np.zeros(force_dim, dtype=np.bool)]
+                mask += [np.zeros(force_dim, dtype=bool)]
         else:
             assert "foot_forces" not in obs_to_hide, "Creating a mask to hide foot forces without activating " \
                                                      "the latter is not allowed."
 
         if self._hold_weight:
             if "weight" not in obs_to_hide:
-                mask += [np.ones(1, dtype=np.bool)]
+                mask += [np.ones(1, dtype=bool)]
             else:
-                mask += [np.zeros(1, dtype=np.bool)]
+                mask += [np.zeros(1, dtype=bool)]
         else:
             assert "weight" not in obs_to_hide, "Creating a mask to hide the carried weight without activating " \
                                                 "the latter is not allowed."
