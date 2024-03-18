@@ -167,15 +167,15 @@ class Atlas(BaseRobotHumanoid):
     ----- --------------------------------------------------- --------- -------- --------------------------- --- ------------------------
     59    Velocity of Joint ankle_angle_l                     -inf      inf      False                       1   Angular Velocity [rad/s]
     ----- --------------------------------------------------- --------- -------- --------------------------- --- ------------------------
-    61    Mass of the Weight                                  0.0       inf      Only Enabled for Carry Task 1   Mass [kg]
+    60    Mass of the Weight                                  0.0       inf      Only Enabled for Carry Task 1   Mass [kg]
     ----- --------------------------------------------------- --------- -------- --------------------------- --- ------------------------
-    62    3D linear Forces between Back Right Foot and Floor  0.0       inf      True                        3   Force [N]
+    61    3D linear Forces between Back Right Foot and Floor  0.0       inf      True                        3   Force [N]
     ----- --------------------------------------------------- --------- -------- --------------------------- --- ------------------------
-    65    3D linear Forces between Front Right Foot and Floor 0.0       inf      True                        3   Force [N]
+    64    3D linear Forces between Front Right Foot and Floor 0.0       inf      True                        3   Force [N]
     ----- --------------------------------------------------- --------- -------- --------------------------- --- ------------------------
-    68    3D linear Forces between Back Left Foot and Floor   0.0       inf      True                        3   Force [N]
+    67    3D linear Forces between Back Left Foot and Floor   0.0       inf      True                        3   Force [N]
     ----- --------------------------------------------------- --------- -------- --------------------------- --- ------------------------
-    71    3D linear Forces between Front Left Foot and Floor  0.0       inf      True                        3   Force [N]
+    70    3D linear Forces between Front Left Foot and Floor  0.0       inf      True                        3   Force [N]
     ===== =================================================== ========= ======== =========================== === ========================
 
     Action Space

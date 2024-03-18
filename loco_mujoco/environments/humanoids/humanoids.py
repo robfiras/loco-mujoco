@@ -163,13 +163,13 @@ class HumanoidTorque(BaseHumanoid):
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
     63    Velocity of Joint wrist_dev_l                                                 -inf      inf      True     1   Angular Velocity [rad/s]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    65    3D linear Forces between Back Right Foot and Floor                            0.0       inf      True     3   Force [N]
+    64    3D linear Forces between Back Right Foot and Floor                            0.0       inf      True     3   Force [N]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    68    3D linear Forces between Front Right Foot and Floor (If box feet is disabled) 0.0       inf      True     3   Force [N]
+    67    3D linear Forces between Front Right Foot and Floor (If box feet is disabled) 0.0       inf      True     3   Force [N]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    71    3D linear Forces between Back Left Foot and Floor                             0.0       inf      True     3   Force [N]
+    70    3D linear Forces between Back Left Foot and Floor                             0.0       inf      True     3   Force [N]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    74    3D linear Forces between Front Left Foot and Floor (If box feet is disabled)  0.0       inf      True     3   Force [N]
+    73    3D linear Forces between Front Left Foot and Floor (If box feet is disabled)  0.0       inf      True     3   Force [N]
     ===== ============================================================================= ========= ======== ======== === ========================
 
     Action Space
@@ -478,13 +478,13 @@ class HumanoidMuscle(BaseHumanoid):
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
     63    Velocity of Joint wrist_dev_l                                                 -inf      inf      True     1   Angular Velocity [rad/s]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    65    3D linear Forces between Back Right Foot and Floor                            0.0       inf      True     3   Force [N]
+    64    3D linear Forces between Back Right Foot and Floor                            0.0       inf      True     3   Force [N]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    68    3D linear Forces between Front Right Foot and Floor (If box feet is disabled) 0.0       inf      True     3   Force [N]
+    67    3D linear Forces between Front Right Foot and Floor (If box feet is disabled) 0.0       inf      True     3   Force [N]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    71    3D linear Forces between Back Left Foot and Floor                             0.0       inf      True     3   Force [N]
+    70    3D linear Forces between Back Left Foot and Floor                             0.0       inf      True     3   Force [N]
     ----- ----------------------------------------------------------------------------- --------- -------- -------- --- ------------------------
-    74    3D linear Forces between Front Left Foot and Floor (If box feet is disabled)  0.0       inf      True     3   Force [N]
+    73    3D linear Forces between Front Left Foot and Floor (If box feet is disabled)  0.0       inf      True     3   Force [N]
     ===== ============================================================================= ========= ======== ======== === ========================
 
     Action Space

@@ -42,13 +42,11 @@ class UnitreeA1(LocoEnv):
 
     The observation space has the following properties *by default* (i.e., only obs with Disabled == False):
 
-    | For simple task: :code:`(min=-inf, max=inf, dim=35, dtype=float32)`
-    | For hard task: :code:`(min=-inf, max=inf, dim=35, dtype=float32)`
+    | For simple task: :code:`(min=-inf, max=inf, dim=37, dtype=float32)`
+    | For hard task: :code:`(min=-inf, max=inf, dim=37, dtype=float32)`
 
     Some observations are **disabled by default**, but can be turned on. The detailed observation space is:
 
-    ===== ========================================================= ========= ========= ======== === ========================
-    Index Description                                               Min       Max       Disabled Dim Units
     ===== ========================================================= ========= ========= ======== === ========================
     0     Position of Joint trunk_tz                                -inf      inf       False    1   Angle [rad]
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
@@ -118,19 +116,17 @@ class UnitreeA1(LocoEnv):
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
     33    Velocity of Joint RL_calf_joint                           -inf      inf       False    1   Angular Velocity [rad/s]
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    34    Position of Joint dir_arrow                               -1.0      1.0       False    1   Angle [rad]
+    34    Desired Velocity Angle represented as Sine-Cosine Feature 0.0       1         False    2   None
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    36    Desired Velocity Angle represented as Sine-Cosine Feature 0.0       1         False    2   None
+    36    Desired Velocity                                          0.0       inf       False    1   Velocity [m/s]
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    38    Desired Velocity                                          0.0       inf       False    1   Velocity [m/s]
+    37    3D linear Forces between Front Left Foot and Floor        0.0       inf       True     3   Force [N]
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    39    3D linear Forces between Front Left Foot and Floor        0.0       inf       True     3   Force [N]
+    40    3D linear Forces between Front Right Foot and Floor       0.0       inf       True     3   Force [N]
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    42    3D linear Forces between Front Right Foot and Floor       0.0       inf       True     3   Force [N]
+    43    3D linear Forces between Back Left Foot and Floor         0.0       inf       True     3   Force [N]
     ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    45    3D linear Forces between Back Left Foot and Floor         0.0       inf       True     3   Force [N]
-    ----- --------------------------------------------------------- --------- --------- -------- --- ------------------------
-    48    3D linear Forces between Back Right Foot and Floor        0.0       inf       True     3   Force [N]
+    46    3D linear Forces between Back Right Foot and Floor        0.0       inf       True     3   Force [N]
     ===== ========================================================= ========= ========= ======== === ========================
 
     Action Space
@@ -176,9 +172,6 @@ class UnitreeA1(LocoEnv):
 
     **Class**: :class:`loco_mujoco.utils.reward.VelocityVectorReward`
 
-    .. note:: This reward function takes an *unmodified* observation as input. This obervsation is not equal to the
-     one defined above, but includes the desired velocity direction as a rotation matrix. Hence, this reward function
-     is not directly compatible with the observation space defined above.
 
     Initial States
     ---------------
@@ -494,21 +487,9 @@ class UnitreeA1(LocoEnv):
             New observation vector (np.array);
 
         """
-        return np.concatenate([obs[2:], [self._goal.get_velocity()]]).flatten()
-
-    def _modify_observation(self, obs):
-        """
-        Transforms the rotation matrix from obs to a sin-cos feature.
-
-        Args:
-            obs (np.array): Generated observation.
-
-        Returns:
-            The final environment observation for the agent.
-
-        """
-
         rot_mat_idx_arrow = self._get_idx("dir_arrow")
+
+        obs = np.concatenate([obs[2:], [self._goal.get_velocity()]]).flatten()
 
         obs = self._modify_observation_callback(obs, rot_mat_idx_arrow, self._goal_velocity_idx)
 
@@ -535,10 +516,10 @@ class UnitreeA1(LocoEnv):
         if reward_type == "velocity_vector":
             x_vel_idx = self.get_obs_idx("dq_trunk_tx")[0]
             y_vel_idx = self.get_obs_idx("dq_trunk_ty")[0]
-            rot_mat_idx = self.get_obs_idx("dir_arrow")
-            goal_vel_idx = self._goal_velocity_idx
+            angle_idx = [-3, -2]
+            goal_vel_idx = [-1]
             goal_reward_func = VelocityVectorReward(x_vel_idx=x_vel_idx, y_vel_idx=y_vel_idx,
-                                                    rot_mat_idx=rot_mat_idx, goal_vel_idx=goal_vel_idx)
+                                                    angle_idx=angle_idx, goal_vel_idx=goal_vel_idx)
         else:
             goal_reward_func = super()._get_reward_function(reward_type, reward_params)
 
@@ -612,8 +593,7 @@ class UnitreeA1(LocoEnv):
 
         """
 
-        trunk_rotation = self._data.joint("trunk_rotation").qpos[0]
-        desired_angle = self._goal.get_direction() #    + trunk_rotation
+        desired_angle = self._goal.get_direction()
 
         rot_mat = euler_to_mat(np.array([np.pi/2, 0, desired_angle]))
 
@@ -685,6 +665,15 @@ class UnitreeA1(LocoEnv):
         check_validity_task_mode_dataset(UnitreeA1.__name__, task, None, dataset_type,
                                          *UnitreeA1.valid_task_confs.get_all())
 
+        if "reward_type" in kwargs.keys():
+            reward_type = kwargs["reward_type"]
+            reward_params = kwargs["reward_params"]
+            del kwargs["reward_type"]
+            del kwargs["reward_params"]
+        else:
+            reward_type = "velocity_vector"
+            reward_params = dict()
+
         # Generate the MDP
         # todo: once the trajectory is learned without random init rotation, activate the latter.
         if task == "simple":
@@ -700,7 +689,7 @@ class UnitreeA1(LocoEnv):
                 path = path.split("/")
                 path.insert(3, "mini_datasets")
                 path = "/".join(path)
-            mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
+            mdp = UnitreeA1(reward_type=reward_type, reward_params=reward_params, **kwargs)
             traj_path = Path(loco_mujoco.__file__).resolve().parent / path
         elif task == "hard":
             if dataset_type == "real":
@@ -715,7 +704,7 @@ class UnitreeA1(LocoEnv):
                 path = path.split("/")
                 path.insert(3, "mini_datasets")
                 path = "/".join(path)
-            mdp = UnitreeA1(reward_type="velocity_vector", **kwargs)
+            mdp = UnitreeA1(reward_type=reward_type, reward_params=reward_params, **kwargs)
             traj_path = Path(loco_mujoco.__file__).resolve().parent / path
 
         # Load the trajectory
@@ -750,6 +739,7 @@ class UnitreeA1(LocoEnv):
         """
         The goal speed is not in the observation helper, but only in the trajectory. This is a workaround
         to access it anyways.
+        Note: This is the goal velocity in index *before* the modify_observation_callback is applied!
 
         """
         return 43
@@ -772,8 +762,10 @@ class UnitreeA1(LocoEnv):
         rot_mat_arrow = obs[rot_mat_idx_arrow].reshape((3, 3))
         # convert mat to angle
         angle = mat2angle_xy(rot_mat_arrow)
-        # transform the angle to be in [-pi, pi] todo: this is not needed anymore when doing sin cos transformation.
+        # transform the angle to be in [-pi, pi]
         angle = transform_angle_2pi(angle)
+        # rotate by 90 degrees
+        angle -= np.pi / 2
         # make sin-cos transformation
         angle = np.array([np.cos(angle), np.sin(angle)])
 
@@ -802,12 +794,9 @@ class UnitreeA1(LocoEnv):
         trunk = xml_handle.find("body", "trunk")
         trunk.add("body", name="dir_arrow", pos="0 0 0.15")
         dir_vec = xml_handle.find("body", "dir_arrow")
-        # todo: once Mujoco support cones, make an actual arrow (its requested feature).
+        # todo: once Mujoco support cones, make an actual arrow (its a requested feature).
         dir_vec.add("site", name="dir_arrow_ball", type="sphere", size=".03", pos="-.1 0 0")
-        #dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="-.1 0 0 .1 0 0")
         dir_vec.add("site", name="dir_arrow", type="cylinder", size=".01", fromto="0 0 -.1 0 0 .1")
-        #dir_vec.add("site", name="dir_arrow_x", type="cylinder", size=".01", fromto="0 0 0 0.1 0 0")
-        #dir_vec.add("site", name="dir_arrow_y", type="cylinder", size=".01", fromto="0 0 0 0 .1 0")
 
         return xml_handle
 

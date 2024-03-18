@@ -38,7 +38,11 @@ def normalize_row(row, max_cols):
     return r + "\n"
 
 
-def get_obs_space_table_docs(env, additional_info):
+def get_obs_space_table_docs(env, additional_info, remove=None):
+
+    if remove is None:
+        remove = []
+
     obs_spec = env.obs_helper.observation_spec[2:] # remove the first two
     low = env.info.observation_space.low
     high = env.info.observation_space.high
@@ -79,32 +83,33 @@ def get_obs_space_table_docs(env, additional_info):
     n_on_by_default = 0
     for i, d in enumerate(zip(obs_spec, low, high)):
         obs, l, h = d
-        is_linear = True if obs[1] in linear_joints else False
-        is_joint_vel = True if obs[2] == ObservationType.JOINT_VEL else False
-        desc = "Velocity of Joint " + obs[1] if is_joint_vel else "Position of Joint " + obs[1]
-        if is_linear and not is_joint_vel:
-            unit = "Position [m]"
-        elif is_linear and is_joint_vel:
-            unit = "Velocity [m/s]"
-        elif not is_linear and not is_joint_vel:
-            unit = "Angle [rad]"
-        else:
-            unit = "Angular Velocity [rad/s]"
-        row = []
-        row.append(str(i))
-        row.append(desc)
-        row.append(str(l))  # min default for all envs
-        row.append(str(h))  # max default for all envs
-        if obs[1] in joints_to_remove:
-            row.append("True")
-        else:
-            row.append("False")
-            n_on_by_default += 1
-        row.append("1") # dim
-        row.append(unit)
-        grid.append(row)
+        if obs[1] not in remove:
+            is_linear = True if obs[1] in linear_joints else False
+            is_joint_vel = True if obs[2] == ObservationType.JOINT_VEL else False
+            desc = "Velocity of Joint " + obs[1] if is_joint_vel else "Position of Joint " + obs[1]
+            if is_linear and not is_joint_vel:
+                unit = "Position [m]"
+            elif is_linear and is_joint_vel:
+                unit = "Velocity [m/s]"
+            elif not is_linear and not is_joint_vel:
+                unit = "Angle [rad]"
+            else:
+                unit = "Angular Velocity [rad/s]"
+            row = []
+            row.append(str(i))
+            row.append(desc)
+            row.append(str(l))  # min default for all envs
+            row.append(str(h))  # max default for all envs
+            if obs[1] in joints_to_remove:
+                row.append("True")
+            else:
+                row.append("False")
+                n_on_by_default += 1
+            row.append("1") # dim
+            row.append(unit)
+            grid.append(row)
 
-    curr_len = len(grid)
+    curr_len = len(grid)-1
     i = 0
     # append additional info
     for info in additional_info:
@@ -155,14 +160,14 @@ def get_action_space_table_docs(env, use_muscles=False):
 if __name__ == "__main__":
 
     # # Talos
-    # env = loco_mujoco.LocoEnv.make("Talos", disable_arms=False, disable_back=False)
-    # additional_info = [["Mass of the Weight", "0.0", "inf", "Only Enabled for Carry Task", "1", "Mass [kg]"],
-    #                    ["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-    #                    ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
-    # print(get_obs_space_table_docs(env, additional_info)[0],
-    #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
-    # print(get_action_space_table_docs(env)[0],
-    #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
+    env = loco_mujoco.LocoEnv.make("Talos", disable_arms=False, disable_back=False)
+    additional_info = [["Mass of the Weight", "0.0", "inf", "Only Enabled for Carry Task", "1", "Mass [kg]"],
+                       ["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+                       ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
+    print(get_obs_space_table_docs(env, additional_info)[0],
+          "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    print(get_action_space_table_docs(env)[0],
+          "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
 
     # # Atlas
     # env = loco_mujoco.LocoEnv.make("Atlas", disable_arms=False, disable_back=False)
@@ -196,7 +201,7 @@ if __name__ == "__main__":
     #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
     # print(get_action_space_table_docs(env)[0],
     #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
-    #
+
     # Torque and Muscle Humanoids4Ages
     # additional_info = [["Index", "Description", "Min", "Max", "Disabled", "Dim", "Units"],
     #                    ["77", "Binary number identifying the humanoid scaling.", "0", "1", "False", "2", "None"]]
@@ -214,15 +219,15 @@ if __name__ == "__main__":
     #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env, use_muscles=True)[1])
 
     # Unitree A1
-    env = loco_mujoco.LocoEnv.make("UnitreeA1")
-    additional_info = [["Desired Velocity Angle represented as Sine-Cosine Feature", "0.0", "1", "False", "2", "None"],
-                       ["Desired Velocity", "0.0", "inf", "False", "1", "Velocity [m/s]"],
-                       ["3D linear Forces between Front Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Front Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Back Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
-    print(get_obs_space_table_docs(env, additional_info)[0],
-          "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
-    print(get_action_space_table_docs(env, use_muscles=True)[0],
-          "\nNumber of actions that are on by default: ", get_action_space_table_docs(env, use_muscles=True)[1])
+    # env = loco_mujoco.LocoEnv.make("UnitreeA1")
+    # additional_info = [["Desired Velocity Angle represented as Sine-Cosine Feature", "0.0", "1", "False", "2", "None"],
+    #                    ["Desired Velocity", "0.0", "inf", "False", "1", "Velocity [m/s]"],
+    #                    ["3D linear Forces between Front Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Front Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Back Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Back Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
+    # print(get_obs_space_table_docs(env, additional_info, remove=["dir_arrow"])[0],
+    #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    # print(get_action_space_table_docs(env, use_muscles=True)[0],
+    #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env, use_muscles=True)[1])
 
