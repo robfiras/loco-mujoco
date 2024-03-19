@@ -18,8 +18,23 @@ python launcher.py
 
 It is suggested to modify `launcher.py` to choose the desired environment.
 
+### Visualizing the Results
+
+The results are saved in the `./logs` directory. To visualize the results, you can use the `tensorboard`.
+To do so, run the following command in the terminal:
+
+```bash
+tensorboard --logdir ./logs
+```
+
+The focus should be put on the following three metrics: "Eval_R-stochastic", "Eval_J-stochastic", and "Eval_L-stochastic", 
+which are the **mean undiscounted return**, **mean discounted return**, and the **mean length of an episode** the agent, respectively.
+The return is calculated based on the reward specified for each environment. Note that the latter is not used for training
+but only for evaluation.
+
+
 ### Tuning the Hyperparameters
-If you want to to change the hyperparameters or the algorithm, we suggest to copy the `confs.yaml` file and 
+If you want to change the hyperparameters or the algorithm, we suggest to copy the `confs.yaml` file and 
 pass the new configuration file to the `get_agent` method in `experiment.py`.
 
 Alternatively, you can also directly use the specific agent getter (e.g., `create_gail_agent`or `create_vail_agent`, 

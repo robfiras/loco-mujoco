@@ -46,6 +46,22 @@ That's it! Now you can run the experiment by executing the following command in 
     python launcher.py
 
 
+Visualizing the Results
+-----------------------
+
+The results are saved in the `./logs` directory. To visualize the results, you can use the `tensorboard`.
+To do so, run the following command in the terminal:
+
+.. code-block:: bash
+
+    tensorboard --logdir ./logs
+
+
+The focus should be put on the following three metrics: "Eval_R-stochastic", "Eval_J-stochastic", and "Eval_L-stochastic",
+which are the **mean undiscounted return**, **mean discounted return**, and the **mean length of an episode** the agent, respectively.
+The return is calculated based on the reward specified for each environment. Note that the latter is not used for training
+but only for evaluation.
+
 Tuning the Hyperparameters
 --------------------------
 

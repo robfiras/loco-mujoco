@@ -55,7 +55,7 @@ def experiment(env_id: str = None,
         sw.add_scalar("Eval_R-stochastic", R_mean, epoch)
         sw.add_scalar("Eval_J-stochastic", J_mean, epoch)
         sw.add_scalar("Eval_L-stochastic", L, epoch)
-        agent_saver.save(core.agent, J_mean)
+        agent_saver.save(core.agent, R_mean)
 
     agent_saver.save_curr_best_agent()
     print("Finished.")
