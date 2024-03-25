@@ -367,13 +367,15 @@ class UnitreeA1(LocoEnv):
         """
 
         dataset = np.load(str(Path(loco_mujoco.__file__).resolve().parent / dataset_path))
+        self._dataset = deepcopy({k: d for k, d in dataset.items()})
+
         states = dataset["states"]
         last = dataset["last"]
 
         states = np.atleast_2d(states)
         rel_keys = [obs_spec[0] for obs_spec in self.obs_helper.observation_spec]
         num_data = len(states)
-        dataset = dict()
+        trajectories = dict()
         for i, key in enumerate(rel_keys):
             if i < 2:
                 if freq is None:
@@ -404,43 +406,16 @@ class UnitreeA1(LocoEnv):
                 vels = np.stack([dq_trunk_tx, dq_trunk_ty], axis=1)
                 goal_speed = np.linalg.norm(vels, axis=1)
                 goal_speed = np.mean(goal_speed) * np.ones_like(goal_speed)
-                dataset["goal_speed"] = goal_speed
+                trajectories["goal_speed"] = goal_speed
             else:
                 data = states[:, i - 2]
-            dataset[key] = data
+            trajectories[key] = data
 
         # add split points
         if len(states) > 2:
-            dataset["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
+            trajectories["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
 
-        return dataset
-
-    def _preprocess_action(self, action):
-        """
-        This function preprocesses all actions. All actions in this environment expected to be between -1 and 1.
-        Hence, we need to unnormalize the action to send to correct action to the simulation.
-        Note: If the action is not in [-1, 1], the unnormalized version will be clipped in Mujoco.
-
-        Args:
-            action (np.array): Action to be send to the environment;
-
-        Returns:
-            Unnormalized action (np.array) that is send to the environment;
-
-        """
-        if self._action_mode == "torque":
-            unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
-        elif self._action_mode == "position":
-            unnormalized_action = ((action.copy() * self.norm_act_delta) + self.norm_act_mean)
-        elif self._action_mode == "position_difference":
-            q_pos = self._data.qpos[6:]
-            normalized_qpos = (q_pos - self.norm_act_mean) / self.norm_act_delta
-            new_normalized_qpos = normalized_qpos + action * 0.3
-            unnormalized_action = ((new_normalized_qpos.copy() * self.norm_act_delta) + self.norm_act_mean)
-        else:
-            raise ValueError(f"Unknown action mode: {self._action_mode}")
-
-        return unnormalized_action
+        return trajectories
 
     def _get_observation_space(self):
         """
