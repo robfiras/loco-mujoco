@@ -270,8 +270,7 @@ class Atlas(BaseRobotHumanoid):
     """
 
     valid_task_confs = ValidTaskConf(tasks=["walk", "carry"],
-                                     data_types=["real", "perfect"],
-                                     non_combinable=[("carry", None, "perfect")])
+                                     data_types=["real", "perfect"])
 
     def __init__(self, disable_arms=True, disable_back_joint=True, hold_weight=False,
                  weight_mass=None, **kwargs):
@@ -446,8 +445,10 @@ class Atlas(BaseRobotHumanoid):
                 assert kwargs["disable_back_joint"] is False
             if "hold_weight" in kwargs.keys():
                 assert kwargs["hold_weight"] is False
-
-            path = "datasets/humanoids/perfect/atlas_walk/perfect_expert_dataset_det.npz"
+            if task == "walk":
+                path = "datasets/humanoids/perfect/atlas_walk/perfect_expert_dataset_det.npz"
+            elif task == "carry":
+                path = "datasets/humanoids/perfect/atlas_carry/Atlas_carry_stochastic_dataset.npz"
 
         return BaseRobotHumanoid.generate(Atlas, path, task, dataset_type, **kwargs)
 

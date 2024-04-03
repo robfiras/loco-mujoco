@@ -25,10 +25,6 @@ class BaseHumanoid4Ages(BaseHumanoid):
 
     """
 
-    valid_task_confs = ValidTaskConf(tasks=["walk", "run"],
-                                     modes=["all", "1", "2", "3", "4"],
-                                     data_types=["real"])
-
     def __init__(self, scaling=None, scaling_trajectory_map=None, use_muscles=False,
                  use_box_feet=True, disable_arms=True, alpha_box_feet=0.5, **kwargs):
         """
@@ -66,9 +62,9 @@ class BaseHumanoid4Ages(BaseHumanoid):
         # 0.6 ~ 5 year old boy
         # 0.8 ~ 12 year old boy
         # 1.0 ~ 20 year old man
-        default_scalings = [0.4, 0.6, 0.8, 1.0]
+        self._default_scalings = [0.4, 0.6, 0.8, 1.0]
         if scaling is None:
-            self._scalings = default_scalings
+            self._scalings = self._default_scalings
         else:
             if type(scaling) == list:
                 self._scalings = scaling
@@ -133,11 +129,13 @@ class BaseHumanoid4Ages(BaseHumanoid):
 
             if self.trajectories is not None:
                 if self._random_start:
-                    curr_model = self._current_model_idx
-                    valid_traj_range = self._scaling_trajectory_map[curr_model]
-                    traj_no = np.random.randint(valid_traj_range[0], valid_traj_range[1])
-                    sample = self.trajectories.reset_trajectory(traj_no=traj_no)
-                    self.set_sim_state(sample)
+                    if self._scaling_trajectory_map:
+                        curr_model = self._current_model_idx
+                        valid_traj_range = self._scaling_trajectory_map[curr_model]
+                        traj_no = np.random.randint(valid_traj_range[0], valid_traj_range[1])
+                        sample = self.trajectories.reset_trajectory(traj_no=traj_no)
+                    else:
+                        sample = self.trajectories.reset_trajectory()
                 elif self._init_step_no:
                     traj_len = self.trajectories.trajectory_length
                     n_traj = self.trajectories.nnumber_of_trajectories
@@ -145,7 +143,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
                     substep_no = int(self._init_step_no % traj_len)
                     traj_no = int(self._init_step_no / traj_len)
                     sample = self.trajectories.reset_trajectory(substep_no, traj_no)
-                    self.set_sim_state(sample)
+                self.set_sim_state(sample)
 
     def load_trajectory(self, traj_params, scaling_trajectory_map=None, warn=True):
         """
@@ -182,7 +180,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
                     current_low_idx = current_high_idx
             else:
                 # only one scaling used
-                self._scaling_trajectory_map = [(0, 1),]
+                self._scaling_trajectory_map = None
         else:
             self._scaling_trajectory_map = scaling_trajectory_map
 
@@ -210,37 +208,33 @@ class BaseHumanoid4Ages(BaseHumanoid):
         pos_dim = len(self._get_joint_pos()) - 2
         vel_dim = len(self._get_joint_vel())
         force_dim = self._get_grf_size()
-
-        if self.more_than_one_env:
-            env_id_dim = len(self._get_env_id_map(self._current_model_idx, len(self._models)))
-        else:
-            env_id_dim = 0
+        env_id_dim = len(self._get_env_id_map(0, self.n_all_models))
 
         mask = []
 
         if "positions" not in obs_to_hide:
-            mask += [np.ones(pos_dim, dtype=np.bool)]
+            mask += [np.ones(pos_dim, dtype=bool)]
         else:
-            mask += [np.zeros(pos_dim, dtype=np.bool)]
+            mask += [np.zeros(pos_dim, dtype=bool)]
 
         if "velocities" not in obs_to_hide:
-            mask += [np.ones(vel_dim, dtype=np.bool)]
+            mask += [np.ones(vel_dim, dtype=bool)]
         else:
-            mask += [np.zeros(vel_dim, dtype=np.bool)]
+            mask += [np.zeros(vel_dim, dtype=bool)]
 
         if self._use_foot_forces:
             if "foot_forces" not in obs_to_hide:
-                mask += [np.ones(force_dim, dtype=np.bool)]
+                mask += [np.ones(force_dim, dtype=bool)]
             else:
-                mask += [np.zeros(force_dim, dtype=np.bool)]
+                mask += [np.zeros(force_dim, dtype=bool)]
         else:
             assert "foot_forces" not in obs_to_hide, "Creating a mask to hide foot forces without activating " \
                                                      "the latter is not allowed."
         if self.more_than_one_env:
             if "env_type" not in obs_to_hide:
-                mask += [np.ones(env_id_dim, dtype=np.bool)]
+                mask += [np.ones(env_id_dim, dtype=bool)]
             else:
-                mask += [np.zeros(env_id_dim, dtype=np.bool)]
+                mask += [np.zeros(env_id_dim, dtype=bool)]
         else:
             assert "env_type" not in obs_to_hide, "Creating a mask to hide the env type without having more than " \
                                                   "one env is not allowed."
@@ -254,10 +248,10 @@ class BaseHumanoid4Ages(BaseHumanoid):
         """
 
         low, high = super(BaseHumanoid4Ages, self)._get_observation_space()
-        if self.more_than_one_env:
-            len_env_map = len(self._get_env_id_map(self._current_model_idx, len(self._models)))
-            low = np.concatenate([low, np.zeros(len_env_map)])
-            high = np.concatenate([high, np.ones(len_env_map)])
+
+        len_env_map = len(self._get_env_id_map(self._current_model_idx, self.n_all_models))
+        low = np.concatenate([low, np.zeros(len_env_map)])
+        high = np.concatenate([high, np.ones(len_env_map)])
         return low, high
 
     def _create_observation(self, obs):
@@ -273,9 +267,14 @@ class BaseHumanoid4Ages(BaseHumanoid):
         """
 
         obs = super(BaseHumanoid4Ages, self)._create_observation(obs)
+
         if self.more_than_one_env:
-            env_id_map = self._get_env_id_map(self._current_model_idx, len(self._models))
-            obs = np.concatenate([obs, env_id_map])
+            model_idx = self._current_model_idx
+        else:
+            model_idx = self._default_scalings.index(self._scalings[0])
+
+        env_id_map = self._get_env_id_map(model_idx, self.n_all_models)
+        obs = np.concatenate([obs, env_id_map])
         return obs
 
     def _get_reward_function(self, reward_type, reward_params):
@@ -295,9 +294,8 @@ class BaseHumanoid4Ages(BaseHumanoid):
             x_vel_idx = self.get_obs_idx("dq_pelvis_tx")
             assert len(x_vel_idx) == 1
             x_vel_idx = x_vel_idx[0]
-            n_models = len(self._models)
-            env_id_len = len(self._get_env_id_map(0, n_models))
-            goal_reward_func = MultiTargetVelocityReward(x_vel_idx=x_vel_idx, scalings=self._scalings,
+            env_id_len = len(self._get_env_id_map(0, self.n_all_models))
+            goal_reward_func = MultiTargetVelocityReward(x_vel_idx=x_vel_idx, scalings=self._default_scalings,
                                                          env_id_len=env_id_len, **reward_params)
         else:
              goal_reward_func = super()._get_reward_function(reward_type, reward_params)
@@ -360,12 +358,13 @@ class BaseHumanoid4Ages(BaseHumanoid):
         return xml_handle
 
     @staticmethod
-    def generate(env, task="walk", mode="all", dataset_type="real", n_models=None, debug=False, **kwargs):
+    def generate(env, path, task="walk", mode="all", dataset_type="real", n_models=None, debug=False, **kwargs):
         """
         Returns a Humanoid environment corresponding to the specified task.
 
         Args:
             env (class): Humanoid class, either HumanoidTorque4Ages or HumanoidMuscle4Ages.
+            path (str): Path to the dataset.
             task (str): Main task to solve. Either "walk" or "run".
             mode (str): Mode of the environment. Either "all" (sample between all humanoid envs), "1"
             (smallest humanoid), "2" (second smallest humanoid), "3" (teenage humanoid), and "4" (adult humanoid).
@@ -380,60 +379,40 @@ class BaseHumanoid4Ages(BaseHumanoid):
 
         """
 
-        check_validity_task_mode_dataset(BaseHumanoid4Ages.__name__, task, mode, dataset_type,
-                                         *BaseHumanoid4Ages.valid_task_confs.get_all())
-
-        # todo: check if n_models is still needed
         if mode == "all":
             dataset_suffix = "_all.npz"
             scaling = None
         elif mode == "1":
             dataset_suffix = "_1.npz"
             scaling = 0.4
-            n_models = 4
         elif mode == "2":
             dataset_suffix = "_2.npz"
             scaling = 0.6
-            n_models = 4
         elif mode == "3":
             dataset_suffix = "_3.npz"
             scaling = 0.8
-            n_models = 4
         elif mode == "4":
             dataset_suffix = "_4.npz"
             scaling = 1.0
-            n_models = 4
 
-        if n_models is not None:
-            assert type(scaling) is float
-            scaling = [scaling for i in range(n_models)]
-            scaling_trajectory_map = [(0, 1) for i in range(n_models)]
-        else:
-            scaling_trajectory_map = None
+        if dataset_type == "real":
+            local_path = path + dataset_suffix
+            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / local_path)
+            if debug or use_mini_dataset:
+                if use_mini_dataset:
+                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
+                                  "the datasets to use this environment for imitation learning!")
+                local_path = local_path.split("/")
+                local_path.insert(3, "mini_datasets")
+                local_path = "/".join(local_path)
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / local_path
+        elif dataset_type == "perfect":
+            local_path = path + dataset_suffix
+            traj_path = Path(loco_mujoco.__file__).resolve().parent / local_path
 
         if task == "walk":
-            local_path = "datasets/humanoids/real/02-constspeed_reduced_humanoid_POMDP" + dataset_suffix
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / local_path)
-            if debug or use_mini_dataset:
-                if use_mini_dataset:
-                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
-                                  "the datasets to use this environment for imitation learning!")
-                local_path = local_path.split("/")
-                local_path.insert(3, "mini_datasets")
-                local_path = "/".join(local_path)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent / local_path
             reward_params = dict(target_velocity=1.25)
         elif task == "run":
-            local_path = "datasets/humanoids/real/05-run_reduced_humanoid_POMDP" + dataset_suffix
-            use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / local_path)
-            if debug or use_mini_dataset:
-                if use_mini_dataset:
-                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
-                                  "the datasets to use this environment for imitation learning!")
-                local_path = local_path.split("/")
-                local_path.insert(3, "mini_datasets")
-                local_path = "/".join(local_path)
-            traj_path = Path(loco_mujoco.__file__).resolve().parent / local_path
             reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
@@ -450,9 +429,16 @@ class BaseHumanoid4Ages(BaseHumanoid):
                                traj_dt=(1 / traj_data_freq),
                                control_dt=(1 / desired_contr_freq))
         elif dataset_type == "perfect":
-            # todo: generate and add this dataset
-            raise ValueError(f"currently not implemented.")
+            traj_data_freq = 100  # hz
+            traj_files = mdp.load_dataset_and_get_traj_files(traj_path, traj_data_freq)
+            traj_params = dict(traj_files=traj_files,
+                               traj_dt=(1 / traj_data_freq),
+                               control_dt=(1 / desired_contr_freq))
 
-        mdp.load_trajectory(traj_params, scaling_trajectory_map, warn=False)
+        mdp.load_trajectory(traj_params, warn=False)
 
         return mdp
+
+    @property
+    def n_all_models(self):
+        return len(self._default_scalings)
