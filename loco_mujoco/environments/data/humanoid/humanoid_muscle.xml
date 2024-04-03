@@ -16,7 +16,7 @@
     <muscle scale="200" ctrlrange="0 1" ctrllimited="true" range="0.65 1.05"></muscle>
     <motor ctrlrange="-1.0 1.0" ctrllimited="true"></motor>
   </default>
-  <option integrator="Euler" iterations="50" solver="Newton"  timestep="0.001" collision="dynamic">
+  <option integrator="Euler" iterations="50" solver="Newton"  timestep="0.001">
     <flag energy="enable"></flag>
   </option>
   <size njmax="1000" nconmax="400" nuser_jnt="1"></size>

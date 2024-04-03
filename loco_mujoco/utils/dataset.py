@@ -67,6 +67,7 @@ def download_perfect_datasets():
     os.makedirs(dataset_path_humanoid_str, exist_ok=True)
     humanoid_url = "https://zenodo.org/records/10912641/files/humanoid_datasets_perfect_v0.2.zip?download=1"
     wget.download(humanoid_url, out=dataset_path_humanoid_str)
+    print("\n")
     file_name = "humanoid_datasets_perfect_v0.2.zip"
     file_path = str(dataset_path_humanoid / file_name)
     with zipfile.ZipFile(file_path, "r") as zip_ref:
