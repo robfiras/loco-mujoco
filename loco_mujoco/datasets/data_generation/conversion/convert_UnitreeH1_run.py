@@ -59,6 +59,6 @@ if __name__ == "__main__":
 
     unavailable_keys = []
     dataset = adapt_mocap(path_mat, joint_conf=joint_conf, unavailable_keys=unavailable_keys, rename_map=rename_map,
-                          discard_first=25000, discard_last=1000)
+                          discard_first=28500, discard_last=12500)
 
     np.savez(file=target_path, **dataset)
