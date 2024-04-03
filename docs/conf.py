@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(".."))
 project = 'LocoMuJoCo'
 copyright = '2024, Firas Al-Hafez'
 author = 'Firas Al-Hafez'
-release = 'v0.1.0'
+release = 'v0.2.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
