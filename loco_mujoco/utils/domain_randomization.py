@@ -535,7 +535,7 @@ def build_MjModel_from_xml_handle(xml_handle, path_domain_rand_conf):
 def build_MjModel_from_xml_handle_job(xml_handle, path_domain_rand_conf, sq, rq):
     """
     Worker function for parallel domain randomization. It takes in an xml_handle and a path to the domain
-    randomization file and puts a randomizaed model in the respective queue.
+    randomization file and puts a randomized model in the respective queue.
 
     Args:
         xml_handle: Mujoco xml handle.
