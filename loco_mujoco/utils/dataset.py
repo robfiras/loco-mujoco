@@ -34,7 +34,7 @@ def download_real_datasets():
     humanoid_url = "https://zenodo.org/records/11113527/files/humanoid_datasets_v0.2.1.zip?download=1"
     wget.download(humanoid_url, out=dataset_path_humanoid_str)
     print("\n")
-    file_name = "humanoid_datasets_v0.2.zip"
+    file_name = "humanoid_datasets_v0.2.1.zip"
     file_path = str(dataset_path_humanoid / file_name)
     with zipfile.ZipFile(file_path, "r") as zip_ref:
         zip_ref.extractall(dataset_path_humanoid_str)
@@ -47,7 +47,7 @@ def download_real_datasets():
     quadruped_url = "https://zenodo.org/records/11113527/files/quadruped_datasets_v0.2.1.zip?download=1"
     wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
     print("\n")
-    file_name = "quadruped_datasets_v0.2.zip"
+    file_name = "quadruped_datasets_v0.2.1.zip"
     file_path = str(dataset_path_quadrupeds / file_name)
     with zipfile.ZipFile(file_path, "r") as zip_ref:
         zip_ref.extractall(dataset_path_quadrupeds_str)
@@ -68,7 +68,7 @@ def download_perfect_datasets():
     humanoid_url = "https://zenodo.org/records/11113527/files/humanoid_datasets_perfect_v0.2.1.zip?download=1"
     wget.download(humanoid_url, out=dataset_path_humanoid_str)
     print("\n")
-    file_name = "humanoid_datasets_perfect_v0.2.zip"
+    file_name = "humanoid_datasets_perfect_v0.2.1.zip"
     file_path = str(dataset_path_humanoid / file_name)
     with zipfile.ZipFile(file_path, "r") as zip_ref:
         zip_ref.extractall(dataset_path_humanoid_str)
@@ -82,7 +82,7 @@ def download_perfect_datasets():
     quadruped_url = "https://zenodo.org/records/11113527/files/quadruped_datasets_perfect_v0.2.1.zip?download=1"
     wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
     print("\n")
-    file_name = "quadruped_datasets_perfect_v0.2.zip"
+    file_name = "quadruped_datasets_perfect_v0.2.1.zip"
     file_path = str(dataset_path_quadrupeds / file_name)
     with zipfile.ZipFile(file_path, "r") as zip_ref:
         zip_ref.extractall(dataset_path_quadrupeds_str)
