@@ -6,7 +6,11 @@ None/
 dist/
 .pytest_cache/
 .DS_Store
-loco_mujoco/datasets/
+loco_mujoco/datasets/data_generation/generated_data
+*.mat
 mushroom_rl_recordings/
 record_all/
+loco_mujoco/datasets/quadrupeds/
+loco_mujoco/datasets/humanoids/
 _build/
+
