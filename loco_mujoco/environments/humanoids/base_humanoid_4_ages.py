@@ -16,7 +16,7 @@ from loco_mujoco.utils import check_validity_task_mode_dataset
 
 class BaseHumanoid4Ages(BaseHumanoid):
     """
-    MuJoCo simulation of 4 simplified humanoid models.
+    Mujoco environment of 4 simplified humanoid models.
     At the beginning of each episode, one of the four humanoid models are
     sampled and used to simulate a trajectory. The different humanoids should
     resemble an adult, a teenager (∼12 years), a child (∼5 years), and a

@@ -24,7 +24,7 @@ class UnitreeA1(LocoEnv):
     Description
     ------------
 
-    Mujoco simulation of Unitree A1 model.
+    Mujoco environment of Unitree A1 model.
 
     Tasks
     -----------------

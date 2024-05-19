@@ -16,7 +16,7 @@ class Talos(BaseRobotHumanoid):
     Description
     ------------
 
-    Mujoco simulation of the Talos robot. Optionally, Talos can carry
+    Mujoco environment of the Talos robot. Optionally, Talos can carry
     a weight. This environment can be partially observable by hiding
     some of the state space entries from the policy using a state mask.
     Hidable entries are "positions", "velocities", "foot_forces",

@@ -16,7 +16,7 @@ class UnitreeH1(BaseRobotHumanoid):
     Description
     ------------
 
-    Mujoco simulation of the Unitree H1 robot. Optionally, the H1 can carry
+    Mujoco environment of the Unitree H1 robot. Optionally, the H1 can carry
     a weight. This environment can be partially observable by hiding
     some of the state space entries from the policy using a state mask.
     Hidable entries are "positions", "velocities", "foot_forces",

@@ -17,6 +17,10 @@ or you do an editable installation by cloning this repository and then running:
     cd loco-mujoco
     pip install -e .
 
+.. note::
+        We fixed the version of MuJoCo to 2.3.7 during installation since we found that there are slight
+        differences in the simulation, which made testing very difficult. However, in practice, you can
+        use any newer version of MuJoCo! Just install it after installing LocoMuJoCo.
 
 Download the Datasets
 ---------------------

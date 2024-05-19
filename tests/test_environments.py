@@ -90,12 +90,8 @@ def test_all_environments():
 
             test_dataset = np.load(dataset_path)
 
-            if not np.allclose(dataset, test_dataset):
-                return False
-            if not np.allclose(dataset_gym, test_dataset):
-                return False
-
-    return True
+            assert np.allclose(dataset, test_dataset)
+            assert np.allclose(dataset_gym, test_dataset)
 
 
 def test_replays():
@@ -126,8 +122,3 @@ def test_replays():
             task_env = gym.make("LocoMujoco", env_name=task_name, debug=True)
             task_env.play_trajectory(n_episodes=N_EPISODES_REP, n_steps_per_episode=N_STEPS_REP, render=False)
 
-    return True
-
-
-if __name__ == "__main__":
-    test_all_environments()

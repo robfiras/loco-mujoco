@@ -11,7 +11,7 @@ from loco_mujoco.environments import LocoEnv
 
 class BaseRobotHumanoid(LocoEnv):
     """
-    Base Class for the Mujoco simulation of Atlas, UnitreeH1 and Talos.
+    Base Class for the Mujoco environment of Atlas, UnitreeH1/G1 and Talos.
 
     """
 

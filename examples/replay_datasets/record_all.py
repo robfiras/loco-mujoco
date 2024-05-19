@@ -11,12 +11,13 @@ def experiment(seed=0):
     envs = LocoEnv.get_all_task_names()
 
     for env in envs:
+
         if "real" in env:
             replay_params = dict(n_episodes=15, n_steps_per_episode=250, record=True) if "Unitree.hard" in env or \
                                                                                          ".all" in env or ".carry" in env \
                 else dict(n_episodes=3, n_steps_per_episode=500, record=True)
 
-            if ("Humanoid" in env or "Atlas.walk" in env) and not "carry" in env:
+            if ("Humanoid" in env or "Atlas.walk" in env or "UnitreeG1" in env) and not "carry" in env:
                 env_params = dict(disable_arms=False)
             else:
                 env_params = dict()
