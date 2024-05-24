@@ -31,6 +31,7 @@ if __name__ == '__main__':
     env_ids = ["Atlas.walk", "Atlas.carry",
                "Talos.walk", "Talos.carry",
                "UnitreeH1.walk", "UnitreeH1.run", "UnitreeH1.carry",
+               "UnitreeG1.walk", "UnitreeG1.run",
                "HumanoidTorque.walk", "HumanoidTorque.run",
                "HumanoidMuscle.walk", "HumanoidMuscle.run",
                "UnitreeA1.simple", "UnitreeA1.hard"]

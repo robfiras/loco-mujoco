@@ -8,25 +8,26 @@
 
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(".."))
 
 
 project = 'LocoMuJoCo'
 copyright = '2024, Firas Al-Hafez'
 author = 'Firas Al-Hafez'
-release = 'v0.2.2'
+release = 'v0.3.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['sphinx.ext.todo', 'sphinx.ext.viewcode', 'sphinx.ext.autodoc', "m2r2"]
+extensions = ['sphinx.ext.todo', 'sphinx.ext.viewcode', 'sphinx.ext.autodoc', "m2r2", 'sphinx.ext.napoleon']
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 add_module_names = False
 autodoc_member_order = 'groupwise'
 source_suffix = [".rst", ".md"]
-
+napoleon_google_docstring = True
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

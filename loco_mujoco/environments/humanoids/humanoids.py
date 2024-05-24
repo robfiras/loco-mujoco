@@ -10,7 +10,7 @@ class HumanoidTorque(BaseHumanoid):
     Description
     ------------
 
-    MuJoCo simulation of a humanoid model with one torque actuator per joint.
+    Mujoco environment of a humanoid model with one torque actuator per joint.
 
     Tasks
     -----------------
@@ -323,7 +323,7 @@ class HumanoidMuscle(BaseHumanoid):
     Description
     ------------
 
-    MuJoCo simulation of a humanoid model with muscle actuation.
+    Mujoco environment of a humanoid model with muscle actuation.
 
     .. note:: This Humanoid consists of 92 muscles on the lower limb. The upper body is torque actuated.
 
@@ -788,7 +788,7 @@ class HumanoidMuscle(BaseHumanoid):
 
 class HumanoidTorque4Ages(BaseHumanoid4Ages):
     """
-    MuJoCo simulation of 4 simplified humanoid models with one torque actuator per joint.
+    Mujoco environment of 4 simplified humanoid models with one torque actuator per joint.
     At the beginning of each episode, one of the four humanoid models are randomly
     sampled and used to simulate a trajectory. The different humanoids should
     resemble an adult, a teenager (∼12 years), a child (∼5 years), and a
@@ -895,7 +895,7 @@ class HumanoidTorque4Ages(BaseHumanoid4Ages):
 class HumanoidMuscle4Ages(BaseHumanoid4Ages):
 
     """
-    MuJoCo simulation of 4 simplified humanoid models with muscle actuation.
+    Mujoco environment of 4 simplified humanoid models with muscle actuation.
     At the beginning of each episode, one of the four humanoid models are
     sampled and used to simulate a trajectory. The different humanoids should
     resemble an adult, a teenager (∼12 years), a child (∼5 years), and a

@@ -13,7 +13,7 @@ from loco_mujoco.environments import LocoEnv
 
 class BaseHumanoid(LocoEnv):
     """
-    MuJoCo simulation of a base humanoid model.
+    Mujoco environment of a base humanoid model.
 
     """
 

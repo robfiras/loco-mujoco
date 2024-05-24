@@ -1,6 +1,6 @@
 import inspect
 import loco_mujoco
-from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle, UnitreeA1
+from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle, UnitreeA1, UnitreeG1
 from mushroom_rl.utils.mujoco import *
 
 
@@ -136,7 +136,10 @@ def get_action_space_table_docs(env, use_muscles=False):
         else:
             motors_to_remove = []
     except :
-        action_spec = env._get_action_specification(use_muscles)
+        if type(env) == UnitreeG1:
+            action_spec = env._get_action_specification()
+        else:
+            action_spec = env._get_action_specification(use_muscles)
         _, motors_to_remove, _, _ = env._get_xml_modifications()
 
     header = ["Index", "Name in XML", "Control Min", "Control Max", "Disabled"]
@@ -160,14 +163,14 @@ def get_action_space_table_docs(env, use_muscles=False):
 if __name__ == "__main__":
 
     # # Talos
-    env = loco_mujoco.LocoEnv.make("Talos", disable_arms=False, disable_back=False)
-    additional_info = [["Mass of the Weight", "0.0", "inf", "Only Enabled for Carry Task", "1", "Mass [kg]"],
-                       ["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
-                       ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
-    print(get_obs_space_table_docs(env, additional_info)[0],
-          "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
-    print(get_action_space_table_docs(env)[0],
-          "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
+    # env = loco_mujoco.LocoEnv.make("Talos", disable_arms=False, disable_back=False)
+    # additional_info = [["Mass of the Weight", "0.0", "inf", "Only Enabled for Carry Task", "1", "Mass [kg]"],
+    #                    ["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+    #                    ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
+    # print(get_obs_space_table_docs(env, additional_info)[0],
+    #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    # print(get_action_space_table_docs(env)[0],
+    #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
 
     # # Atlas
     # env = loco_mujoco.LocoEnv.make("Atlas", disable_arms=False, disable_back=False)
@@ -190,6 +193,15 @@ if __name__ == "__main__":
     #       "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
     # print(get_action_space_table_docs(env)[0],
     #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
+
+    # UnitreeG1
+    env = loco_mujoco.LocoEnv.make("UnitreeG1", disable_arms=False, disable_back=False)
+    additional_info = [["3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"],
+                       ["3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "3", "Force [N]"]]
+    print(get_obs_space_table_docs(env, additional_info)[0],
+          "\nNumber of obs that are on by default: ", get_obs_space_table_docs(env, additional_info)[1], "\n")
+    print(get_action_space_table_docs(env)[0],
+          "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
 
     # Torque Humanoid
     # env = loco_mujoco.LocoEnv.make("HumanoidTorque", disable_back=False, disable_arms=False)

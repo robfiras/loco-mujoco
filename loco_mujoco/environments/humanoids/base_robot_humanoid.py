@@ -11,7 +11,7 @@ from loco_mujoco.environments import LocoEnv
 
 class BaseRobotHumanoid(LocoEnv):
     """
-    Base Class for the Mujoco simulation of Atlas, UnitreeH1 and Talos.
+    Base Class for the Mujoco environment of Atlas, UnitreeH1/G1 and Talos.
 
     """
 
@@ -197,7 +197,7 @@ class BaseRobotHumanoid(LocoEnv):
             else:
                 reward_params = dict(target_velocity=2.5)
                 
-            mdp = env(hold_weight=False, reward_type=reward_type, reward_params=reward_params, **kwargs)
+            mdp = env(reward_type=reward_type, reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

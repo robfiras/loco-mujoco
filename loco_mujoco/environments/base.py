@@ -37,7 +37,7 @@ class LocoEnv(MultiMuJoCo):
         Constructor.
 
         Args:
-            xml_handle : MuJoCo xml handle.
+            xml_handles : MuJoCo xml handles.
             actuation_spec (list): A list specifying the names of the joints
                 which should be controllable by the agent. Can be left empty
                 when all actuators should be used;
@@ -86,6 +86,7 @@ class LocoEnv(MultiMuJoCo):
 
         if type(xml_handles) != list:
             xml_handles = [xml_handles]
+        self._xml_handles = xml_handles
 
         if collision_groups is None:
             collision_groups = list()
@@ -128,7 +129,7 @@ class LocoEnv(MultiMuJoCo):
         self.mean_grf = self._setup_ground_force_statistics()
 
         # dataset dummy
-        self._dataset= None
+        self._dataset = None
 
         if traj_params:
             self.trajectories = None
@@ -546,6 +547,22 @@ class LocoEnv(MultiMuJoCo):
             trajectories["split_points"] = np.concatenate([[0], np.squeeze(np.argwhere(last == 1) + 1)])
 
         return trajectories
+
+    @property
+    def xml_handle(self):
+        """ Returns the XML handle of the environment. This will raise an error if the environment contains more
+            than one xml_handle. """
+
+        if len(self._xml_handles) > 1:
+            raise ValueError("This environment contains multiple models and hence multiple xml_handles. Use the "
+                             "property \"xml_handles\" instead.")
+        return self._xml_handles[0]
+
+    @property
+    def xml_handles(self):
+        """ Returns all XML handles of the environment. """
+
+        return self._xml_handles
 
     def _get_observation_space(self):
         """
