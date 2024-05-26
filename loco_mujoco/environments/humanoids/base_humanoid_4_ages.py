@@ -27,7 +27,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
 
     def __init__(self, scaling=None, scaling_trajectory_map=None, use_muscles=False,
                  use_box_feet=True, disable_arms=True, alpha_box_feet=0.5,
-                 force_scaling_exponent=2.0, **kwargs):
+                 force_scaling_exponent=2.0, lengthrange_multiplier=1.0, **kwargs):
         """
         Constructor.
 
@@ -74,6 +74,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
 
         self._scaling_trajectory_map = scaling_trajectory_map
         self._force_scaling_exponent = force_scaling_exponent
+        self._lengthrange_multiplier = lengthrange_multiplier
 
         # --- Modify the xml, the action_spec, and the observation_spec if needed ---
         self._use_box_feet = use_box_feet
@@ -81,7 +82,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
         joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups = self._get_xml_modifications()
 
         xml_handle = mjcf.from_path(xml_path)
-        xml_handles = [self.scale_body(deepcopy(xml_handle), scaling, use_muscles, self._force_scaling_exponent) for scaling in self._scalings]
+        xml_handles = [self.scale_body(deepcopy(xml_handle), scaling, use_muscles, self._force_scaling_exponent, self._lengthrange_multiplier) for scaling in self._scalings]
 
         if use_box_feet or disable_arms:
             obs_to_remove = ["q_" + j for j in joints_to_remove] + ["dq_" + j for j in joints_to_remove]
@@ -304,7 +305,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
         return goal_reward_func
 
     @staticmethod
-    def scale_body(xml_handle, scaling, use_muscles, force_scaling_exponent):
+    def scale_body(xml_handle, scaling, use_muscles, force_scaling_exponent, lengthrange_multiplier):
         """
         This function scales the kinematics and dynamics of the humanoid model given a Mujoco XML handle.
 
@@ -351,7 +352,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
             for h in actuator_handle:
                 if "mot" not in h.name:
                     h.force *= body_scaling ** force_scaling_exponent
-                    h.lengthrange *= body_scaling
+                    h.lengthrange *= body_scaling * lengthrange_multiplier
 
         if not use_muscles:
             actuator_handle = xml_handle.find_all("actuator")
