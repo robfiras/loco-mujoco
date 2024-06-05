@@ -197,7 +197,6 @@ class BaseHumanoid4Ages(BaseHumanoid):
             included, and False means that it should be discarded.
 
         """
-
         if type(obs_to_hide) == str:
             obs_to_hide = (obs_to_hide,)
 
@@ -345,10 +344,12 @@ class BaseHumanoid4Ages(BaseHumanoid):
                 for s in h.site:
                     s.pos *= body_scaling
 
+
             actuator_handle = xml_handle.find_all("actuator")
             for h in actuator_handle:
                 if "mot" not in h.name:
                     h.force *= body_scaling ** 2
+                    h.lengthrange *= body_scaling
 
         if not use_muscles:
             actuator_handle = xml_handle.find_all("actuator")
@@ -410,13 +411,30 @@ class BaseHumanoid4Ages(BaseHumanoid):
             local_path = path + dataset_suffix
             traj_path = Path(loco_mujoco.__file__).resolve().parent / local_path
 
-        if task == "walk":
-            reward_params = dict(target_velocity=1.25)
-        elif task == "run":
-            reward_params = dict(target_velocity=2.5)
+        if 'reward_type' in kwargs.keys():
+            reward_type = kwargs['reward_type']
+            del kwargs['reward_type']
+
+            if 'reward_params' in kwargs.keys():
+                reward_params = kwargs['reward_params']
+                del kwargs['reward_params']
+            else:
+                reward_params = None
+        else:
+            reward_type = 'multi_target_velocity'
+
+            if 'reward_params' in kwargs.keys():
+                assert len(kwargs['reward_params'].keys()) == 1, 'The default reward only expects one parameter!'
+                assert list(kwargs['reward_params'].keys())[0] == 'target_velocity', 'The default reward only expects the parameter \'target_velocity\'!'
+                reward_params = kwargs['reward_params']
+                del kwargs['reward_params']
+            elif task == "walk":
+                reward_params = dict(target_velocity=1.25)
+            elif task == "run":
+                reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = env(scaling=scaling, reward_type="multi_target_velocity", reward_params=reward_params, **kwargs)
+        mdp = env(scaling=scaling, reward_type=reward_type, reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz
