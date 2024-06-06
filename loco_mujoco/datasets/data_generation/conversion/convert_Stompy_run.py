@@ -1,4 +1,4 @@
-"""T """
+"""Script to convert raw mocap data to a format that can be used by the Stompy environment."""
 import os
 import numpy as np
 from loco_mujoco.utils.dataset import adapt_mocap
@@ -91,6 +91,8 @@ if __name__ == "__main__":
         "joint_legs_1_right_leg_1_x4_1_dof_x4",
         "joint_legs_1_left_leg_1_x4_1_dof_x4",
 
+        "joint_legs_1_left_leg_1_x10_1_dof_x10", # pitch
+        "joint_legs_1_right_leg_1_x10_2_dof_x10", # pitch
         "joint_legs_1_x8_2_dof_x8", # yaw
         "joint_legs_1_x8_1_dof_x8", # yaw
     ]

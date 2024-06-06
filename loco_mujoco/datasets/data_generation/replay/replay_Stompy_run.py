@@ -1,5 +1,6 @@
 import numpy as np
 from loco_mujoco.environments import Stompy
+from loco_mujoco.utils import video2gif
 
 
 def experiment():
@@ -23,7 +24,15 @@ def experiment():
     mdp = Stompy(gamma=gamma, horizon=horizon, n_substeps=n_substeps, traj_params=traj_params,
                 disable_arms=False, disable_back_joint=False)
 
-    mdp.play_trajectory(record=False, n_episodes=1, n_steps_per_episode=200)
+    mdp.play_trajectory(
+        record=False, n_episodes=1, n_steps_per_episode=500, 
+        recorder_params=dict(
+            path="test_video", 
+            tag="stompy",
+            video_name="stompy_run")
+        )
+
+    video2gif("test_video/stompy/stompy_run.mp4", duration=4.0, fps=15, scale=720)
 
 
 if __name__ == '__main__':

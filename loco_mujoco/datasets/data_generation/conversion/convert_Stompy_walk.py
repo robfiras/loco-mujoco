@@ -1,14 +1,8 @@
-""" """
+"""Script to convert raw mocap data to a format that can be used by the Stompy environment."""
 import os
 import numpy as np
 from loco_mujoco.utils.dataset import adapt_mocap
 
-# There are 37 dof for mocap
-# There are 32 for unitree?
-
-# Unitree doesn't have:
-# subtalar_angle_r at all
-# 
 if __name__ == "__main__":
     joint_conf = dict(
                       pelvis_tx=(0.95, 0.0),
