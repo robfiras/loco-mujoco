@@ -13,7 +13,7 @@ def experiment():
     n_substeps = env_freq//desired_contr_freq
 
     # prepare trajectory params
-    traj_params = dict(traj_path="generated_data/walk_stompy.npz",
+    traj_params = dict(traj_path="../generated_data/walk_stompy.npz",
                        traj_dt=(1/traj_data_freq),
                        control_dt=(1/desired_contr_freq),
                        clip_trajectory_to_joint_ranges=False)
@@ -25,14 +25,14 @@ def experiment():
                 disable_arms=False, disable_back_joint=False)
 
     mdp.play_trajectory(
-        record=True, n_episodes=1, n_steps_per_episode=500, 
+        record=True, n_episodes=1, n_steps_per_episode=1000,
         recorder_params=dict(
-            path="test_video", 
+            path="./test_video",
             tag="stompy",
             video_name="stompy_walk")
         )
 
-    video2gif("test_video/stompy/stompy_walk.mp4", duration=4.0, fps=15, scale=720)
+    video2gif("./test_video/stompy/stompy_walk.mp4", duration=4.0, fps=15, scale=720)
 
 
 if __name__ == '__main__':
