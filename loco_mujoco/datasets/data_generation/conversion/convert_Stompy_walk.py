@@ -5,24 +5,24 @@ from loco_mujoco.utils.dataset import adapt_mocap
 
 if __name__ == "__main__":
     joint_conf = dict(
-                      pelvis_tx=(0.95, 0.0),
-                      pelvis_tz=(1.0, 0.0),
-                      pelvis_ty=(1.0, -1.05),
-                      pelvis_tilt=(1.0, 0.0),
-                      pelvis_list=(1.0, 0.0),
-                      pelvis_rotation=(1.0, 0.0),
+                      pelvis_tx=(0.67, 0.0),
+                      pelvis_tz=(0.67, 0.0),
+                      pelvis_ty=(0.67, -0.73),
+                      pelvis_tilt=(0.7, -0.05),
+                      pelvis_list=(0.7, 0.0),
+                      pelvis_rotation=(0.7, 0.0),
                       knee_angle_l=(1.0, 0.0),
                       knee_angle_r=(-1.0, 0.0),
-                      lumbar_rotation=(1., 0.0),
+                      lumbar_rotation=(0.7, 0.0),
 
-                      hip_flexion_r=(-1.0, 0.0),
-                      hip_flexion_l=(1.0, 0.0),
-                      hip_rotation_r=(1.0, 0.0),
+                      hip_flexion_r=(1.0, 0.0),
+                      hip_flexion_l=(-1.0, 0.0),
+                      hip_rotation_r=(-1.0, 0.0),
                       hip_rotation_l=(1.0, 0.0),
-                      hip_adduction_r=(1.0, 0.0),
+                      hip_adduction_r=(-1.0, 0.0),
                       hip_adduction_l=(1.0, 0.0),
-                      ankle_angle_r=(-1.0, 0.0),
-                      ankle_angle_l=(1.0, 0.0),
+                      ankle_angle_r=(-1.0, -0.1),
+                      ankle_angle_l=(1.0, 0.1),
 
                       subtalar_angle_r=(-1.0, 0.0),
                       subtalar_angle_l=(1.0, 0.0),
@@ -40,8 +40,8 @@ if __name__ == "__main__":
                       elbow_flex_l=(-1.0, 0.0),
     )
 
-    path_mat = "00_raw_mocap_data/raw_walking_motion_capture.mat"
-    dir_target_path = "generated_data"
+    path_mat = "../00_raw_mocap_data/raw_walking_motion_capture.mat"
+    dir_target_path = "../generated_data"
     if not os.path.exists(dir_target_path):
         os.makedirs(dir_target_path)
     target_path = os.path.join(dir_target_path, "walk_stompy.npz")
@@ -51,12 +51,14 @@ if __name__ == "__main__":
         knee_angle_r="joint_legs_1_right_leg_1_knee_revolute",
         elbow_flex_l="joint_left_arm_2_x6_2_dof_x6",
         elbow_flex_r="joint_right_arm_1_x6_2_dof_x6",
-        hip_adduction_l="joint_legs_1_left_leg_1_x8_1_dof_x8", # roll
-        hip_adduction_r="joint_legs_1_right_leg_1_x8_1_dof_x8", # roll
+        hip_adduction_l="joint_legs_1_x8_2_dof_x8", # roll
+        hip_adduction_r="joint_legs_1_x8_1_dof_x8", # roll
         hip_flexion_l="joint_legs_1_left_leg_1_x10_1_dof_x10", # pitch
         hip_flexion_r="joint_legs_1_right_leg_1_x10_2_dof_x10", # pitch
-        hip_rotation_l="joint_legs_1_x8_2_dof_x8", # yaw
-        hip_rotation_r="joint_legs_1_x8_1_dof_x8", # yaw
+        #hip_rotation_l="joint_legs_1_x8_2_dof_x8", # yaw
+        hip_rotation_l="joint_legs_1_left_leg_1_x8_1_dof_x8", # yaw
+        #hip_rotation_r="joint_legs_1_x8_1_dof_x8", # yaw
+        hip_rotation_r="joint_legs_1_right_leg_1_x8_1_dof_x8", # yaw
         lumbar_rotation="joint_torso_1_x8_1_dof_x8",
         ankle_angle_l="joint_legs_1_left_leg_1_ankle_revolute",
         ankle_angle_r="joint_legs_1_right_leg_1_ankle_revolute",
@@ -90,8 +92,6 @@ if __name__ == "__main__":
         "joint_legs_1_right_leg_1_x4_1_dof_x4",
         "joint_legs_1_left_leg_1_x4_1_dof_x4",
 
-        "joint_legs_1_x8_2_dof_x8", # yaw
-        "joint_legs_1_x8_1_dof_x8", # yaw
     ]
     dataset = adapt_mocap(path_mat, joint_conf=joint_conf, unavailable_keys=unavailable_keys, rename_map=rename_map,
                           discard_first=25000, discard_last=1000)
