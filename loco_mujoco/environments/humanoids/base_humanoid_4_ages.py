@@ -26,7 +26,8 @@ class BaseHumanoid4Ages(BaseHumanoid):
     """
 
     def __init__(self, scaling=None, scaling_trajectory_map=None, use_muscles=False,
-                 use_box_feet=True, disable_arms=True, alpha_box_feet=0.5, **kwargs):
+                 use_box_feet=True, disable_arms=True, alpha_box_feet=0.5,
+                 custom_force_scaler=1.0, **kwargs):
         """
         Constructor.
 
@@ -79,7 +80,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
         joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups = self._get_xml_modifications()
 
         xml_handle = mjcf.from_path(xml_path)
-        xml_handles = [self.scale_body(deepcopy(xml_handle), scaling, use_muscles) for scaling in self._scalings]
+        xml_handles = [self.scale_body(deepcopy(xml_handle), scaling, use_muscles, custom_force_scaler) for scaling in self._scalings]
 
         if use_box_feet or disable_arms:
             obs_to_remove = ["q_" + j for j in joints_to_remove] + ["dq_" + j for j in joints_to_remove]
@@ -303,7 +304,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
         return goal_reward_func
 
     @staticmethod
-    def scale_body(xml_handle, scaling, use_muscles):
+    def scale_body(xml_handle, scaling, use_muscles, custom_force_scaler):
         """
         This function scales the kinematics and dynamics of the humanoid model given a Mujoco XML handle.
 
@@ -348,7 +349,7 @@ class BaseHumanoid4Ages(BaseHumanoid):
             actuator_handle = xml_handle.find_all("actuator")
             for h in actuator_handle:
                 if "mot" not in h.name:
-                    h.force *= body_scaling ** 2
+                    h.force *= body_scaling ** 2 * custom_force_scaler
 
         if not use_muscles:
             actuator_handle = xml_handle.find_all("actuator")

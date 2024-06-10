@@ -30,7 +30,7 @@ class LocoEnv(MultiMuJoCo):
 
     def __init__(self, xml_handles, action_spec, observation_spec, collision_groups=None, gamma=0.99, horizon=1000,
                  n_substeps=10,  reward_type=None, reward_params=None, traj_params=None, random_start=True,
-                 init_step_no=None, timestep=0.001, use_foot_forces=False, default_camera_mode="follow",
+                 init_step_no=None, timestep=0.001, use_foot_forces=False, obs_mujoco_act=False,default_camera_mode="follow",
                  use_absorbing_states=True, domain_randomization_config=None, parallel_dom_rand=True,
                  N_worker_per_xml_dom_rand=4, **viewer_params):
         """
@@ -113,17 +113,18 @@ class LocoEnv(MultiMuJoCo):
         # specify reward function
         self._reward_function = self._get_reward_function(reward_type, reward_params)
 
-        # optionally use foot forces in the observation space
-        self._use_foot_forces = use_foot_forces
-
-        self.info.observation_space = spaces.Box(*self._get_observation_space())
-
         # the action space is supposed to be between -1 and 1, so we normalize it
-        low, high = self.info.action_space.low.copy(), self.info.action_space.high.copy()
-        self.norm_act_mean = (high + low) / 2.0
-        self.norm_act_delta = (high - low) / 2.0
+        self.mujoco_act_low, self.mujoco_act_high = self.info.action_space.low.copy(), self.info.action_space.high.copy()
+        self.norm_act_mean = (self.mujoco_act_high + self.mujoco_act_low) / 2.0
+        self.norm_act_delta = (self.mujoco_act_high - self.mujoco_act_low) / 2.0
         self.info.action_space.low[:] = -1.0
         self.info.action_space.high[:] = 1.0
+
+        # optionally use foot forces in the observation space
+        self._use_foot_forces = use_foot_forces
+        self._obs_mujoco_act = obs_mujoco_act
+
+        self.info.observation_space = spaces.Box(*self._get_observation_space())
 
         # setup a running average window for the mean ground forces
         self.mean_grf = self._setup_ground_force_statistics()
@@ -569,17 +570,26 @@ class LocoEnv(MultiMuJoCo):
         Returns a tuple of the lows and highs (np.array) of the observation space.
 
         """
+        lower_bounds = []
+        upper_bounds = []
 
-        sim_low, sim_high = (self.info.observation_space.low[2:],
-                             self.info.observation_space.high[2:])
+        lower_bounds.append(self.info.observation_space.low[2:])
+        upper_bounds.append(self.info.observation_space.high[2:])
+        #sim_low, sim_high = (self.info.observation_space.low[2:],
+        #                     self.info.observation_space.high[2:])
 
         if self._use_foot_forces:
-            grf_low, grf_high = (-np.ones((self._get_grf_size(),)) * np.inf,
-                                 np.ones((self._get_grf_size(),)) * np.inf)
-            return (np.concatenate([sim_low, grf_low]),
-                    np.concatenate([sim_high, grf_high]))
-        else:
-            return sim_low, sim_high
+            grf_low = -np.ones((self._get_grf_size(),)) * np.inf
+            grf_high = np.ones((self._get_grf_size(),)) * np.inf
+
+            lower_bounds.append(grf_low)
+            upper_bounds.append(grf_high)
+
+        if self._obs_mujoco_act:
+            lower_bounds.append(self.mujoco_act_low)
+            upper_bounds.append(self.mujoco_act_high)
+
+        return (np.concatenate(lower_bounds), np.concatenate(upper_bounds))
 
     def _create_observation(self, obs):
         """
@@ -592,16 +602,15 @@ class LocoEnv(MultiMuJoCo):
             New observation vector (np.array);
 
         """
+        obs_out = [obs[2:]]
 
         if self._use_foot_forces:
-            obs = np.concatenate([obs[2:],
-                                  self.mean_grf.mean / 1000.,
-                                  ]).flatten()
-        else:
-            obs = np.concatenate([obs[2:],
-                                  ]).flatten()
+            obs_out.append(self.mean_grf.mean / 1000.,)
 
-        return obs
+        if self._obs_mujoco_act:
+            obs_out.append(self._data.act)
+
+        return np.concatenate(obs_out).flatten()
 
     def _preprocess_action(self, action):
         """
@@ -789,7 +798,7 @@ class LocoEnv(MultiMuJoCo):
     def _has_fallen(self, obs, return_err_msg=False):
         """
         Checks if a model has fallen. This has to be implemented for each environment.
-        
+
         Args:
             obs (np.array): Current observation.
             return_err_msg (bool): If True, an error message with violations is returned.
@@ -798,7 +807,7 @@ class LocoEnv(MultiMuJoCo):
             True, if the model has fallen for the current observation, False otherwise.
 
         """
-        
+
         raise NotImplementedError
 
     def _get_interpolate_map_params(self):
