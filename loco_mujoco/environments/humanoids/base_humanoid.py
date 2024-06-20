@@ -17,7 +17,7 @@ class BaseHumanoid(LocoEnv):
 
     """
 
-    def __init__(self, use_muscles=False, use_box_feet=True, disable_arms=True, alpha_box_feet=0.5, **kwargs):
+    def __init__(self, use_muscles=False, use_box_feet=True, disable_arms=True, alpha_box_feet=0.5, muscle_force_scaling=1.0, **kwargs):
         """
         Constructor.
 
@@ -59,6 +59,8 @@ class BaseHumanoid(LocoEnv):
 
             if self._disable_arms:
                 xml_handle = self._reorient_arms(xml_handle)
+
+        xml_handle = BaseHumanoid.scale_muscle_force(xml_handle, muscle_force_scaling)
 
         super().__init__(xml_handle, action_spec, observation_spec, collision_groups, **kwargs)
 
@@ -125,6 +127,26 @@ class BaseHumanoid(LocoEnv):
                                      "wrist_flex_l_constraint", "wrist_dev_l_constraint"]
 
         return joints_to_remove, motors_to_remove, equ_constr_to_remove, collision_groups
+
+    @staticmethod
+    def scale_muscle_force(xml_handle, force_scaling):
+        """
+        This function scales the force of all muscles.
+
+        Args:
+            xml_handle: Handle to Mujoco XML.
+            scaling (float): Scaling factor.
+
+        Returns:
+            Modified Mujoco XML handle.
+
+        """
+        actuator_handle = xml_handle.find_all("actuator")
+        for h in actuator_handle:
+            if h._spec.name == "muscle":
+                h.force *= force_scaling
+
+        return xml_handle
 
     def _has_fallen(self, obs, return_err_msg=False):
         """
