@@ -137,11 +137,12 @@ class Trajectory:
             states = np.array(transformed_states)
 
         # convert to dict with states and next_states
-        new_states = states[:-1]
-        new_next_states = states[1:]
-        absorbing = np.zeros(len(states[:-1]))  # we assume that there are no absorbing states in the trajectory
-        last = np.zeros(len(states))
-        last[self.split_points[1:]-1] = np.ones(len(self.split_points)-1)
+        splitted_states = np.split(states, self.split_points[1:-1])
+        new_states = np.concatenate([s[:-1]for s in splitted_states])
+        new_next_states = np.concatenate([s[1:]for s in splitted_states])
+
+        absorbing = np.zeros(len(new_states))  # we assume that there are no absorbing states in the trajectory
+        last = np.concatenate([np.concatenate([np.zeros(len(s)-2), [1.0]]) for s in splitted_states])
 
         if self._traj_info is not None:
             info = np.array([[l] * self.trajectory_length for l in self._traj_info]).reshape(-1)
