@@ -3,7 +3,7 @@ from .talos import Talos
 from .unitreeH1 import UnitreeH1
 from .unitreeG1 import UnitreeG1
 from .humanoids import HumanoidTorque, HumanoidMuscle, HumanoidTorque4Ages, HumanoidMuscle4Ages
-
+from .stompy import Stompy
 
 # register environments in mushroom
 Atlas.register()
@@ -14,6 +14,7 @@ HumanoidTorque.register()
 HumanoidMuscle.register()
 HumanoidTorque4Ages.register()
 HumanoidMuscle4Ages.register()
+Stompy.register()
 
 
 from gymnasium import register
