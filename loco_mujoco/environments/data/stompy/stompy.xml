@@ -493,9 +493,6 @@ SOFTWARE.
 			</body>
 		</body>
 	</worldbody>
-	<equality>
-  	<weld body1="link_left_arm_2_hand_1_slide_1" body2="torso" relpose="1 1 -1.3 0 1 0 0"/>
-	</equality>
 	<actuator>
 	<motor name="joint_head_1_x4_1_dof_x4" joint="joint_head_1_x4_1_dof_x4" ctrllimited="true" ctrlrange="-1.5 1.5" />
 	<motor name="joint_right_arm_1_x8_1_dof_x8" joint="joint_right_arm_1_x8_1_dof_x8" ctrllimited="true" ctrlrange="-6 6" />
