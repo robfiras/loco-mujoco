@@ -326,6 +326,28 @@ class Stompy(BaseRobotHumanoid):
         motors_to_remove = []
         equ_constr_to_remove = []
 
+        if self._disable_arms:
+
+
+            ["joint_right_arm_1_x8_1_dof_x8", "joint_right_arm_1_x8_2_dof_x8", "joint_right_arm_1_x6_1_dof_x6",
+             "joint_right_arm_1_x6_2_dof_x6", "joint_right_arm_1_x4_1_dof_x4", "joint_right_arm_1_hand_1_x4_1_dof_x4",
+             "joint_left_arm_1_x8_1_dof_x8", "joint_left_arm_1_x8_2_dof_x8", "joint_left_arm_1_x6_1_dof_x6",
+             "joint_left_arm_1_x6_2_dof_x6", "joint_left_arm_1_x4_1_dof_x4", "joint_left_arm_1_hand_1_x4_1_dof_x4",
+             ]
+
+            joints_to_remove += ["joint_right_arm_1_x8_1_dof_x8", "joint_right_arm_1_x8_2_dof_x8",
+                                 "joint_right_arm_1_x6_1_dof_x6", "joint_right_arm_1_x6_2_dof_x6",
+                                 "joint_right_arm_1_x4_1_dof_x4", "joint_right_arm_1_hand_1_x4_1_dof_x4",
+                                 "joint_left_arm_2_x8_1_dof_x8", "joint_left_arm_2_x8_2_dof_x8",
+                                 "joint_left_arm_2_x6_1_dof_x6", "joint_left_arm_2_x6_2_dof_x6",
+                                 "joint_left_arm_2_x4_1_dof_x4", "joint_left_arm_2_hand_1_x4_1_dof_x4",
+                                 ]
+
+            motors_to_remove += ["joint_right_arm_1_x8_1_dof_x8",
+                                 "joint_left_arm_2_x8_1_dof_x8",
+                                 "joint_right_arm_1_x8_2_dof_x8",
+                                 "joint_left_arm_2_x8_2_dof_x8"]
+
         return joints_to_remove, motors_to_remove, equ_constr_to_remove
 
     def _has_fallen(self, obs, return_err_msg=False):
@@ -390,9 +412,9 @@ class Stompy(BaseRobotHumanoid):
         # add path to dataset
         if dataset_type == "real":
             if task == "walk":
-                path = "datasets/humanoids/real/walk_stompy.npz"
+                path = "datasets/humanoids/real/02-constspeed_Stompy.npz"
             elif task == "run":
-                path = "datasets/humanoids/real/run_stompy.npz"
+                path = "datasets/humanoids/real/05-run_Stompy.npz"
 
         return BaseRobotHumanoid.generate(Stompy, path, task, dataset_type,
                                           clip_trajectory_to_joint_ranges=True, **kwargs)
@@ -410,15 +432,15 @@ class Stompy(BaseRobotHumanoid):
 
         """
 
-        # modify the arm orientation
-        left_shoulder_pitch_link = xml_handle.find("body", "left_shoulder_pitch_link")
-        left_shoulder_pitch_link.quat = [1.0, 0.25, 0.1, 0.0]
-        right_elbow_link = xml_handle.find("body", "right_elbow_pitch_link")
-        right_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
-        right_shoulder_pitch_link = xml_handle.find("body", "right_shoulder_pitch_link")
-        right_shoulder_pitch_link.quat = [1.0, -0.25, 0.1, 0.0]
-        left_elbow_link = xml_handle.find("body", "left_elbow_pitch_link")
-        left_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
+        # # modify the arm orientation
+        # left_shoulder_pitch_link = xml_handle.find("body", "link_right_arm_1_x8_1_inner_1")
+        # left_shoulder_pitch_link.quat = [1.0, 0.25, 0.0, 0.0]
+        # right_elbow_link = xml_handle.find("body", "right_elbow_pitch_link")
+        # right_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
+        # right_shoulder_pitch_link = xml_handle.find("body", "right_shoulder_pitch_link")
+        # right_shoulder_pitch_link.quat = [1.0, -0.25, 0.1, 0.0]
+        # left_elbow_link = xml_handle.find("body", "left_elbow_pitch_link")
+        # left_elbow_link.quat = [1.0, 0.0, 0.25, 0.0]
 
         return xml_handle
 

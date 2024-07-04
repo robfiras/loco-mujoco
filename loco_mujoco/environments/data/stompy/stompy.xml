@@ -293,19 +293,19 @@ SOFTWARE.
 									<geom pos="0.0473754 -0.0147545 0.0019099" quat="0.32102 0.32102 -0.630037 -0.630037" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="right_arm_1_hand_1_x4_2_pcb_1" />
 									<geom pos="0.0489455 -0.035561 -0.014" quat="-0.32102 0.32102 -0.630037 0.630037" type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="right_arm_1_hand_1_x4_2_outer_1" />
 									<body name="link_right_arm_1_hand_1_slide_1" pos="0.139251 -0.00228616 -0.014" quat="-0.218508 -0.218508 -0.672498 -0.672499">
-										<joint name="joint_right_arm_1_hand_1_slider_1" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="-0.01938" />
+<!--										<joint name="joint_right_arm_1_hand_1_slider_1" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="-0.01938" />-->
 										<geom type="mesh" class="visual" rgba="0.917647 0.917647 0.917647 1" mesh="right_arm_1_hand_1_slide_1" />
 										<geom pos="-0.00499 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="right_arm_1_hand_1_rack_2" />
 										<geom pos="-0.04949 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="right_arm_1_hand_1_gripper_1" />
 									</body>
 									<body name="link_right_arm_1_hand_1_slide_2" pos="0.0452051 -0.131729 -0.014" quat="0.218508 -0.218508 -0.672499 0.672498">
-										<joint name="joint_right_arm_1_hand_1_slider_2" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="0.0" />
+<!--										<joint name="joint_right_arm_1_hand_1_slider_2" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="0.0" />-->
 										<geom type="mesh" class="visual" rgba="0.917647 0.917647 0.917647 1" mesh="right_arm_1_hand_1_slide_2" />
 										<geom pos="-0.00499 -0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="right_arm_1_hand_1_rack_1" />
 										<geom pos="-0.04949 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="right_arm_1_hand_1_gripper_2" />
 									</body>
 									<body name="link_right_arm_1_hand_1_x4_2_inner_1" pos="0.0489455 -0.035561 -0.014" quat="-0.32102 -0.32102 0.630037 0.630037">
-										<joint name="joint_right_arm_1_hand_1_x4_2_dof_x4" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" ref="0.0" />
+<!--										<joint name="joint_right_arm_1_hand_1_x4_2_dof_x4" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" ref="0.0" />-->
 										<geom type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="right_arm_1_hand_1_x4_2_inner_1" />
 										<geom pos="0.0105058 0.00467747 -0.0345" quat="0.544639 0 0 0.838671" type="mesh" class="visual" rgba="0.615686 0.811765 0.929412 1" mesh="right_arm_1_hand_1_spur_gear_(26_teeth)_1" />
 									</body>
@@ -356,20 +356,19 @@ SOFTWARE.
 									<geom pos="0.0473754 -0.0147545 0.0019099" quat="0.32102 0.32102 -0.630037 -0.630037" type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="left_arm_2_hand_1_x4_2_pcb_1" />
 									<geom pos="0.0489455 -0.035561 -0.014" quat="-0.32102 0.32102 -0.630037 0.630037" type="mesh" class="visual" rgba="0.768627 0.886275 0.952941 1" mesh="left_arm_2_hand_1_x4_2_outer_1" />
 									<body name="link_left_arm_2_hand_1_slide_1" pos="0.139251 -0.00228616 -0.014" quat="-0.218508 -0.218508 -0.672498 -0.672499">s
-
-										<joint name="joint_left_arm_2_hand_1_slider_1" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="0.0" />
+<!--										<joint name="joint_left_arm_2_hand_1_slider_1" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="0.0" />-->
 										<geom type="mesh" class="visual" rgba="0.917647 0.917647 0.917647 1" mesh="left_arm_2_hand_1_slide_1" />
 										<geom pos="-0.00499 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="left_arm_2_hand_1_rack_2" />
 										<geom pos="-0.04949 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="left_arm_2_hand_1_gripper_1" />
 									</body>
 									<body name="link_left_arm_2_hand_1_slide_2" pos="0.0452051 -0.131729 -0.014" quat="0.218508 -0.218508 -0.672499 0.672498">
-										<joint name="joint_left_arm_2_hand_1_slider_2" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="0.0" />
+<!--										<joint name="joint_left_arm_2_hand_1_slider_2" pos="0 0 0" axis="0 0 1" type="slide" range="-0.034 0" ref="0.0" />-->
 										<geom type="mesh" class="visual" rgba="0.917647 0.917647 0.917647 1" mesh="left_arm_2_hand_1_slide_2" />
 										<geom pos="-0.00499 -0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="left_arm_2_hand_1_rack_1" />
 										<geom pos="-0.04949 0.01 -0.033" quat="-1.64085e-08 -0.707107 1.64085e-08 -0.707107" type="mesh" class="visual" rgba="0.647059 0.647059 0.647059 1" mesh="left_arm_2_hand_1_gripper_2" />
 									</body>
 									<body name="link_left_arm_2_hand_1_x4_2_inner_1" pos="0.0489455 -0.035561 -0.014" quat="-0.32102 -0.32102 0.630037 0.630037">
-										<joint name="joint_left_arm_2_hand_1_x4_2_dof_x4" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" ref="0.0" />
+<!--										<joint name="joint_left_arm_2_hand_1_x4_2_dof_x4" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" ref="0.0" />-->
 										<geom type="mesh" class="visual" rgba="0.972549 0.529412 0.00392157 1" mesh="left_arm_2_hand_1_x4_2_inner_1" />
 										<geom pos="0.0105058 0.00467747 -0.0345" quat="0.544639 0 0 0.838671" type="mesh" class="visual" rgba="0.615686 0.811765 0.929412 1" mesh="left_arm_2_hand_1_spur_gear_(26_teeth)_1" />
 									</body>
@@ -494,6 +493,9 @@ SOFTWARE.
 			</body>
 		</body>
 	</worldbody>
+	<equality>
+  	<weld body1="link_left_arm_2_hand_1_slide_1" body2="torso" relpose="1 1 -1.3 0 1 0 0"/>
+	</equality>
 	<actuator>
 	<motor name="joint_head_1_x4_1_dof_x4" joint="joint_head_1_x4_1_dof_x4" ctrllimited="true" ctrlrange="-1.5 1.5" />
 	<motor name="joint_right_arm_1_x8_1_dof_x8" joint="joint_right_arm_1_x8_1_dof_x8" ctrllimited="true" ctrlrange="-6 6" />
