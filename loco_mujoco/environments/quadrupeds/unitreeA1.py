@@ -270,7 +270,7 @@ class UnitreeA1(LocoEnv):
                     if self.setup_random_rot:
                         angle = np.random.uniform(0, 2 * np.pi)
                         sample = rotate_obs(sample, angle,  *self._get_relevant_idx_rotation())
-                elif self._init_step_no:
+                elif self._init_step_no is not None:
                     traj_len = self.trajectories.trajectory_length
                     n_traj = self.trajectories.nnumber_of_trajectories
                     assert self._init_step_no <= traj_len * n_traj
