@@ -163,4 +163,5 @@ class GymnasiumWrapper(Env):
         return Box(low, high, shape, np.float64)
     
     def _set_action_space(self):
-        return self._convert_space(self._env.info.action_space)
+        self.action_space = self._convert_space(self._env.info.action_space)
+        return self.action_space
