@@ -227,7 +227,7 @@ class LocoEnv(MultiMuJoCo):
             if self.trajectories is not None:
                 if self._random_start:
                     sample = self.trajectories.reset_trajectory()
-                elif self._init_step_no:
+                elif self._init_step_no is not None:
                     traj_len = self.trajectories.trajectory_length
                     n_traj = self.trajectories.number_of_trajectories
                     assert self._init_step_no <= traj_len * n_traj
