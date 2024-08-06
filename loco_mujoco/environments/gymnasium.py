@@ -45,8 +45,7 @@ class GymnasiumWrapper(Env):
         self._env = LocoEnv.make(env_name, **kwargs)
 
         self.observation_space = self._convert_space(self._env.info.observation_space)
-        self._set_action_space()
-
+        self.action_space = self._convert_space(self._env.info.action_space)
 
     def step(self, action):
         """
@@ -161,6 +160,3 @@ class GymnasiumWrapper(Env):
         high = np.max(space.high)
         shape = space.shape
         return Box(low, high, shape, np.float64)
-    
-    def _set_action_space(self):
-        return self._convert_space(self._env.info.action_space)
