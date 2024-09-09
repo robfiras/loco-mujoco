@@ -12,7 +12,7 @@ def experiment(seed=0):
 
     for env in envs:
 
-        if "real" in env:
+        if "real" in env and "MyoSuite" in env:
             replay_params = dict(n_episodes=15, n_steps_per_episode=250, record=True) if "Unitree.hard" in env or \
                                                                                          ".all" in env or ".carry" in env \
                 else dict(n_episodes=3, n_steps_per_episode=500, record=True)
@@ -27,6 +27,9 @@ def experiment(seed=0):
 
             if "Humanoid" in env:
                 env_params["use_box_feet"] = False
+
+            if "MyoSuite" in env:
+                env_params = dict()
 
             mdp = LocoEnv.make(env, headless=True, **env_params)
 
