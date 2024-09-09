@@ -4,6 +4,10 @@ from loco_mujoco import LocoEnv
 
 
 def experiment():
+    """
+    In this example, the *expert actions* rather than the kinematics are used to replay the Unitree A1 environment.
+    This can be done analogously for the other environments.
+    """
 
     env = gym.make(
         "LocoMujoco",
@@ -27,6 +31,3 @@ def experiment():
         env.render()
         i += 1
 
-
-if __name__ == "__main__":
-    experiment()
