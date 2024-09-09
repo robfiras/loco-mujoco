@@ -41,9 +41,8 @@ class GymnasiumWrapper(Env):
 
         self.metadata["render_fps"] = 1.0 / self._env.dt
 
-        self.observation_space = self._convert_space(self._env.info.observation_space)
+        self._set_observation_space()
         self._set_action_space()
-
 
     def step(self, action):
         """
@@ -150,6 +149,13 @@ class GymnasiumWrapper(Env):
         Returns the inner environment.
         """
         return self._env
+
+    def _set_observation_space(self):
+        """
+        Setter for the observation space.
+        """
+        self.observation_space = self._convert_space(self._env.info.observation_space)
+        return self.observation_space
 
     def _set_action_space(self):
         """ 
