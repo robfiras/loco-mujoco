@@ -100,8 +100,8 @@ def test_replays():
 
     for task_name in task_names:
 
-        # todo: include perfect datasets into test
-        if "perfect" not in task_name:
+        # todo: include perfect datasets and MyoSuiteHumanoid into tests (the latter requires updating Mujoco >= 3.0)
+        if "perfect" not in task_name or "MyoSuiteHumanoid" not in task_name:
             np.random.seed(0)
 
             print(f"Testing Replay {task_name}...")

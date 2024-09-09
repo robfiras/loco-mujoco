@@ -1294,8 +1294,7 @@ class MyoSuiteHumanoid(LocoEnv):
         """
 
         # Create tmp dir if it doesn't exist yet
-        if xml_path_tmp and not os.path.exists(xml_path_tmp):
-            os.makedirs(os.path.dirname(xml_path_tmp))
+        os.makedirs(os.path.dirname(xml_path_tmp), exist_ok=True)
 
         # we load and save the model to have a single file xml
         model = mujoco.MjModel.from_xml_path(xml_path)
