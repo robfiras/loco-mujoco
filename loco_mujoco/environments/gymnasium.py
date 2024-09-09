@@ -15,15 +15,10 @@ class GymnasiumWrapper(Env):
 
     """
 
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-        ]
-    }
-
     def __init__(self, env_name, render_mode=None, **kwargs):
         self.spec = EnvSpec(env_name)
+
+        self.metadata = {"render_modes": ["human", "rgb_array"]}
 
         key_render_mode = "render_modes"
         assert "headless" not in kwargs.keys(), f"headless parameter is not allowed in Gymnasium environment. " \
@@ -43,6 +38,8 @@ class GymnasiumWrapper(Env):
             kwargs["headless"] = True
 
         self._env = LocoEnv.make(env_name, **kwargs)
+
+        self.metadata["render_fps"] = 1.0 / self._env.dt
 
         self.observation_space = self._convert_space(self._env.info.observation_space)
         self.action_space = self._convert_space(self._env.info.action_space)
