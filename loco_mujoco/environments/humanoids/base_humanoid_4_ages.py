@@ -136,9 +136,9 @@ class BaseHumanoid4Ages(BaseHumanoid):
                         sample = self.trajectories.reset_trajectory(traj_no=traj_no)
                     else:
                         sample = self.trajectories.reset_trajectory()
-                elif self._init_step_no:
+                elif self._init_step_no is not None:
                     traj_len = self.trajectories.trajectory_length
-                    n_traj = self.trajectories.nnumber_of_trajectories
+                    n_traj = self.trajectories.number_of_trajectories
                     assert self._init_step_no <= traj_len * n_traj
                     substep_no = int(self._init_step_no % traj_len)
                     traj_no = int(self._init_step_no / traj_len)
