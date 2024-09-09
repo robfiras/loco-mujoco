@@ -136,10 +136,6 @@ def adapt_mocap(path, joint_conf, unavailable_keys, rename_map=None, discard_fir
     # extract the euler keys
     euler_keys = list(joint_conf.keys())
 
-    # extract the multipliers and offsets for linear transformation
-    multipliers = [joint_conf[k][0] for k in euler_keys]
-    offsets = [joint_conf[k][1] for k in euler_keys]
-
     # load the mocap dataset
     data = sio.loadmat(path)
     joint_pos = data["angJoi"]
@@ -157,16 +153,30 @@ def adapt_mocap(path, joint_conf, unavailable_keys, rename_map=None, discard_fir
         for ukey in unavailable_keys:
             joint_pos[ukey] = np.zeros(n_datapoint)
             joint_vel[ukey] = np.zeros(n_datapoint)
+            if ukey not in rename_map.values():
+                euler_keys.append(ukey)
     elif type(unavailable_keys) == dict:
         for ukey, val in unavailable_keys.items():
             joint_pos[ukey] = np.ones(n_datapoint) * val
             joint_vel[ukey] = np.zeros(n_datapoint)
+            if ukey not in rename_map.values():
+                euler_keys.append(ukey)
     else:
         raise TypeError
 
     # get the relevant data
     joint_pos = np.array([joint_pos[k] for k in euler_keys])
     joint_vel = np.array([joint_vel[k] for k in euler_keys])
+
+    # extract the multipliers and offsets for linear transformation
+    multipliers, offsets = [], []
+    for k in euler_keys:
+        if k in joint_conf.keys():
+            multipliers.append(joint_conf[k][0])
+            offsets.append(joint_conf[k][1])
+        else:
+            multipliers.append(1.0)
+            offsets.append(0.0)
 
     # apply multipliers and offsets
     multipliers = np.transpose(np.tile(np.array(multipliers), (np.shape(joint_pos)[1], 1)))
