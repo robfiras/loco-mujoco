@@ -1,9 +1,9 @@
 import numpy as np
-from loco_mujoco.environments import HumanoidTorque
+from loco_mujoco.environments import MyoSuiteHumanoid
 
 
 def experiment():
-    np.random.seed(1)
+    #np.random.seed(1)
 
     # define env and data frequencies
     env_freq = 1000  # hz, added here as a reminder
@@ -12,18 +12,17 @@ def experiment():
     n_substeps = env_freq//desired_contr_freq
 
     # prepare trajectory params
-    traj_params = dict(traj_path="../generated_data/02-constspeed_humanoid.npz",
+    traj_params = dict(traj_path="../generated_data/myosuite_humanoid_walking.npz",
                        traj_dt=(1/traj_data_freq),
                        control_dt=(1/desired_contr_freq),
-                       clip_trajectory_to_joint_ranges=False)
+                       clip_trajectory_to_joint_ranges=True)
 
     # MDP
     gamma = 0.99
     horizon = 1000
-    mdp = HumanoidTorque(gamma=gamma, horizon=horizon, n_substeps=n_substeps, traj_params=traj_params,
-                         use_box_feet=False, disable_arms=False)
+    mdp = MyoSuiteHumanoid(gamma=gamma, horizon=horizon, n_substeps=n_substeps, traj_params=traj_params)
 
-    mdp.play_trajectory()
+    mdp.play_trajectory(record=False)
 
 
 if __name__ == '__main__':

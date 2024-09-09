@@ -6,6 +6,8 @@
 [![Documentation Status](https://readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI](https://img.shields.io/pypi/v/loco-mujoco)](https://pypi.org/project/loco-mujoco/)
+[![Join our Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white)](https://discord.gg/gEqR3xCVdn)
+
 
 **LocoMuJoCo** is an **imitation learning benchmark** specifically targeted towards **locomotion**. It encompasses a diverse set of environments, including quadrupeds, bipeds, and musculoskeletal human models, each accompanied by comprehensive datasets, such as real noisy motion capture data, ground truth expert data, and ground truth sub-optimal data,
 enabling evaluation across a spectrum of difficulty levels. 
@@ -20,7 +22,7 @@ enabling evaluation across a spectrum of difficulty levels.
 ✅ Easy to use with [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) or [Mushroom-RL](https://github.com/MushroomRL/mushroom-rl) interface \
 ✅ Many environments including humanoids and quadrupeds \
 ✅ Diverse set of datasets --> e.g., noisy motion capture or ground truth datasets with actions \
-✅ Wide spectrum spectrum of difficulty levels \
+✅ Wide spectrum of difficulty levels \
 ✅ Built-in domain randomization \
 ✅ Many baseline algorithms for quick benchmarking \
 ✅ [Documentation](https://loco-mujoco.readthedocs.io/)
@@ -38,6 +40,7 @@ pip install loco-mujoco
 or you do an editable installation by cloning this repository and then running:
 
 ```bash
+git clone --recurse-submodules git@github.com:robfiras/loco-mujoco.git 
 cd loco-mujoco
 pip install -e . 
 ```
@@ -46,6 +49,11 @@ pip install -e .
 > We fixed the version of MuJoCo to 2.3.7 during installation since we found that there are slight 
 > differences in the simulation, which made testing very difficult. However, in practice, you can 
 > use any newer version of MuJoCo! Just install it after installing LocoMuJoCo.
+
+> [!NOTE]
+> If you want to run the **MyoSuiteHumanoid** environment, you need to upgrade Mujoco to 3.2.2 and dm_control to 1.0.22
+> *after* installing this package and downloading the datasets! 
+
 
 ### Download the Datasets
 After installing LocoMuJoCo, new commands for downloading the datasets will be setup for you.

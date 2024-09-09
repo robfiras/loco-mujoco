@@ -10,3 +10,4 @@ loco_mujoco/datasets/
 mushroom_rl_recordings/
 record_all/
 _build/
+loco_mujoco/environments/data/myo_model_tmp/

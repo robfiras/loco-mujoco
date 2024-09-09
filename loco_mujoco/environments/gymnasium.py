@@ -15,15 +15,10 @@ class GymnasiumWrapper(Env):
 
     """
 
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-        ]
-    }
-
     def __init__(self, env_name, render_mode=None, **kwargs):
         self.spec = EnvSpec(env_name)
+
+        self.metadata = {"render_modes": ["human", "rgb_array"]}
 
         key_render_mode = "render_modes"
         assert "headless" not in kwargs.keys(), f"headless parameter is not allowed in Gymnasium environment. " \
@@ -43,6 +38,8 @@ class GymnasiumWrapper(Env):
             kwargs["headless"] = True
 
         self._env = LocoEnv.make(env_name, **kwargs)
+
+        self.metadata["render_fps"] = 1.0 / self._env.dt
 
         self.observation_space = self._convert_space(self._env.info.observation_space)
         self._set_action_space()
@@ -154,6 +151,13 @@ class GymnasiumWrapper(Env):
         """
         return self._env
 
+    def _set_action_space(self):
+        """ 
+        Setter for the action space.
+        """
+        self.action_space = self._convert_space(self._env.info.action_space)
+        return self.action_space
+      
     @staticmethod
     def _convert_space(space):
         """ Converts the observation and action space from mushroom-rl to gymnasium. """
@@ -161,7 +165,3 @@ class GymnasiumWrapper(Env):
         high = np.max(space.high)
         shape = space.shape
         return Box(low, high, shape, np.float64)
-    
-    def _set_action_space(self):
-        self.action_space = self._convert_space(self._env.info.action_space)
-        return self.action_space

@@ -14,6 +14,7 @@ or you do an editable installation by cloning this repository and then running:
 
 .. code-block:: bash
 
+    git clone --recurse-submodules git@github.com:robfiras/loco-mujoco.git
     cd loco-mujoco
     pip install -e .
 
@@ -21,6 +22,10 @@ or you do an editable installation by cloning this repository and then running:
         We fixed the version of MuJoCo to 2.3.7 during installation since we found that there are slight
         differences in the simulation, which made testing very difficult. However, in practice, you can
         use any newer version of MuJoCo! Just install it after installing LocoMuJoCo.
+
+.. note::
+        If you want to run the **MyoSuiteHumanoid** environment, you need to upgrade Mujoco to 3.2.2 and dm_control to 1.0.22
+        *after* installing this package and downloading the datasets!
 
 Download the Datasets
 ---------------------
