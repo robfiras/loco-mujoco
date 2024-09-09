@@ -2,6 +2,9 @@
 Here you can find an overviw of all tasks. Each Task is represented by its own ID. For each task, you can choose between different datasets. The real dataset contains real (noisy) motion capture datasets without actions. The perfect dataset contains ground truth states and actions form an expert policy (only available on an few tasks). The preference dataset contains preferences of an ground truth expert with states and action (only available on an few tasks). 
 The status of a dataset can be seen down below. ✅ means it is already available, and 🔶 means pending. 
 
+> **Note:**  You can find a detailed description of each environment in the 
+> [documentation](https://loco-mujoco.readthedocs.io/).
+
  | Image | Task-IDs | Status of Datasets | Description|
  |---|---|---|---|
  | ![out5](https://github.com/robfiras/loco-mujoco/assets/69359729/cdcd4617-c18a-448d-b42a-ea01384016b0) | HumanoidMuscle.walk </br> HumanoidMuscle.run </br> HumanoidMuscle4Ages.walk.4 </br> HumanoidMuscle.run </br> HumanoidMuscle4Ages.run.4 | real: ✅  <br /> perfect: ✅   <br /> preference: 🔶| Task of an adult **Muscle** Humanoid Walking or Running Straight. |

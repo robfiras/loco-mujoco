@@ -20,7 +20,7 @@ enabling evaluation across a spectrum of difficulty levels.
 ✅ Easy to use with [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) or [Mushroom-RL](https://github.com/MushroomRL/mushroom-rl) interface \
 ✅ Many environments including humanoids and quadrupeds \
 ✅ Diverse set of datasets --> e.g., noisy motion capture or ground truth datasets with actions \
-✅ Wide spectrum spectrum of difficulty levels \
+✅ Wide spectrum of difficulty levels \
 ✅ Built-in domain randomization \
 ✅ Many baseline algorithms for quick benchmarking \
 ✅ [Documentation](https://loco-mujoco.readthedocs.io/)
@@ -38,6 +38,7 @@ pip install loco-mujoco
 or you do an editable installation by cloning this repository and then running:
 
 ```bash
+git clone --recurse-submodules git@github.com:robfiras/loco-mujoco.git 
 cd loco-mujoco
 pip install -e . 
 ```

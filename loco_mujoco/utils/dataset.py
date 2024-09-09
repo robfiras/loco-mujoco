@@ -31,7 +31,7 @@ def download_real_datasets():
     dataset_path_humanoid = dataset_path / "humanoids/real"
     dataset_path_humanoid_str = str(dataset_path_humanoid)
     os.makedirs(dataset_path_humanoid_str, exist_ok=True)
-    humanoid_url = "https://zenodo.org/records/11217638/files/humanoid_datasets_v0.3.0.zip?download=1"
+    humanoid_url = "https://zenodo.org/records/13737593/files/humanoid_datasets_v0.4.1.zip?download=1"
     wget.download(humanoid_url, out=dataset_path_humanoid_str)
     print("\n")
     file_name = "humanoid_datasets_v0.3.0.zip"
@@ -44,7 +44,7 @@ def download_real_datasets():
     dataset_path_quadrupeds = dataset_path / "quadrupeds/real"
     dataset_path_quadrupeds_str = str(dataset_path_quadrupeds)
     os.makedirs(dataset_path_quadrupeds_str, exist_ok=True)
-    quadruped_url = "https://zenodo.org/records/11217638/files/quadruped_datasets_v0.3.0.zip?download=1"
+    quadruped_url = "https://zenodo.org/records/13737593/files/quadruped_datasets_v0.4.1.zip?download=1"
     wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
     print("\n")
     file_name = "quadruped_datasets_v0.3.0.zip"
@@ -65,7 +65,7 @@ def download_perfect_datasets():
     dataset_path_humanoid = dataset_path / "humanoids/perfect"
     dataset_path_humanoid_str = str(dataset_path_humanoid)
     os.makedirs(dataset_path_humanoid_str, exist_ok=True)
-    humanoid_url = "https://zenodo.org/records/11217638/files/humanoid_datasets_perfect_v0.3.0.zip?download=1"
+    humanoid_url = "https://zenodo.org/records/13737593/files/humanoid_datasets_perfect_v0.4.1.zip?download=1"
     wget.download(humanoid_url, out=dataset_path_humanoid_str)
     print("\n")
     file_name = "humanoid_datasets_perfect_v0.3.0.zip"
@@ -79,7 +79,7 @@ def download_perfect_datasets():
     dataset_path_quadrupeds = dataset_path / "quadrupeds/perfect"
     dataset_path_quadrupeds_str = str(dataset_path_quadrupeds)
     os.makedirs(dataset_path_quadrupeds_str, exist_ok=True)
-    quadruped_url = "https://zenodo.org/records/11217638/files/quadruped_datasets_perfect_v0.3.0.zip?download=1"
+    quadruped_url = "https://zenodo.org/records/13737593/files/quadruped_datasets_perfect_v0.4.1.zip?download=1"
     wget.download(quadruped_url, out=dataset_path_quadrupeds_str)
     print("\n")
     file_name = "quadruped_datasets_perfect_v0.3.0.zip"
