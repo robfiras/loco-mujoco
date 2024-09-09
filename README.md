@@ -48,6 +48,11 @@ pip install -e .
 > differences in the simulation, which made testing very difficult. However, in practice, you can 
 > use any newer version of MuJoCo! Just install it after installing LocoMuJoCo.
 
+> [!NOTE]
+> If you want to run the **MyoSuiteHumanoid** environment, you need to upgrade Mujoco to 3.2.2 and dm_control to 1.0.22
+> *after* installing this packing and downloading the datasets! 
+
+
 ### Download the Datasets
 After installing LocoMuJoCo, new commands for downloading the datasets will be setup for you.
 You have the choice of downloading all datasets available or only the ones you need.
