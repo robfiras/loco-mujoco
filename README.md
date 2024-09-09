@@ -6,6 +6,8 @@
 [![Documentation Status](https://readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI](https://img.shields.io/pypi/v/loco-mujoco)](https://pypi.org/project/loco-mujoco/)
+[![Join our Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white)](https://discord.gg/gEqR3xCVdn)
+
 
 **LocoMuJoCo** is an **imitation learning benchmark** specifically targeted towards **locomotion**. It encompasses a diverse set of environments, including quadrupeds, bipeds, and musculoskeletal human models, each accompanied by comprehensive datasets, such as real noisy motion capture data, ground truth expert data, and ground truth sub-optimal data,
 enabling evaluation across a spectrum of difficulty levels. 
@@ -50,7 +52,7 @@ pip install -e .
 
 > [!NOTE]
 > If you want to run the **MyoSuiteHumanoid** environment, you need to upgrade Mujoco to 3.2.2 and dm_control to 1.0.22
-> *after* installing this packing and downloading the datasets! 
+> *after* installing this package and downloading the datasets! 
 
 
 ### Download the Datasets

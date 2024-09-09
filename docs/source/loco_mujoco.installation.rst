@@ -25,7 +25,7 @@ or you do an editable installation by cloning this repository and then running:
 
 .. note::
         If you want to run the **MyoSuiteHumanoid** environment, you need to upgrade Mujoco to 3.2.2 and dm_control to 1.0.22
-        *after* installing this packing and downloading the datasets!
+        *after* installing this package and downloading the datasets!
 
 Download the Datasets
 ---------------------
