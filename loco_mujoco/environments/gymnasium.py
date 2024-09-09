@@ -42,7 +42,8 @@ class GymnasiumWrapper(Env):
         self.metadata["render_fps"] = 1.0 / self._env.dt
 
         self.observation_space = self._convert_space(self._env.info.observation_space)
-        self.action_space = self._convert_space(self._env.info.action_space)
+        self._set_action_space()
+
 
     def step(self, action):
         """
@@ -150,6 +151,13 @@ class GymnasiumWrapper(Env):
         """
         return self._env
 
+    def _set_action_space(self):
+        """ 
+        Setter for the action space.
+        """
+        self.action_space = self._convert_space(self._env.info.action_space)
+        return self.action_space
+      
     @staticmethod
     def _convert_space(space):
         """ Converts the observation and action space from mushroom-rl to gymnasium. """
