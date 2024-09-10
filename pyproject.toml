@@ -11,7 +11,8 @@ dependencies = [
     "gymnasium",
     "dm_control==1.0.14",
     "pyyaml",
-    "wget"]
+    "wget",
+    "gitpython"]
 
 requires-python = ">=3.8"
 authors = [{name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
