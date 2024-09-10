@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from loco_mujoco.environments.humanoids import MyoSuiteHumanoid
+from loco_mujoco.environments.humanoids import MyoSkeleton
 from loco_mujoco.utils.dataset import adapt_mocap
 
 from scipy.spatial.transform import Rotation as R
@@ -15,7 +15,7 @@ def reorder_shoulder_orientation(keys, old, new):
 
 
 # get the xml_handle from the environment
-xml_handle = MyoSuiteHumanoid().xml_handle
+xml_handle = MyoSkeleton().xml_handle
 
 all_joints = []
 for prefix in ["q_", "dq_"]:
@@ -25,7 +25,7 @@ for prefix in ["q_", "dq_"]:
 # define the joints for which we have data
 joint_conf = dict(pelvis_tx=(1.0, 0.0),
                   pelvis_tz=(1.0, 0.0),
-                  pelvis_ty=(1.0, -1.01),
+                  pelvis_ty=(1.0, -1.0),
                   pelvis_tilt=(1.0, -0.22),
                   pelvis_list=(1.0, 0.0),
                   pelvis_rotation=(1.0, 0.0),
@@ -33,7 +33,7 @@ joint_conf = dict(pelvis_tx=(1.0, 0.0),
                   hip_adduction_r=(1.0, 0.0),
                   hip_rotation_r=(1.0, 0.0),
                   knee_angle_r=(-1.0, 0.0),
-                  ankle_angle_r=(1.0, 0.15),
+                  ankle_angle_r=(1.0, 0.1),
                   hip_flexion_l=(1.0, 0.2),
                   hip_adduction_l=(1.0, 0.0),
                   hip_rotation_l=(1.0, 0.0),
@@ -73,14 +73,14 @@ rename_map = dict(lumbar_extension="L5_S1_Flex_Ext",
                   pro_sup_r='pro_sup'
                   )
 
-path_mat = "../00_raw_mocap_data/raw_walking_motion_capture.mat"
+path_mat = "../00_raw_mocap_data/raw_running_mocap_data.mat"
 dir_target_path = "../generated_data"
 if not os.path.exists(dir_target_path):
     os.makedirs(dir_target_path)
-target_path = os.path.join(dir_target_path, "myosuite_humanoid_walking.npz")
+target_path = os.path.join(dir_target_path, "myosuite_humanoid_running.npz")
 
 dataset = adapt_mocap(path_mat, joint_conf=joint_conf, unavailable_keys=unavailable_keys, rename_map=rename_map,
-                      discard_first=5000, discard_last=1000)
+                      discard_first=28500, discard_last=1000)
 
 old_order = 'zxy'
 new_order = 'yxy'
@@ -102,5 +102,3 @@ for k, i in dataset.items():
     dataset[k] = i[:-1]
 
 np.savez(file=target_path, **dataset)
-
-

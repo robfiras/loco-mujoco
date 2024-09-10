@@ -2,7 +2,7 @@ import numpy as np
 from loco_mujoco import LocoEnv
 
 
-env = LocoEnv.make("MyoSuiteHumanoid.walk")
+env = LocoEnv.make("MyoSkeleton.walk")
 
 action_dim = env.info.action_space.shape[0]
 

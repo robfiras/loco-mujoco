@@ -1,3 +1,0 @@
-[submodule "loco_mujoco/environments/data/myo_model"]
-	path = loco_mujoco/environments/data/myo_model
-	url = https://github.com/myolab/myo_model.git

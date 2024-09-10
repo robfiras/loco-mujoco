@@ -1,6 +1,6 @@
 import inspect
 import loco_mujoco
-from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle, UnitreeA1, UnitreeG1, MyoSuiteHumanoid
+from loco_mujoco.environments import HumanoidTorque, HumanoidMuscle, UnitreeA1, UnitreeG1, MyoSkeleton
 from mushroom_rl.utils.mujoco import *
 
 
@@ -136,7 +136,7 @@ def get_action_space_table_docs(env, use_muscles=False):
         else:
             motors_to_remove = []
     except :
-        if type(env) == UnitreeG1 or type(env) == MyoSuiteHumanoid:
+        if type(env) == UnitreeG1 or type(env) == MyoSkeleton:
             action_spec = env._get_action_specification()
         else:
             action_spec = env._get_action_specification(use_muscles)
@@ -176,8 +176,8 @@ if __name__ == "__main__":
     # print(get_action_space_table_docs(env)[0],
     #       "\nNumber of actions that are on by default: ", get_action_space_table_docs(env)[1])
 
-    # MyoSuite Humanoid
-    env = loco_mujoco.LocoEnv.make("MyoSuiteHumanoid")
+    # MyoSkeleton
+    env = loco_mujoco.LocoEnv.make("MyoSkeleton")
     additional_info = [["5x3D linear Forces between Right Foot and Floor", "0.0", "inf", "True", "15", "Force [N]"],
                        ["5X3D linear Forces between Left Foot and Floor", "0.0", "inf", "True", "15", "Force [N]"]]
     print(get_obs_space_table_docs(env, additional_info)[0],

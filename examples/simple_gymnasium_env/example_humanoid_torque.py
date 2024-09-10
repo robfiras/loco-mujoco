@@ -4,7 +4,6 @@ import gymnasium as gym
 
 
 env = gym.make("LocoMujoco", env_name="HumanoidTorque.run", render_mode="human")
-
 action_dim = env.action_space.shape[0]
 
 env.reset()

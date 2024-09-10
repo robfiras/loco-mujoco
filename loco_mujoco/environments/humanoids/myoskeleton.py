@@ -13,12 +13,12 @@ from loco_mujoco.environments import LocoEnv
 from loco_mujoco.utils import check_validity_task_mode_dataset
 
 
-class MyoSuiteHumanoid(LocoEnv):
+class MyoSkeleton(LocoEnv):
     """
     Description
     ------------
 
-    MuJoCo simulation of the MyoSuite Humanoid with one position controller per joint. This is a biomechanical
+    MuJoCo simulation of the MyoSkeleton with one position controller per joint. This is a biomechanical
     humanoid model with many degrees of freedom (151 joints) to accurately simulate human movement. The model
     extends the simple humanoid by a spine, hands with fingers, realistic knees, and feet with toes.
 
@@ -1030,6 +1030,13 @@ class MyoSuiteHumanoid(LocoEnv):
 
         xml_path = (Path(__file__).resolve().parent.parent / "data" / "myo_model" /
                     "myoskeleton" / "myoskeleton.xml").as_posix()
+
+        # check if file exists, if not exit
+        if not os.path.exists(xml_path):
+            print("MyoSkeleton model not initialized. Please run \"loco-mujoco-myomodel-init\" to accept the license "
+                  "and download the model. Exiting...")
+            exit()
+
         # create temporary xml file path
         xml_path_tmp = (Path(__file__).resolve().parent.parent / "data" / "myo_model_tmp" /
                         "myoskeleton" / "myoskeleton.xml").as_posix()
@@ -1196,7 +1203,7 @@ class MyoSuiteHumanoid(LocoEnv):
     @staticmethod
     def generate(task="walk", dataset_type="real", debug=False, **kwargs):
         """
-        Returns a Full-body MyoSuite Humanoid environment and a dataset corresponding to the specified task.
+        Returns a Full-body MyoSkeleton environment and a dataset corresponding to the specified task.
 
         Args:
             task (str): Main task to solve. Either "walk" or "run".
@@ -1208,12 +1215,12 @@ class MyoSuiteHumanoid(LocoEnv):
 
 
         Returns:
-            An MDP of a Full-body MyoSuite Humanoid.
+            An MDP of a Full-body MyoSkeleton Humanoid.
 
         """
 
-        check_validity_task_mode_dataset(MyoSuiteHumanoid.__name__, task, None, dataset_type,
-                                         *MyoSuiteHumanoid.valid_task_confs.get_all())
+        check_validity_task_mode_dataset(MyoSkeleton.__name__, task, None, dataset_type,
+                                         *MyoSkeleton.valid_task_confs.get_all())
 
         if "reward_type" in kwargs.keys():
             reward_type = kwargs["reward_type"]
@@ -1226,10 +1233,7 @@ class MyoSuiteHumanoid(LocoEnv):
             use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
-                    # todo: add mini datasets once the MyoSuite humanoid is finalized.
-                    raise NotImplementedError("Mini datasets are currently not available for the MyoSuite Humanoid.")
-                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
-                                  "the datasets to use this environment for imitation learning!")
+                    raise NotImplementedError("Mini datasets are currently not available for the MyoSkeleton.")
                 path = path.split("/")
                 path.insert(3, "mini_datasets")
                 path = "/".join(path)
@@ -1244,10 +1248,7 @@ class MyoSuiteHumanoid(LocoEnv):
             use_mini_dataset = not os.path.exists(Path(loco_mujoco.__file__).resolve().parent / path)
             if debug or use_mini_dataset:
                 if use_mini_dataset:
-                    # todo: add mini datasets once the MyoSuite humanoid is finalized.
-                    raise NotImplementedError("Mini datasets are currently not available for the MyoSuite Humanoid.")
-                    warnings.warn("Datasets not found, falling back to test datasets. Please download and install "
-                                  "the datasets to use this environment for imitation learning!")
+                    raise NotImplementedError("Mini datasets are currently not available for the MyoSkeleton.")
                 path = path.split("/")
                 path.insert(3, "mini_datasets")
                 path = "/".join(path)
@@ -1259,7 +1260,7 @@ class MyoSuiteHumanoid(LocoEnv):
                 reward_params = dict(target_velocity=2.5)
 
         # Generate the MDP
-        mdp = MyoSuiteHumanoid(reward_type=reward_type, reward_params=reward_params, **kwargs)
+        mdp = MyoSkeleton(reward_type=reward_type, reward_params=reward_params, **kwargs)
 
         # Load the trajectory
         env_freq = 1 / mdp._timestep  # hz

@@ -40,7 +40,6 @@ pip install loco-mujoco
 or you do an editable installation by cloning this repository and then running:
 
 ```bash
-git clone --recurse-submodules git@github.com:robfiras/loco-mujoco.git 
 cd loco-mujoco
 pip install -e . 
 ```
@@ -51,8 +50,9 @@ pip install -e .
 > use any newer version of MuJoCo! Just install it after installing LocoMuJoCo.
 
 > [!NOTE]
-> If you want to run the **MyoSuiteHumanoid** environment, you need to upgrade Mujoco to 3.2.2 and dm_control to 1.0.22
-> *after* installing this package and downloading the datasets! 
+> If you want to run the **MyoSkeleton** environment, you need to additionally run
+> `loco-mujoco-myomodel-init` to accept the license and download the model. Finally, you need to 
+> upgrade Mujoco to 3.2.2 and dm_control to 1.0.22 *after* installing this package and downloading the datasets! 
 
 
 ### Download the Datasets
