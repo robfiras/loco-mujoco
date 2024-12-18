@@ -142,6 +142,29 @@ class LocoEnv(MultiMuJoCo):
 
         self._use_absorbing_states = use_absorbing_states
 
+    def step(self, action):
+
+        obs, reward, absorbing, info = super().step(action)
+
+        model = self._model
+        data = self._data
+
+        qpos_dict = {}
+        qvel_dict = {}
+
+        for joint_name in ["pelvis_tx", "pelvis_tz", "pelvis_ty", "pelvis_tilt", "pelvis_list", "pelvis_rotation"]:
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            joint_qposadr = model.jnt_qposadr[joint_id]
+            joint_qveladr = model.jnt_dofadr[joint_id]
+
+            qpos_dict[joint_name] = data.qpos[joint_qposadr]
+            qvel_dict[joint_name] = data.qvel[joint_qveladr]
+
+            info['qpos'] = qpos_dict
+            info['qvel'] = qvel_dict
+
+        return obs, reward, absorbing, info
+
     def load_trajectory(self, traj_params, warn=True):
         """
         Loads trajectories. If there were trajectories loaded already, this function overrides the latter.
