@@ -17,7 +17,11 @@ To install the CPU version of PyTorch, run:
 pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
 ````
 
-Once PyTorch is installed, you can install the rest of the additional dependencies, including SMPL-related packages. Note that this will install the GPU version of PyTorch if you haven't explicitly installed the CPU version above:
+Once PyTorch is installed, you can install the rest of the additional dependencies, including SMPL-related packages. 
+
+The SMPL Software Copyright License is for non-commercial scientific research purposes, and you must read and accept the terms and conditions described [here](https://github.com/vchoutas/smplx) before executing the command below. If you do not agree with these terms and conditions, you must not download and/or use the Model & Software. Any infringement of the terms of this agreement will automatically terminate your rights under this [License](https://github.com/vchoutas/smplx/blob/main/LICENSE).
+
+Note that this command will install the GPU version of PyTorch if you haven't explicitly installed the CPU version above:
 ```bash
 pip install -e '.[smpl]'
 ```
