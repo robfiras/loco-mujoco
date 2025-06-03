@@ -20,7 +20,7 @@
     <default class="upper_body">
        <motor ctrlrange="-1.0 1.0" ctrllimited="true"></motor>
     </default>
-    <!-- <motor ctrlrange="-2.0 1.0" ctrllimited="true"></motor> -->
+    <!-- <motor ctrlrange="-1.0 1.0" ctrllimited="true"></motor> -->
     <muscle scale="200" ctrlrange="0 1" ctrllimited="true" range="0.65 1.05"></muscle>
     
   </default>
