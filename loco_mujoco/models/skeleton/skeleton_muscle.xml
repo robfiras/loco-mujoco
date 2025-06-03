@@ -17,8 +17,12 @@
     <geom rgba="0.8 0.6 .4 1" margin="0.001" group="0"></geom>
     <site size="0.001"></site>
     <tendon width="0.005" rgba=".95 .3 .3 1" limited="false"></tendon>
+    <default class="upper_body">
+       <motor ctrlrange="-1.0 1.0" ctrllimited="true"></motor>
+    </default>
+    <!-- <motor ctrlrange="-2.0 1.0" ctrllimited="true"></motor> -->
     <muscle scale="200" ctrlrange="0 1" ctrllimited="true" range="0.65 1.05"></muscle>
-    <motor ctrlrange="-1.0 1.0" ctrllimited="true"></motor>
+    
   </default>
   <size njmax="1000" nconmax="400" nuser_jnt="1"></size>
   <worldbody>
@@ -1124,20 +1128,20 @@
     </spatial>
   </tendon>
   <actuator>
-    <motor name="mot_shoulder_flex_r" gear="250" joint="arm_flex_r"></motor>
-    <motor name="mot_shoulder_add_r" gear="250" joint="arm_add_r"></motor>
-    <motor name="mot_shoulder_rot_r" gear="250" joint="arm_rot_r"></motor>
-    <motor name="mot_elbow_flex_r" gear="250" joint="elbow_flex_r"></motor>
-    <motor name="mot_pro_sup_r" gear="250" joint="pro_sup_r"></motor>
-    <motor name="mot_wrist_flex_r" gear="50" joint="wrist_flex_r"></motor>
-    <motor name="mot_wrist_dev_r" gear="50" joint="wrist_dev_r"></motor>
-    <motor name="mot_shoulder_flex_l" gear="250" joint="arm_flex_l"></motor>
-    <motor name="mot_shoulder_add_l" gear="250" joint="arm_add_l"></motor>
-    <motor name="mot_shoulder_rot_l" gear="250" joint="arm_rot_l"></motor>
-    <motor name="mot_elbow_flex_l" gear="250" joint="elbow_flex_l"></motor>
-    <motor name="mot_pro_sup_l" gear="250" joint="pro_sup_l"></motor>
-    <motor name="mot_wrist_flex_l" gear="50" joint="wrist_flex_l"></motor>
-    <motor name="mot_wrist_dev_l" gear="50" joint="wrist_dev_l"></motor>
+    <motor name="mot_shoulder_flex_r" gear="250" joint="arm_flex_r" class="upper_body"></motor>
+    <motor name="mot_shoulder_add_r" gear="250" joint="arm_add_r" class="upper_body"></motor>
+    <motor name="mot_shoulder_rot_r" gear="250" joint="arm_rot_r" class="upper_body"></motor>
+    <motor name="mot_elbow_flex_r" gear="250" joint="elbow_flex_r" class="upper_body"></motor>
+    <motor name="mot_pro_sup_r" gear="250" joint="pro_sup_r" class="upper_body"></motor>
+    <motor name="mot_wrist_flex_r" gear="50" joint="wrist_flex_r" class="upper_body"></motor>
+    <motor name="mot_wrist_dev_r" gear="50" joint="wrist_dev_r" class="upper_body"></motor>
+    <motor name="mot_shoulder_flex_l" gear="250" joint="arm_flex_l" class="upper_body"></motor>
+    <motor name="mot_shoulder_add_l" gear="250" joint="arm_add_l" class="upper_body"></motor>
+    <motor name="mot_shoulder_rot_l" gear="250" joint="arm_rot_l" class="upper_body"></motor>
+    <motor name="mot_elbow_flex_l" gear="250" joint="elbow_flex_l" class="upper_body"></motor>
+    <motor name="mot_pro_sup_l" gear="250" joint="pro_sup_l" class="upper_body"></motor>
+    <motor name="mot_wrist_flex_l" gear="50" joint="wrist_flex_l" class="upper_body"></motor>
+    <motor name="mot_wrist_dev_l" gear="50" joint="wrist_dev_l" class="upper_body"></motor>
     <muscle name="glut_med1_r" tendon="glut_med1_r_tendon" timeconst="    0.01     0.04" force="819" lengthrange="0.104113 0.156901"></muscle>
     <muscle name="glut_med2_r" tendon="glut_med2_r_tendon" timeconst="    0.01     0.04" force="573" lengthrange="0.0947995   0.1789"></muscle>
     <muscle name="glut_med3_r" tendon="glut_med3_r_tendon" timeconst="    0.01     0.04" force="653" lengthrange="0.0827699 0.143287"></muscle>
