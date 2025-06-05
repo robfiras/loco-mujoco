@@ -26,6 +26,9 @@ class DefaultControl(ControlFunction):
         """
         # get the limits of the action space
         self._actuator_low, self._actuator_high = self._get_actuator_limits(env._action_indices, env._model)
+        # print('env._model', dir(env._model))
+        #print('self._actuator_low', self._actuator_low)
+        #print('self._actuator_high', self._actuator_high)
 
         # calculate mean and delta
         self.norm_act_mean = (self._actuator_high + self._actuator_low) / 2.0
@@ -73,4 +76,18 @@ class DefaultControl(ControlFunction):
 
         """
         unnormalized_action = ((action * self.norm_act_delta) + self.norm_act_mean)
+        jax.debug.print("unnormalized_action: {unnormalized_action}", unnormalized_action=unnormalized_action)
+        # # # Check if 0 to 14 entries are in the range of [-1, 1]
+        # out_of_bounds_low = jax.numpy.any(unnormalized_action < self._actuator_low)
+        # out_of_bounds_high = jax.numpy.any(unnormalized_action > self._actuator_high)
+        # out_of_bounds = jax.numpy.logical_or(out_of_bounds_low, out_of_bounds_high)
+
+        # # Use jax.lax.cond to handle out-of-bounds condition
+        # def raise_error(_):
+        #     jax.debug.print("unnormalized_action: {unnormalized_action}", unnormalized_action=unnormalized_action)
+        #     raise ValueError(f"Action {unnormalized_action} is out of bounds: "
+        #             f"low={self._actuator_low}, high={self._actuator_high}")
+
+        # jax.lax.cond(jax.numpy.any(out_of_bounds), raise_error, lambda _: None, None)
+
         return unnormalized_action
