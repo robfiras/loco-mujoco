@@ -106,6 +106,7 @@ class JaxRLAlgorithmBase:
             raise ValueError(f'Not a file: {path}')
         if path.suffix != cls._saved_agent_suffix:
             raise ValueError(f'Not a {cls._saved_agent_suffix} file: {path}')
+        print(f"Loading agent from {path}..." )
         with open(path, 'rb') as file:
             data = pickle.load(file)
         return cls.from_dict(data)

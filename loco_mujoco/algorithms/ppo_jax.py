@@ -182,10 +182,34 @@ class PPOJax(JaxRLAlgorithmBase):
                 y, updates = network.apply({'params': train_state.params,
                                                   'run_stats': train_state.run_stats},
                                                  last_obs, mutable=["run_stats"])
+                
+                jax.debug.print("jax.debug.print(y) update_step -> {y}", y=y)
                 pi, value = y
+
+                jax.debug.print("jax.debug.print(pi) update_step -> {pi}", pi=pi)
+                jax.debug.print("jax.debug.print(value) update_step -> {value}", value=value)
+
                 train_state = train_state.replace(run_stats=updates['run_stats'])   # update stats
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
+
+                # print(f"action: {action.block_until_ready()}")
+                # jax.debug.callback(lambda action: print(f"Action: {action}"), action)
+                jax.debug.print("jax.debug.print(action) update_step -> {action}", action=action)
+
+                # check if action is between -1 and 1 for 0:14 and 14: 0 & 1 
+                action_first_out_of_bounds = jnp.logical_or(jnp.any(action[..., :14] < -1),
+                                                            jnp.any(action[..., :14] > 1))
+                action_rest_out_of_bounds = jnp.logical_or(jnp.any(action[..., 14:] < 0),
+                                                            jnp.any(action[..., 14:] > 1))
+                jax.debug.print("action_first_out_of_bounds: {action_first_out_of_bounds}", action_first_out_of_bounds=action_first_out_of_bounds)
+                jax.debug.print("action_rest_out_of_bounds: {action_rest_out_of_bounds}", action_rest_out_of_bounds=action_rest_out_of_bounds)
+
+                # ValueError if action is out of bounds
+
+                action_out_of_bounds = jax.numpy.logical_or(action_first_out_of_bounds,action_rest_out_of_bounds)
+                jax.debug.print("action_out_of_bounds: {action_out_of_bounds}", action_out_of_bounds=action_out_of_bounds)
+
 
                 # STEP ENV
                 obsv, reward, absorbing, done, info, env_state = env.step(env_state, action)
@@ -482,6 +506,10 @@ class PPOJax(JaxRLAlgorithmBase):
             rng, _rng = jax.random.split(rng)
             action, train_state = plcy_call(train_state, obs, _rng)
             action = jnp.atleast_2d(action)
+
+            # print step and action 
+            # if config.debug:
+            # print(f"Step {i}, action: {action}")
 
             # STEP ENV
             if use_mujoco:

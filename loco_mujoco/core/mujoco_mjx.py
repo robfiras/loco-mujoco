@@ -178,6 +178,8 @@ class Mjx(Mujoco):
             step_fn = lambda _, x: mjx.step(sys, x)
             _data = jax.lax.fori_loop(0, self._n_substeps, step_fn, _data)
 
+            # print actions always 
+            jax.debug.print("action at mjx_step: {action}", action=ctrl_action)
             return _data, _carry
 
         # run inner loop
@@ -387,7 +389,9 @@ class Mjx(Mujoco):
         Returns:
             Tuple[jnp.ndarray, MjxAdditionalCarry]: Processed action and updated carry.
         """
+        jax.debug.print("action at mjx_preprocess_action before domain_rando: {action}", action=action)
         action, carry = self._domain_randomizer.update_action(self, action, model, data, carry, jnp)
+        jax.debug.print("action at mjx_preprocess_action after domain_rando: {action}", action=action)
         return action, carry
 
     def _mjx_compute_action(self, action: jnp.ndarray,
