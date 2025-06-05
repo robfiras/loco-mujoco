@@ -32,6 +32,9 @@ class ControlFunction(StatefulObject):
         self._low = low
         self._high = high
 
+        # print('self._low', self._low)
+        # print('self._high', self._high)
+
         # compute the controller frequency
         n_intermediate_steps = env._n_intermediate_steps
         env_frequency = 1 / env.simulation_dt
@@ -101,6 +104,7 @@ class ControlFunction(StatefulObject):
         low = []
         high = []
         for index in action_indices:
+            # print('model', dir(model))
             if model.actuator_ctrllimited[index]:
                 low.append(model.actuator_ctrlrange[index][0])
                 high.append(model.actuator_ctrlrange[index][1])
