@@ -40,6 +40,7 @@ dynamic = ["version"]
 where = ["."]
 
 [project.optional-dependencies]
+# To install SMPL, you need to accept the license as described here https://github.com/vchoutas/smplx
 smpl = [
     "torch",
     "tqdm",
