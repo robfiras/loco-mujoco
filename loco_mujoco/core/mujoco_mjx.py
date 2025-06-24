@@ -505,7 +505,8 @@ class Mjx(Mujoco):
                 obs[self._obs_indices.site_xmat].reshape(-1, 9)))
 
     def mjx_render(self, state,
-                   record: bool = False) -> np.ndarray:
+                   record: bool = False,
+                   offset: float = 2.0) -> np.ndarray:
         """
         Renders all environments in parallel.
 
@@ -529,7 +530,7 @@ class Mjx(Mujoco):
             self._model.hfield_data = hfield_data[0]
             self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)
 
-        return self._viewer.parallel_render(state, record)
+        return self._viewer.parallel_render(state, record, offset)
 
     def mjx_render_trajectory(self, trajectory,
                               record: bool = False) -> None:

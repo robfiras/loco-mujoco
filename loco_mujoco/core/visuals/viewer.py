@@ -526,6 +526,7 @@ class MujocoViewer:
         visual_geoms_dataid = np.array(mjx_state.additional_carry.user_scene.geoms.dataid)
         n_visual_geoms = mjx_state.additional_carry.user_scene.ngeoms[0]
 
+        model = self._model.__copy__()
         def render_all_inner_loop(self):
 
             render_start = time.time()
@@ -535,21 +536,27 @@ class MujocoViewer:
                 offset = self._offsets_for_parallel_render[i]
                 data.qpos, data.qvel = mjx_state.data.qpos[i, :], mjx_state.data.qvel[i, :]
                 data.mocap_pos, data.mocap_quat = mjx_state.data.mocap_pos[i, :], mjx_state.data.mocap_quat[i, :]
-                # data.qpos[0] += offset[0]
-                # data.qpos[1] += offset[1]
-                # data.mocap_pos[:, 0] += offset[0]
-                # data.mocap_pos[:, 1] += offset[1]
-                mujoco.mj_forward(self._model, data)
+
+                for j in np.where(self._model.body_parentid == 0)[0]:
+                    model.body_pos[j, 0] = self._model.body_pos[j, 0] + offset[0]
+                    model.body_pos[j, 1] = self._model.body_pos[j, 1] + offset[1]
+                for j in np.where(self._model.jnt_type == mujoco.mjtJoint.mjJNT_FREE)[0]:
+                    adr = model.jnt_qposadr[j]
+                    data.qpos[adr:adr + 2] += offset[:2]
+
+                data.mocap_pos[:, 0] += offset[0]
+                data.mocap_pos[:, 1] += offset[1]
+                mujoco.mj_forward(model, data)
 
                 if i == 0 and not self._headless:
                     self._create_overlay()
 
                 if i == 0:
-                    mujoco.mjv_updateScene(self._model, data, self._scene_option, None, self._camera,
+                    mujoco.mjv_updateScene(model, data, self._scene_option, None, self._camera,
                                            mujoco.mjtCatBit.mjCAT_ALL,
                                            self._scene)
                 else:
-                    mujoco.mjv_addGeoms(self._model, data, self._scene_option, mujoco.MjvPerturb(),
+                    mujoco.mjv_addGeoms(model, data, self._scene_option, mujoco.MjvPerturb(),
                                         mujoco.mjtCatBit.mjCAT_DYNAMIC, self._scene)
 
                 # add visual geoms
