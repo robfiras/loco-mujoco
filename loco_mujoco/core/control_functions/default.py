@@ -6,6 +6,7 @@ import jax
 from mujoco import MjData, MjModel
 from mujoco.mjx import Data, Model
 
+from loco_mujoco.core.utils.backend import assert_backend_is_supported
 from loco_mujoco.core.control_functions import ControlFunction
 
 
@@ -36,6 +37,17 @@ class DefaultControl(ControlFunction):
         high = np.ones_like(self.norm_act_mean)
 
         super(DefaultControl, self).__init__(env, low, high, **kwargs)
+
+    def reset(self, env: Any,
+            model: Union[MjModel, Model],
+            data: Union[MjData, Data],
+            carry: Any,
+            backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+        """
+        Reset the control function.
+        """
+        assert_backend_is_supported(backend)
+        return data, carry
 
     def generate_action(self, env: Any,
                         action: Union[np.ndarray, jax.Array],

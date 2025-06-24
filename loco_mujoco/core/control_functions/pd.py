@@ -80,7 +80,7 @@ class PDControl(ControlFunction):
         if nominal_joint_positions is None:
             self._nominal_joint_positions = env._model.qpos0[self._qpos_ids]
         else:
-            self._nominal_joint_positions = nominal_joint_positions
+            self._nominal_joint_positions = np.array(nominal_joint_positions)
 
         self._high_pos_target = self._jnt_ranges[:, 1] - self._nominal_joint_positions
         self._low_pos_target = self._jnt_ranges[:, 0] - self._nominal_joint_positions
@@ -94,6 +94,17 @@ class PDControl(ControlFunction):
         high = np.ones_like(self.norm_act_mean)
 
         super(PDControl, self).__init__(env, low, high, **kwargs)
+
+    def reset(self, env: Any,
+                model: Union[MjModel, Model],
+                data: Union[MjData, Data],
+                carry: Any,
+                backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+        """
+        Reset the PD controller state.
+        """
+        assert_backend_is_supported(backend)
+        return data, carry
 
     def init_state(self,
                    env: Any,

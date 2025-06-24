@@ -426,6 +426,7 @@ class Mjx(Mujoco):
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, jnp)
         data, carry = self._terrain.reset(self, model, data, carry, jnp)
         data, carry = self._init_state_handler.reset(self, model, data, carry, jnp)
+        data, carry = self._control_func.reset(self, model, data, carry, jnp)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp)
         data, carry = self._reward_function.reset(self, model, data, carry, jnp)
         return data, carry
