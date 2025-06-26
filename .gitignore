@@ -46,3 +46,4 @@ prosthesis_randomization/updated_eval_parallel.py
 
 prosthesis_evaluation/grf_computation_test/grf_plot.png
 prosthesis_evaluation/grf_computation_test/grf_data_1000steps.npz
+prosthesis_evaluation/all_trajs_walk_SkeletonMuscle.pkl
