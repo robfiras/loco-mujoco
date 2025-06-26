@@ -5,7 +5,7 @@ defaults:
 
 wandb:
   project: "deepmimic"
-  run_name: "MjxSkeletonMuscle_noOutputAct_SMControl_AdaptSigmd5_NoMotorTanh"
+  run_name: "MjxSkeletonPros_RandStiffDampRotY_solrefTime003_solimpWidth0002" #"MjxSkeletonPros_AdaptSigmd5_NoMotorTanh_stiff50_damp1"
 
 experiment:
   task_factory:
@@ -17,7 +17,12 @@ experiment:
       #   dataset_name:
       #     - walk1_subject1
   env_params:
-    env_name: MjxSkeletonMuscle #SkeletonMuscle #MjxMyoSkeleton
+    env_name: MjxSkeletonMuscleProsthesis #SkeletonMuscle #MjxMyoSkeleton
+    prosthesis_side : 'left_side' # 'left_side' or 'right_side'
+    prosthesis_type: 'transtibial'
+    joint_stiffness: 100 #100
+    joint_damping: 1 #10
+    delete_joints: False
     headless: True
     disable_arms: false
     horizon: 1000
@@ -41,7 +46,7 @@ experiment:
         ##- left_elbow_mimic
         #- left_shoulder_mimic
         #- left_hip_mimic
-        #- left_knee_mimic
+        # - left_knee_mimic
         - left_foot_mimic
         - right_hand_mimic
         #- right_elbow_mimic
@@ -53,7 +58,7 @@ experiment:
   lr: 1e-4
   num_envs: 2048
   num_steps: 200
-  total_timesteps: 600e6 #300e6
+  total_timesteps: 900e6 #300e6
   update_epochs: 4
   proportion_env_reward: 0.0
   num_minibatches: 32
@@ -70,7 +75,7 @@ experiment:
   weight_decay: 0.0
   normalize_env: true
   debug: false
-  n_seeds: 1  # will automatically take seeds from 1 to n_seeds
+  n_seeds: 1 #2 #1  # will automatically take seeds from 1 to n_seeds
   vmap_across_seeds: true
   validation: 
     active: true 
@@ -91,6 +96,7 @@ experiment:
     rel_site_names:
       - upper_body_mimic
       - left_hand_mimic
+      # - left_knee_mimic
       - left_foot_mimic
       - right_hand_mimic
       - right_foot_mimic
@@ -106,3 +112,31 @@ control_config:
  torque_control:
     control_type: SkeletonMuscleControlFunction #DefaultControl
     control_params:
+
+randomization_config:
+    randomization_type: ProsthesisRandomizer
+    randomization_params:
+      randomize_prosthesis_dof_damping: False #True #True
+      randomization_dof_names: ['ankle_angle', 'subtalar_angle', 'mtp_angle' ]
+      prosthesis_dof_damping_range: [1,5]
+
+      randomize_prosthesis_joint_stiffness: False #True #True
+      randomization_joint_names: ['ankle_angle', 'subtalar_angle', 'mtp_angle' ]
+      prosthesis_joint_stiffness_range: [50,100]
+
+      randomization_body_position_names: ['calcn']
+      randomize_prosthesis_body_position: True
+      # prosthesis_body_position_range: {'x': [-0.001, 0.001], 'y': [-0.02, 0.001], 'z': [-0.001, 0.001]} # range for randomizing the position of the prosthesis body
+      prosthesis_body_position_range: {} # range for randomizing the position of the prosthesis body
+      # prosthesis_body_position_range: {'z': [0.1, 0.5]} 
+      #'x': [-0.001, 0.001], 'y': [0.015, 0.02], 'z': [-0.001, 0.001]
+
+      randomize_prosthesis_body_orientation: False #True
+      randomization_body_orientation_names: ['calcn']
+      # prosthesis_body_orientation_range: {'y': [-0.09, 0.09]} #[-0.1, 0.1]
+      prosthesis_body_orientation_range: {'y': [-0.3, 0.3]} #[-0.1, 0.1]
+      # prosthesis_body_orientation_range: {'x': [0.1, 0.2], 'y': [0.15, 0.3], 'z': [0.1, 0.2]} #[-0.1, 0.1]
+
+      # randomize_feet_geom_solref: True
+      # feet_geom_solref_range: {'other_side': [0.02, 0.1], 'prosthesis_side': [0.02, 0.1]}
+      # randomization_feet_geom_names: ['foot_box']

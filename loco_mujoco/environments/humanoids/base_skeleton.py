@@ -65,10 +65,8 @@ class BaseSkeleton(LocoEnv):
         else:
             # parse
             observation_spec = self.parse_observation_spec(observation_spec)
-        # print('action_spec', actuation_spec)
         if actuation_spec is None:
             actuation_spec = self._get_action_specification(spec)
-            # print('after _get_action_specification', actuation_spec)
 
         # --- Modify the xml, the action_spec, and the observation_spec if needed ---
         self._use_muscles = use_muscles
@@ -80,7 +78,6 @@ class BaseSkeleton(LocoEnv):
             obs_to_remove = ["q_" + j for j in joints_to_remove] + ["dq_" + j for j in joints_to_remove]
             observation_spec = [elem for elem in observation_spec if elem.name not in obs_to_remove]
             actuation_spec = [ac for ac in actuation_spec if ac not in motors_to_remove]
-            # print('after removing joints and motors', actuation_spec, observation_spec)
 
             spec = self._delete_from_spec(spec, joints_to_remove,
                                           motors_to_remove, equ_constr_to_remove)
@@ -238,10 +235,12 @@ class BaseSkeleton(LocoEnv):
         size = np.array([0.112, 0.03, 0.05]) * self.scaling
         pos = np.array([-0.09, 0.019, 0.0]) * self.scaling
         toe_l.add_geom(name="foot_box_l", type=mujoco.mjtGeom.mjGEOM_BOX, size=size, pos=pos,
-                       rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, 0.15, 0.0])
+                       rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, 0.15, 0.0], 
+                       solref=[0.03,1], solimp=[0.9,0.95,0.002,0.5,2]) # Added solref and solimp for softer contact handling
         toe_r = spec.find_body("toes_r")
-        toe_r.add_geom(name="foot_box_r", type=mujoco.mjtGeom.mjGEOM_BOX, size=size, pos=pos,
-                       rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, -0.15, 0.0])
+        toe_r.add_geom(name="foot_box_r", type=mujoco.mjtGeom.mjGEOM_BOX, size=size, pos=pos, 
+                       rgba=[0.5, 0.5, 0.5, alpha_box_feet], euler=[0.0, -0.15, 0.0], 
+                       solref=[0.03,1], solimp=[0.9,0.95,0.002,0.5,2]) # Added solref and solimp for softer contact handling
 
         # make true foot uncollidable
         foot_geoms = ["r_foot", "r_bofoot", "l_foot", "l_bofoot"]

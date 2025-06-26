@@ -15,7 +15,7 @@ def test_jax_activation_limits():
     """
 
     # Example actor outputs before activation
-    raw_outputs = jnp.array([-100, -1, 0, 1, 10], dtype=jnp.float32)
+    raw_outputs = jnp.array([-3, -1, 0, 1, 3], dtype=jnp.float32)
 
     # Example activation function (tanh limits outputs between -1 and 1)
     activated_outputs = nn.sigmoid(raw_outputs) 
@@ -179,7 +179,7 @@ def test_distribution(mean, log_std):
 
 
 if __name__ == "__main__":
-    # # test_jax_activation_limits()
+    test_jax_activation_limits()
     # activation= 'tanh'  # Example activation function
     # output_activation = None #['tanh', 'sigmoid']  # Example output activation function
     # # x = RunningMeanStd()(x)
@@ -207,8 +207,8 @@ if __name__ == "__main__":
     # print(f'NetworkSkeletonMuscle output for activation {activation} without custom output_activation {output_activation}: {output}')
 
 
-    pi, pi_sample = test_distribution(mean=jnp.array([1, 0, 0.5]), log_std=jnp.array([-1.61, -1.61, -1.61]))
+    # pi, pi_sample = test_distribution(mean=jnp.array([1, 0, 0.5]), log_std=jnp.array([-1.61, -1.61, -1.61]))
 
-    print(f"Distribution mean: {pi.mean}")
-    print(f"Sampled output: {pi_sample}")
-    print(f"pi: {pi}")
+    # print(f"Distribution mean: {pi.mean}")
+    # print(f"Sampled output: {pi_sample}")
+    # print(f"pi: {pi}")

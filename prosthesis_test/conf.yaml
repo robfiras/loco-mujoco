@@ -5,7 +5,7 @@ defaults:
 
 wandb:
   project: "deepmimic"
-  run_name: "MjxSkeletonMuscle_noOutputAct_SMControl_AdaptSigmd5_NoMotorTanh"
+  run_name: "MjxSkeletonPros_AdaptSigmd5_NoMotorTanh_stiff50_damp1"
 
 experiment:
   task_factory:
@@ -17,7 +17,12 @@ experiment:
       #   dataset_name:
       #     - walk1_subject1
   env_params:
-    env_name: MjxSkeletonMuscle #SkeletonMuscle #MjxMyoSkeleton
+    env_name: MjxSkeletonMuscleProsthesis #SkeletonMuscle #MjxMyoSkeleton
+    prosthesis_side : 'left_side' # 'left_side' or 'right_side'
+    prosthesis_type: 'transtibial'
+    joint_stiffness: 50 #100
+    joint_damping: 1 #10
+    delete_joints: False
     headless: True
     disable_arms: false
     horizon: 1000
@@ -41,7 +46,7 @@ experiment:
         ##- left_elbow_mimic
         #- left_shoulder_mimic
         #- left_hip_mimic
-        #- left_knee_mimic
+        # - left_knee_mimic
         - left_foot_mimic
         - right_hand_mimic
         #- right_elbow_mimic
@@ -53,7 +58,7 @@ experiment:
   lr: 1e-4
   num_envs: 2048
   num_steps: 200
-  total_timesteps: 600e6 #300e6
+  total_timesteps: 900e6 #300e6
   update_epochs: 4
   proportion_env_reward: 0.0
   num_minibatches: 32
@@ -70,7 +75,7 @@ experiment:
   weight_decay: 0.0
   normalize_env: true
   debug: false
-  n_seeds: 1  # will automatically take seeds from 1 to n_seeds
+  n_seeds: 1 #2 #1  # will automatically take seeds from 1 to n_seeds
   vmap_across_seeds: true
   validation: 
     active: true 
@@ -91,6 +96,7 @@ experiment:
     rel_site_names:
       - upper_body_mimic
       - left_hand_mimic
+      # - left_knee_mimic
       - left_foot_mimic
       - right_hand_mimic
       - right_foot_mimic

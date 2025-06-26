@@ -92,16 +92,21 @@ class Mjx(Mujoco):
 
         carry = self._init_additional_carry(key, self._model, data, jnp)
 
+        # jax.debug.print("carry.domain_randomizer_state in mjx_reset carry init: {domain_randomizer_state}", domain_randomizer_state=carry.domain_randomizer_state)
+
         data, carry = self._mjx_reset_carry(self.sys, data, carry)
 
         # reset all stateful entities
         data, carry = self.obs_container.reset_state(self, self._model, data, carry, jnp)
+
+        # jax.debug.print("carry.domain_randomizer_state in mjx_reset after: {domain_randomizer_state}", domain_randomizer_state=carry.domain_randomizer_state)
 
         obs, carry = self._mjx_create_observation(self._model, data, carry)
         reward = 0.0
         absorbing = jnp.array(False, dtype=bool)
         done = jnp.array(False, dtype=bool)
         info = self._mjx_reset_info_dictionary(obs, data, subkey)
+
 
         return MjxState(data=data, observation=obs, reward=reward, absorbing=absorbing, done=done,
                         info=info, additional_carry=carry)
@@ -216,6 +221,7 @@ class Mjx(Mujoco):
         state = jax.lax.cond(state.done, self._mjx_reset_in_step, lambda x: x, state)
 
         return state
+    
 
     def _mjx_create_observation(self, model: Model,
                                 data: Data,
@@ -530,7 +536,8 @@ class Mjx(Mujoco):
 
         return self._viewer.parallel_render(state, record)
     
-    def mjx_render_domain_randomization(self, state,
+
+    def mjx_render_test(self, state,
                    record: bool = False) -> np.ndarray:
         """
         Renders all environments in parallel.
@@ -543,21 +550,22 @@ class Mjx(Mujoco):
             np.ndarray: Rendered image.
         """
         model = self.update_mjM_post_domain_randomizer(state.additional_carry)
+
         if self._viewer is None:
+            print("VIEWER IS NONE, CREATING NEW VIEWER")
             if "default_camera_mode" not in self._viewer_params.keys():
                 self._viewer_params["default_camera_mode"] = "static"
-            self._viewer = MujocoViewer(model, self.dt, record=record, **self._viewer_params)
+            self._viewer = MujocoViewer(self._model, self.dt, record=record, **self._viewer_params)
 
         if self._terrain.is_dynamic:
             terrain_state = state.additional_carry.terrain_state
             assert hasattr(terrain_state, "height_field_raw"), "Terrain state does not have height_field_raw."
             assert self._terrain.hfield_id is not None, "Terrain hfield id is not set."
             hfield_data = np.array(terrain_state.height_field_raw)
-            model.hfield_data = hfield_data[0]
-            self._viewer.upload_hfield(model, hfield_id=self._terrain.hfield_id)
+            self._model.hfield_data = hfield_data[0]
+            self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)
 
         return self._viewer.parallel_render(state, record)
-
 
     def mjx_render_trajectory(self, trajectory,
                               record: bool = False) -> None:
@@ -612,7 +620,7 @@ class Mjx(Mujoco):
     def mjx_env(self) -> bool:
         """Indicates whether this is an MJX environment."""
         return True
-        
+    
 
     def update_mjM_post_domain_randomizer(self, carry: MjxAdditionalCarry) -> None:
         """
@@ -625,126 +633,28 @@ class Mjx(Mujoco):
 
         model = self._model
 
-        # dof_indices = list(self._domain_randomizer._dof_indices.values())
-        # jnt_indices = list(self._domain_randomizer._joint_indices.values())
-        # body_pos_indices = list(self._domain_randomizer._body_pos_indices.values())
-        # body_quat_indices = list(self._domain_randomizer._body_quat_indices.values())   
-        # print("Stiffness before update:", model.jnt_stiffness)
-        if self._domain_randomizer.rand_conf["randomize_prosthesis_joint_stiffness"]:
-            jnt_indices = list(self._domain_randomizer._joint_indices.values()) 
-        # if hasattr(domain_randomizer_state, "prosthesis_joint_stiffness"):
-            model.jnt_stiffness[jnt_indices]= np.array(
-                domain_randomizer_state.prosthesis_joint_stiffness, dtype=np.float64
-            ).squeeze()
-            # print('Stiffness updated:',  model.jnt_stiffness)
+        if hasattr(domain_randomizer_state, "prosthesis_joint_stiffness"):
+            model.jnt_stiffness= np.array(
+                domain_randomizer_state.prosthesis_joint_stiffness
+            )
 
-        # print("Damping before update:", model.dof_damping)
-        if self._domain_randomizer.rand_conf["randomize_prosthesis_dof_damping"]:
-            dof_indices = list(self._domain_randomizer._dof_indices.values())
-        # if hasattr(domain_randomizer_state, "prosthesis_dof_damping"):
-            model.dof_damping[dof_indices] = np.array(
-                domain_randomizer_state.prosthesis_dof_damping, dtype=np.float64
-            ).squeeze()
-            # print('Damping updated:', model.dof_damping)
+        if hasattr(domain_randomizer_state, "prosthesis_dof_damping"):
+            model.dof_damping = np.array(
+                domain_randomizer_state.prosthesis_dof_damping
+            )
 
-        # print("Position before update:", model.body_pos)
-        if self._domain_randomizer.rand_conf["randomize_prosthesis_body_position"]:
-            body_pos_indices = list(self._domain_randomizer._body_pos_indices.values())
-        #if hasattr(domain_randomizer_state, "prosthesis_body_position"):
-            model.body_pos[body_pos_indices] = np.array(
-                domain_randomizer_state.prosthesis_body_position, dtype=np.float64
-            ).squeeze()
-            # print('Position updated:', model.body_pos)
+        if hasattr(domain_randomizer_state, "prosthesis_body_position"):
+            model.body_pos = np.array(
+                domain_randomizer_state.prosthesis_body_position
+            )
 
-        # print("Orientation before update:", model.body_quat)
-        if self._domain_randomizer.rand_conf["randomize_prosthesis_body_orientation"]:
-            body_quat_indices = list(self._domain_randomizer._body_quat_indices.values())   
-        #if hasattr(domain_randomizer_state, "prosthesis_body_orientation"):
-            model.body_quat[body_quat_indices] = np.array(
-                domain_randomizer_state.prosthesis_body_orientation, dtype=np.float64
-            ).squeeze()
-            # print('Orientation updated:', model.body_quat)
+        if hasattr(domain_randomizer_state, "prosthesis_body_orientation"):
+            model.body_quat = np.array(
+                domain_randomizer_state.prosthesis_body_orientation
+            )
 
         return model 
 
+        
 
-    def mjx_step_test(self, state: MjxState, action: jax.Array) -> MjxState:
-        """
-
-        Args:
-            state (MjxState): Current state of the environment.
-            action (jax.Array): Action to take in the environment.
-
-        Returns:
-            MjxState: The next state of the environment.
-
-        """
-
-        data = state.data
-        cur_info = state.info
-        carry = state.additional_carry
-        carry = carry.replace(last_action=action)
-
-        # reset dones
-        state = state.replace(done=jnp.zeros_like(state.done, dtype=bool))
-
-        # preprocess action
-        processed_action, carry = self._mjx_preprocess_action(action, self._model, data, carry)
-
-        # modify data and model *before* step if needed
-        sys, data, carry = self._mjx_simulation_pre_step(self.sys, data, carry)
-
-        def _inner_loop(idx, _runner_state):
-
-            _data, _carry = _runner_state
-
-            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry)
-
-            # step in the environment using the action
-            ctrl = _data.ctrl.at[jnp.array(self._action_indices)].set(ctrl_action)
-            _data = _data.replace(ctrl=ctrl)
-            step_fn = lambda _, x: mjx.step(sys, x)
-            _data = jax.lax.fori_loop(0, self._n_substeps, step_fn, _data)
-
-            return _data, _carry
-
-        # run inner loop
-        data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
-
-        # modify data *after* step if needed (does nothing by default)
-        data, carry = self._mjx_simulation_post_step(self._model, data, carry)
-
-        # create the observation
-        cur_obs, carry = self._mjx_create_observation(sys, data, carry)
-
-        # modify the observation and the data if needed (does nothing by default)
-        cur_obs, data, cur_info, carry = self._mjx_step_finalize(cur_obs, self._model, data, cur_info, carry)
-
-        # create info
-        cur_info = self._mjx_update_info_dictionary(cur_info, cur_obs, data, carry)
-
-        # check if the next obs is an absorbing state
-        absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry)
-
-        # calculate the reward
-        reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data, carry)
-
-        # check if done
-        done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry)
-
-        done = jnp.logical_or(done, jnp.any(jnp.isnan(cur_obs)))
-        cur_obs = jnp.nan_to_num(cur_obs, nan=0.0)
-
-        # create state
-        carry = carry.replace(cur_step_in_episode=carry.cur_step_in_episode + 1)
-        state = state.replace(data=data, observation=cur_obs, reward=reward,
-                              absorbing=absorbing, done=done, info=cur_info, additional_carry=carry)
-
-        def print_identity(x):
-            jax.debug.print("Identity function called")
-            return x
-
-        # reset state if done
-        state = jax.lax.cond(state.done, self._mjx_reset_in_step, print_identity, state)
-
-        return state, sys
+        

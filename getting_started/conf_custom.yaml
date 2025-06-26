@@ -5,7 +5,7 @@ defaults:
 
 wandb:
   project: "deepmimic"
-  run_name: "MjxSkeletonMuscle_noOutputAct_SMControl_AdaptSigmd5_NoMotorTanh"
+  run_name: "MjxSkeletonMuscleImitation"
 
 experiment:
   task_factory:
@@ -53,7 +53,7 @@ experiment:
   lr: 1e-4
   num_envs: 2048
   num_steps: 200
-  total_timesteps: 600e6 #300e6
+  total_timesteps: 900e6 #300e6
   update_epochs: 4
   proportion_env_reward: 0.0
   num_minibatches: 32
@@ -65,7 +65,9 @@ experiment:
   ent_coef: 0.0
   vf_coef: 0.5
   max_grad_norm: 0.5
-  activation: tanh 
+  number_upper_body_activation: 14
+  custom_output_activation: ["tanh", "sigmoid"]
+  activation: tanh #sigmoid #tanh
   anneal_lr: false
   weight_decay: 0.0
   normalize_env: true
@@ -104,5 +106,5 @@ experiment:
 # Define control subconfigs
 control_config:
  torque_control:
-    control_type: SkeletonMuscleControlFunction #DefaultControl
+    control_type: DefaultControl
     control_params:
