@@ -44,6 +44,7 @@ prosthesis_randomization/wandb
 prosthesis_randomization/__pycache__
 prosthesis_randomization/updated_eval_parallel.py
 
+prosthesis_evaluation/
 prosthesis_evaluation/eval_per_run.ipynb
 prosthesis_evaluation/eval_prosthesis_all.ipynb
 prosthesis_evaluation/eval_diff_runs_andPerturb.ipynb
