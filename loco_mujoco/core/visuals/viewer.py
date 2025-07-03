@@ -521,7 +521,7 @@ class MujocoViewer:
         visual_geoms_type = np.array(mjx_state.additional_carry.user_scene.geoms.type)
         visual_geoms_size = np.array(mjx_state.additional_carry.user_scene.geoms.size)
         visual_geoms_pos = np.array(mjx_state.additional_carry.user_scene.geoms.pos)
-        visual_geoms_pos[..., :2] += self._visual_geom_offsets
+        # visual_geoms_pos[..., :2] += self._visual_geom_offsets
         visual_geoms_mat = np.array(mjx_state.additional_carry.user_scene.geoms.mat)
         visual_geoms_rgba = np.array(mjx_state.additional_carry.user_scene.geoms.rgba)
         visual_geoms_dataid = np.array(mjx_state.additional_carry.user_scene.geoms.dataid)
