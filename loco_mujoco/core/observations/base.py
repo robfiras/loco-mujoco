@@ -797,8 +797,8 @@ class SensorData(SimpleObs):
         :class:`Obs` for the base observation class.
     """
 
-    def __init__(self, obs_name: str, xml_names: List[str], **kwargs):
-        super().__init__(obs_name, xml_names, **kwargs)
+    def __init__(self, obs_name: str, xml_name: List[str], **kwargs):
+        super().__init__(obs_name, xml_name, **kwargs)
         self.dim = None
 
     def _init_from_mj(self, env, model, data, current_obs_size):
