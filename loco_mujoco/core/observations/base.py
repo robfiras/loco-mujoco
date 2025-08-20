@@ -944,12 +944,12 @@ class Force(Observation):
 
 class LastAction(StatefulObservation):
 
-    def __init__(self, obs_name: str, **kwargs):
+    def __init__(self, obs_name: str, action_dim: int, **kwargs):
         super().__init__(obs_name, **kwargs)
-        self.dim = None
+        self.dim = action_dim
 
     def _init_from_mj(self, env, model, data, current_obs_size):
-        self.dim = env.action_dim
+        # self.dim = env.action_dim
         self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
         self._initialized_from_mj = True

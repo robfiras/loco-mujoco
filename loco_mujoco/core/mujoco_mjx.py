@@ -170,7 +170,7 @@ class Mjx(Mujoco):
 
             _data, _carry = _runner_state
 
-            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry)
+            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry, idx)
 
             # step in the environment using the action
             ctrl = _data.ctrl.at[jnp.array(self._action_indices)].set(ctrl_action)
@@ -393,7 +393,8 @@ class Mjx(Mujoco):
     def _mjx_compute_action(self, action: jnp.ndarray,
                             model: Model,
                             data: Data,
-                            carry: MjxAdditionalCarry) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
+                            carry: MjxAdditionalCarry,
+                            inner_loop_idx: int) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
         """
         Applies transformations to the action at intermediate steps.
 
@@ -406,7 +407,7 @@ class Mjx(Mujoco):
         Returns:
             Tuple[jnp.ndarray, MjxAdditionalCarry]: Computed action and updated carry.
         """
-        action, carry = self._control_func.generate_action(self, action, model, data, carry, jnp)
+        action, carry = self._control_func.generate_action(self, action, model, data, carry, inner_loop_idx, jnp)
         return action, carry
 
     def _mjx_reset_carry(self, model: Model,

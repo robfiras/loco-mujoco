@@ -122,7 +122,7 @@ class Mujoco:
         self._info = None
         self._additional_carry = None
         self._cur_step_in_episode = 0
-        self.action_dim = len(actuation_spec)
+        # self.action_dim = len(actuation_spec)
 
         # setup goal
         spec, self._goal = self._setup_goal(spec, goal_type, goal_params)
@@ -400,6 +400,7 @@ class Mujoco:
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, np)
         data, carry = self._terrain.reset(self, model, data, carry, np)
         data, carry = self._init_state_handler.reset(self, model, data, carry, np)
+        data, carry = self._control_func.reset(self, model, data, carry, np)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, np)
         data, carry = self._reward_function.reset(self, model, data, carry, np)
 
