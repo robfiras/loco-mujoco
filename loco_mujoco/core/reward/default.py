@@ -215,6 +215,7 @@ class LocomotionRewardState:
     last_qvel: Union[np.ndarray, jax.Array]
     last_action: Union[np.ndarray, jax.Array]
     time_since_last_touchdown: Union[np.ndarray, jax.Array]
+    reward_components: Dict[str, Union[np.ndarray, jax.Array]]
 
 
 class LocomotionReward(TargetVelocityGoalReward):
@@ -295,8 +296,26 @@ class LocomotionReward(TargetVelocityGoalReward):
             LocomotionRewardState: The initialized reward state.
 
         """
-        return LocomotionRewardState(last_qvel=data.qvel, last_action=backend.zeros(env.info.action_space.shape[0]),
-                                     time_since_last_touchdown=backend.zeros(len(self._foot_ids)))
+        return LocomotionRewardState(
+            last_qvel=data.qvel,
+            last_action=backend.zeros(env.info.action_space.shape[0]),
+            time_since_last_touchdown=backend.zeros(len(self._foot_ids)),
+            reward_components={
+                "tracking/main_goal": 0.0,
+                "penalties/z_velocity": 0.0,
+                "penalties/roll_pitch_velocity": 0.0,
+                "penalties/roll_pitch_position": 0.0,
+                "penalties/nominal_joint_position": 0.0,
+                "penalties/joint_position_limit": 0.0,
+                "penalties/joint_velocity": 0.0,
+                "penalties/joint_acceleration": 0.0,
+                "penalties/joint_torque": 0.0,
+                "penalties/action_rate": 0.0,
+                "penalties/air_time": 0.0,
+                "penalties/gait_symmetry": 0.0,
+                "penalties/energy": 0.0,
+            }
+        )
 
     def reset(self,
               env: Any,
@@ -506,8 +525,29 @@ class LocomotionReward(TargetVelocityGoalReward):
         total_reward = tracking_reward + penality_rewards
         total_reward = backend.maximum(total_reward, 0.0)
 
-        # update reward state
-        reward_state = reward_state.replace(last_qvel=data.qvel, last_action=action, time_since_last_touchdown=tslt)
+        reward_components = {
+            "tracking/main_goal": tracking_reward,
+            "penalties/z_velocity": z_vel_reward,
+            "penalties/roll_pitch_velocity": roll_pitch_vel_reward,
+            "penalties/roll_pitch_position": roll_pitch_reward,
+            "penalties/nominal_joint_position": joint_qpos_reward,
+            "penalties/joint_position_limit": joint_position_limit_reward,
+            "penalties/joint_velocity": joint_vel_reward,
+            "penalties/joint_acceleration": acceleration_reward,
+            "penalties/joint_torque": torque_reward,
+            "penalties/action_rate": action_rate_reward,
+            "penalties/air_time": air_time_reward,
+            "penalties/gait_symmetry": symmetry_air_reward,
+            "penalties/energy": energy_reward,
+        }
+
+        reward_state = reward_state.replace(
+            last_qvel=data.qvel,
+            last_action=action,
+            time_since_last_touchdown=tslt,
+            reward_components=reward_components
+        )
+
         carry = carry.replace(reward_state=reward_state)
 
         return total_reward, carry

@@ -72,3 +72,10 @@ experiment:
     num_steps: 100
     num_envs: 100
     num: 10 # set to 0 to disable validation
+
+  adaptive_lr: true       # The main flag to enable/disable the feature
+  lr_min: 1.0e-6          # Minimum learning rate
+  lr_max: 0.01            # Maximum learning rate
+  kl_target: 0.02         # Target KL divergence
+  kl_margin: 1.5          # Margin for scaling (e.g., if KL > 0.02*1.5, decrease LR)
+  kl_lr_scale: 1.5        # How much to scale LR by (multiply or divide)
