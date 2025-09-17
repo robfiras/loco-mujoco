@@ -1,5 +1,6 @@
 from copy import deepcopy
 from functools import partial
+import dataclasses
 from typing import Optional, Tuple, Union, Any
 
 import numpy as np
@@ -102,6 +103,13 @@ class SummaryMetrics:
     mean_episode_length: float = 0.0
     max_timestep: int = 0.0
 
+@struct.dataclass
+class SummaryRichMetrics:
+    mean_episode_return: float = 0.0
+    mean_episode_length: float = 0.0
+    max_timestep: int = 0.0
+    frac_absorbed: float = 0.0
+    mean_episode_return_components: dict = dataclasses.field(default_factory=lambda: {})
 
 @struct.dataclass
 class Metrics:
@@ -112,11 +120,28 @@ class Metrics:
     timestep: int
     done: bool
 
+@struct.dataclass
+class RichMetrics:
+    episode_returns: float
+    episode_lengths: int
+    returned_episode_returns: float
+    returned_episode_lengths: int
+    timestep: int
+    done: bool
+    absorbed: bool
+    episode_return_components: dict[str, float]
+    returned_episode_return_components: dict[str, float]
+
 
 @struct.dataclass
 class LogEnvState(BaseWrapperState):
     env_state: MjxState
     metrics: Metrics
+
+@struct.dataclass
+class RichLogEnvState(BaseWrapperState):
+    env_state: MjxState
+    metrics: RichMetrics
 
 
 class LogWrapper(BaseWrapper):
@@ -147,6 +172,74 @@ class LogWrapper(BaseWrapper):
                                          + new_episode_length * done,
                 timestep=state.metrics.timestep + 1,
                 done=done,),
+        )
+        return next_observation, reward, absorbing, done, info, state
+    
+
+class RichLogWrapper(BaseWrapper):
+    """Log the episode returns and lengths."""
+
+    @partial(jax.jit, static_argnums=(0,))
+    def reset(self, rng_key):
+        obs, env_state = self.env.reset(rng_key)
+        initial_reward_components = env_state.additional_carry.reward_state.reward_components
+        zero_components = {key: 0.0 for key in initial_reward_components.keys()}
+
+        state = RichLogEnvState(env_state, 
+                            metrics=RichMetrics(0, 0, 0, 0, 0, False, False, 
+                                                zero_components.copy(), zero_components.copy()))
+        return obs, state
+
+    @partial(jax.jit, static_argnums=(0,))
+    def step(self, state: RichLogEnvState, action: Union[int, float]):
+
+        # make a step
+        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action)
+
+        new_episode_return = state.metrics.episode_returns + reward
+        new_episode_length = state.metrics.episode_lengths + 1
+
+        reward_components = state.metrics.episode_return_components
+        new_episode_return_components = dict()
+        episode_return_components = dict()
+        returned_episode_return_components = dict()
+        current_keys = set(env_state.additional_carry.reward_state.reward_components.keys())
+
+        if len(reward_components) == 0:
+            for key in current_keys:
+                new_episode_return_components[key] = env_state.additional_carry.reward_state.reward_components[key]
+                episode_return_components[key] = new_episode_return_components[key] * (1 - done)
+                returned_episode_return_components[key] = new_episode_return_components[key] * done
+        else:
+            all_keys = current_keys.union(set(state.metrics.episode_return_components.keys()))
+            
+            for key in all_keys:
+                old_episode_value = state.metrics.episode_return_components.get(key, 0.0)
+                old_returned_value = state.metrics.returned_episode_return_components.get(key, 0.0)
+
+                current_reward = env_state.additional_carry.reward_state.reward_components.get(key, 0.0)
+                
+                new_episode_return_components[key] = old_episode_value + current_reward
+                episode_return_components[key] = new_episode_return_components[key] * (1 - done)
+                returned_episode_return_components[key] = old_returned_value * (1 - done) + \
+                    new_episode_return_components[key] * done
+
+        
+        state = RichLogEnvState(
+            env_state=env_state,
+            metrics=RichMetrics(
+                episode_returns=new_episode_return * (1 - done),
+                episode_lengths=new_episode_length * (1 - done),
+                returned_episode_returns=state.metrics.returned_episode_returns * (1 - done)
+                                         + new_episode_return * done,
+                returned_episode_lengths=state.metrics.returned_episode_lengths * (1 - done)
+                                         + new_episode_length * done,
+                timestep=state.metrics.timestep + 1,
+                done=done,
+                absorbed=absorbing,
+                episode_return_components=episode_return_components,
+                returned_episode_return_components=returned_episode_return_components,
+                ),
         )
         return next_observation, reward, absorbing, done, info, state
 

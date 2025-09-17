@@ -7,6 +7,7 @@ from dataclasses import fields
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms import PPOJax
 from loco_mujoco.utils.metrics import QuantityContainer
+from loco_mujoco.utils import MetricsHandler
 
 import hydra
 from hydra.core.hydra_config import HydraConfig
@@ -35,11 +36,13 @@ def experiment(config: DictConfig):
         # create env
         env = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
 
+        mh = MetricsHandler(config, env) if config.experiment.validation.active else None
+
         # get initial agent configuration
         agent_conf = PPOJax.init_agent_conf(env, config)
 
         # build training function
-        train_fn = PPOJax.build_train_fn(env, agent_conf)
+        train_fn = PPOJax.build_train_fn(env, agent_conf, mh=mh, wandb_run=run)
 
         # jit and vmap training function
         train_fn = jax.jit(jax.vmap(train_fn)) if config.experiment.n_seeds > 1 else jax.jit(train_fn)

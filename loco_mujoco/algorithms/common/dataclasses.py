@@ -1,5 +1,5 @@
 from typing import NamedTuple
-from typing import Any
+from typing import Any, Optional
 
 import jax
 import jax.numpy as jnp
@@ -28,9 +28,13 @@ class MetricHandlerTransition(NamedTuple):
     logged_metrics: Metrics
 
 
+@struct.dataclass
+class AdaptiveLRState:
+    learning_rate: jnp.ndarray
+
 class TrainState(train_state.TrainState):
     run_stats: Any
-
+    adaptive_lr_state: Optional[AdaptiveLRState]
 
 @struct.dataclass
 class TrainStateBuffer:
