@@ -404,6 +404,24 @@ def get_init_qpos_for_motion_retargeting(env, init_mocap_pos, init_mocap_quat, r
 
     env._data.mocap_pos = init_mocap_pos
     env._data.mocap_quat = init_mocap_quat
+
+    # get mocap body position and quaternion
+    body_names = [env._model.body(i).name for i in range(env._model.nbody)]
+    root_body_name = env.root_body_name
+
+    root_mocap_body_name = f"target_mocap_body_{root_body_name}_mimic"
+    root_mocap_body_index = body_names.index(root_mocap_body_name)
+    root_mocap_id = env._model.body_mocapid[root_mocap_body_index]
+    assert root_mocap_id != -1
+    root_mocap_pos = env._data.mocap_pos[root_mocap_id]
+    root_mocap_quat = env._data.mocap_quat[root_mocap_id]
+
+    root_body_id = body_names.index(root_body_name)
+    root_joint_id = env._model.body_jntadr[root_body_id]
+    root_joint_qposadr = env._model.jnt_qposadr[root_joint_id]
+    env._data.qpos[root_joint_qposadr:root_joint_qposadr + 3] = root_mocap_pos
+    env._data.qpos[root_joint_qposadr + 3:root_joint_qposadr + 7] = root_mocap_quat
+
     mujoco.mj_step(env._model, env._data, robot_conf.optimization_params.init_motion_iterations)
     qpos = env._data.qpos.copy()
 
