@@ -9,7 +9,8 @@ from itertools import cycle
 import numpy as np
 
 from loco_mujoco.core.visuals.video_recorder import VideoRecorder
-
+from mujoco import mjx
+import jax
 
 def _import_egl(width, height):
     from mujoco.egl import GLContext
@@ -520,7 +521,7 @@ class MujocoViewer:
         visual_geoms_type = np.array(mjx_state.additional_carry.user_scene.geoms.type)
         visual_geoms_size = np.array(mjx_state.additional_carry.user_scene.geoms.size)
         visual_geoms_pos = np.array(mjx_state.additional_carry.user_scene.geoms.pos)
-        visual_geoms_pos[..., :2] += self._visual_geom_offsets
+        # visual_geoms_pos[..., :2] += self._visual_geom_offsets
         visual_geoms_mat = np.array(mjx_state.additional_carry.user_scene.geoms.mat)
         visual_geoms_rgba = np.array(mjx_state.additional_carry.user_scene.geoms.rgba)
         visual_geoms_dataid = np.array(mjx_state.additional_carry.user_scene.geoms.dataid)
@@ -530,21 +531,32 @@ class MujocoViewer:
 
             render_start = time.time()
 
+            data_list = _unbatch_general(mjx_state.data)
+
             for i in range(n_envs):
                 data = self._datas_for_parallel_render[i]
-                offset = self._offsets_for_parallel_render[i]
-                data.qpos, data.qvel = mjx_state.data.qpos[i, :], mjx_state.data.qvel[i, :]
-                data.mocap_pos, data.mocap_quat = mjx_state.data.mocap_pos[i, :], mjx_state.data.mocap_quat[i, :]
-                data.qpos[0] += offset[0]
-                data.qpos[1] += offset[1]
-                data.mocap_pos[:, 0] += offset[0]
-                data.mocap_pos[:, 1] += offset[1]
-                mujoco.mj_forward(self._model, data)
+                # offset = self._offsets_for_parallel_render[i]
+                # data.qpos, data.qvel = mjx_state.data.qpos[i, :], mjx_state.data.qvel[i, :]
+                # data.mocap_pos, data.mocap_quat = mjx_state.data.mocap_pos[i, :], mjx_state.data.mocap_quat[i, :]
+
+                mjx.get_data_into(data, self._model, data_list[i])
+
+                # for j in np.where(self._model.body_parentid == 0)[0]:
+                #     model.body_pos[j, 0] = self._model.body_pos[j, 0] + offset[0]
+                #     model.body_pos[j, 1] = self._model.body_pos[j, 1] + offset[1]
+                # for j in np.where(self._model.jnt_type == mujoco.mjtJoint.mjJNT_FREE)[0]:
+                #     adr = model.jnt_qposadr[j]
+                #     data.qpos[adr:adr + 2] += offset[:2]
+
+                # data.mocap_pos[:, 0] += offset[0]
+                # data.mocap_pos[:, 1] += offset[1]
+                # mujoco.mj_forward(model, data)
 
                 if i == 0 and not self._headless:
                     self._create_overlay()
 
                 if i == 0:
+                    mujoco.mj_forward(self._model, data)
                     mujoco.mjv_updateScene(self._model, data, self._scene_option, None, self._camera,
                                            mujoco.mjtCatBit.mjCAT_ALL,
                                            self._scene)
@@ -890,3 +902,9 @@ class MujocoViewer:
             return self._recorder.file_path
         else:
             return None
+
+@jax.jit
+def _unbatch_general(batched_data):
+    leaves, treedef = jax.tree_util.tree_flatten(batched_data)
+    unbatched_leaves = zip(*[leaf for leaf in leaves])  # zip over batch axis
+    return [jax.tree_util.tree_unflatten(treedef, elems) for elems in unbatched_leaves]

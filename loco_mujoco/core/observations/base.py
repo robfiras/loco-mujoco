@@ -789,6 +789,34 @@ class SiteRot(SimpleObs):
         return "site_xmat"
 
 
+class SensorData(SimpleObs):
+    """
+    Observation Type holding array senseor data.
+
+    See also:
+        :class:`Obs` for the base observation class.
+    """
+
+    def __init__(self, obs_name: str, xml_names: List[str], **kwargs):
+        super().__init__(obs_name, xml_names, **kwargs)
+        self.dim = None
+
+    def _init_from_mj(self, env, model, data, current_obs_size):
+        sensor_id = model.sensor(self.xml_name).id
+        sensor_adr = model.sensor_adr[sensor_id]
+        sensor_dim = model.sensor_dim[sensor_id]
+        self.dim = sensor_dim
+
+        self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim
+        self.data_type_ind = np.arange(sensor_adr, sensor_adr + sensor_dim)
+        self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + sensor_dim)])
+        self._initialized_from_mj = True
+
+    @classmethod
+    def data_type(cls):
+        return "sensordata"
+
+
 class ProjectedGravityVector(Observation):
     """
     Observation Type holding the gravity vector.
@@ -916,12 +944,12 @@ class Force(Observation):
 
 class LastAction(StatefulObservation):
 
-    def __init__(self, obs_name: str, **kwargs):
+    def __init__(self, obs_name: str, action_dim: int, **kwargs):
         super().__init__(obs_name, **kwargs)
-        self.dim = None
+        self.dim = action_dim
 
     def _init_from_mj(self, env, model, data, current_obs_size):
-        self.dim = env.action_dim
+        # self.dim = env.action_dim
         self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
         self._initialized_from_mj = True
@@ -1101,6 +1129,7 @@ class ObservationType:
     EntryFromFreeJointVel = EntryFromFreeJointVel
     SitePos = SitePos
     SiteRot = SiteRot
+    SensorData = SensorData
     ProjectedGravityVector = ProjectedGravityVector
     Force = Force
     LastAction = LastAction

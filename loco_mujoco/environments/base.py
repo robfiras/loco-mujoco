@@ -594,7 +594,8 @@ class LocoEnv(Mjx):
                                key: jax.Array,
                                model: MjModel,
                                data: MjData,
-                               backend: ModuleType) -> LocoCarry:
+                               backend: ModuleType,
+                               env_id: int = None ) -> LocoCarry:
         """
         Initializes the additional carry structure.
 
@@ -608,7 +609,7 @@ class LocoEnv(Mjx):
             AdditionalCarry: The initialized additional carry structure.
         """
 
-        carry = super()._init_additional_carry(key, model, data, backend)
+        carry = super()._init_additional_carry(key, model, data, backend, env_id)
 
         key = carry.key
         key, _k = jax.random.split(key)

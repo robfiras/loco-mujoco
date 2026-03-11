@@ -91,7 +91,7 @@ class Mjx(Mujoco):
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
 
-    def mjx_reset(self, key: jax.random.PRNGKey) -> MjxState:
+    def mjx_reset(self, key: jax.random.PRNGKey, env_id: int = None) -> MjxState:
         """
         Resets the environment.
 
@@ -108,7 +108,7 @@ class Mjx(Mujoco):
         # reset data
         data = self._first_data
 
-        carry = self._init_additional_carry(key, self._model, data, jnp)
+        carry = self._init_additional_carry(key, self._model, data, jnp, env_id)
 
         data, carry = self._mjx_reset_carry(self.sys, data, carry)
 
@@ -194,7 +194,7 @@ class Mjx(Mujoco):
 
             _data, _carry = _runner_state
 
-            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry)
+            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry, idx)
 
             # step in the environment using the action
             ctrl = _data.ctrl.at[jnp.array(self._action_indices)].set(ctrl_action)
@@ -417,7 +417,8 @@ class Mjx(Mujoco):
     def _mjx_compute_action(self, action: jnp.ndarray,
                             model: Model,
                             data: Data,
-                            carry: MjxAdditionalCarry) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
+                            carry: MjxAdditionalCarry,
+                            inner_loop_idx: int) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
         """
         Applies transformations to the action at intermediate steps.
 
@@ -430,7 +431,7 @@ class Mjx(Mujoco):
         Returns:
             Tuple[jnp.ndarray, MjxAdditionalCarry]: Computed action and updated carry.
         """
-        action, carry = self._control_func.generate_action(self, action, model, data, carry, jnp)
+        action, carry = self._control_func.generate_action(self, action, model, data, carry, inner_loop_idx, jnp)
         return action, carry
 
     def _mjx_reset_carry(self, model: Model,
@@ -450,6 +451,7 @@ class Mjx(Mujoco):
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, jnp)
         data, carry = self._terrain.reset(self, model, data, carry, jnp)
         data, carry = self._init_state_handler.reset(self, model, data, carry, jnp)
+        data, carry = self._control_func.reset(self, model, data, carry, jnp)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp)
         data, carry = self._reward_function.reset(self, model, data, carry, jnp)
         data, carry = self._control_func.reset(self, model, data, carry, jnp)
@@ -530,7 +532,8 @@ class Mjx(Mujoco):
                 obs[self._obs_indices.site_xmat].reshape(-1, 9)))
 
     def mjx_render(self, state,
-                   record: bool = False) -> np.ndarray:
+                   record: bool = False,
+                   offset: float = 2.0) -> np.ndarray:
         """
         Renders all environments in parallel.
 
@@ -554,7 +557,7 @@ class Mjx(Mujoco):
             self._model.hfield_data = hfield_data[0]
             self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)
 
-        return self._viewer.parallel_render(state, record)
+        return self._viewer.parallel_render(state, record, offset)
 
     def mjx_render_trajectory(self, trajectory,
                               record: bool = False) -> None:
@@ -582,7 +585,8 @@ class Mjx(Mujoco):
     def _init_additional_carry(self, key,
                                model: Model,
                                data: Data,
-                               backend: ModuleType) -> MjxAdditionalCarry:
+                               backend: ModuleType,
+                               env_id: int = None) -> MjxAdditionalCarry:
         """
         Initializes additional carry parameters.
 
@@ -595,7 +599,7 @@ class Mjx(Mujoco):
         Returns:
             MjxAdditionalCarry: Initialized carry object.
         """
-        carry = super()._init_additional_carry(key, model, data, backend)
+        carry = super()._init_additional_carry(key, model, data, backend, env_id)
         return MjxAdditionalCarry(final_observation=backend.zeros(self.info.observation_space.shape),
                                   final_info={},
                                   **vars(carry))

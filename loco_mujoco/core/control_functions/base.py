@@ -37,6 +37,31 @@ class ControlFunction(StatefulObject):
         env_frequency = 1 / env.simulation_dt
         self._controller_frequency = env_frequency * n_intermediate_steps
 
+    def reset(self, env: Any,
+            model: Union[MjModel, Model],
+            data: Union[MjData, Data],
+            carry: Any,
+            backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+        """
+        Reset the control function.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Carry instance with additional state information.
+            backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+
+        Returns:
+            Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
+
+        Raises:
+            ValueError: If the backend module is not supported.
+            NotImplementedError: If the method is not implemented in a subclass.
+        """
+        assert_backend_is_supported(backend)
+        raise NotImplementedError
+
     def generate_action(self, env: Any,
                         action: Union[np.ndarray, jax.Array],
                         model: Union[MjModel, Model],
