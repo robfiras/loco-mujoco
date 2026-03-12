@@ -28,8 +28,9 @@ experiment:
           - walk1_subject5
   env_params:
     env_name: MjxUnitreeH1
-    use_mjwarp: True
-    nconmax: 7000
+    # use_mjwarp: True
+    # nconmax: 7000
+    # njmax: 200
     headless: True
     horizon: 1000
     goal_type: GoalTrajMimic
@@ -68,6 +69,7 @@ experiment:
   max_grad_norm: 0.5
   activation: tanh
   anneal_lr: false
+  desired_kl: 0.01
   weight_decay: 0.0
   normalize_env: true
   debug: false

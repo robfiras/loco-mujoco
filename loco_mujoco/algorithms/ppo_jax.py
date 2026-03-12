@@ -15,6 +15,15 @@ import optax
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStateBase, ActorCritic,
                                     Transition, TrainState, TrainStateBuffer, MetricHandlerTransition)
 from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, NormalizeVecReward, SummaryMetrics
+
+@struct.dataclass
+class PPOSummaryMetrics(SummaryMetrics):
+    mean_value_loss: float = 0.0
+    mean_actor_loss: float = 0.0
+    mean_entropy: float = 0.0
+    mean_approx_kl: float = 0.0
+    mean_clip_fraction: float = 0.0
+    learning_rate: float = 0.0
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
 
@@ -120,6 +129,7 @@ class PPOJax(JaxRLAlgorithmBase):
 
     @classmethod
     def _get_optimizer(cls, config):
+        desired_kl = getattr(config.experiment, 'desired_kl', None)
         if config.experiment.anneal_lr:
             tx = optax.chain(
                 optax.clip_by_global_norm(config.experiment.max_grad_norm),
@@ -128,6 +138,13 @@ class PPOJax(JaxRLAlgorithmBase):
                                                                                 config.experiment.update_epochs, config.lr,
                                                                                 config.experiment.num_updates))
             )
+        elif desired_kl is not None:
+            tx = optax.inject_hyperparams(
+                lambda learning_rate: optax.chain(
+                    optax.clip_by_global_norm(config.experiment.max_grad_norm),
+                    optax.adamw(learning_rate, weight_decay=config.experiment.weight_decay, eps=1e-5),
+                )
+            )(learning_rate=config.experiment.lr)
         else:
             tx = optax.chain(
                 optax.clip_by_global_norm(config.experiment.max_grad_norm),
@@ -290,7 +307,9 @@ class PPOJax(JaxRLAlgorithmBase):
                             + config.vf_coef * value_loss
                             - config.ent_coef * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        old_approx_kl = (traj_batch.log_prob - log_prob).mean()
+                        clip_fraction = jnp.mean(jnp.abs(ratio - 1.0) > config.clip_eps)
+                        return total_loss, (value_loss, loss_actor, entropy, old_approx_kl, clip_fraction)
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(
@@ -322,6 +341,30 @@ class PPOJax(JaxRLAlgorithmBase):
                 train_state, total_loss = jax.lax.scan(
                     _update_minbatch, train_state, minibatches
                 )
+
+                # Adaptive KL learning rate (RSL-style)
+                desired_kl = getattr(config, 'desired_kl', None)
+                if desired_kl is not None:
+                    mean_kl = jnp.mean(total_loss[1][3])  # avg old_approx_kl across minibatches
+                    current_lr = train_state.opt_state.inner_state.hyperparams['learning_rate']
+                    new_lr = jax.lax.cond(
+                        mean_kl > desired_kl * 2.0,
+                        lambda lr: jnp.maximum(1e-5, lr / 1.5),
+                        lambda lr: jax.lax.cond(
+                            (mean_kl < desired_kl / 2.0) & (mean_kl > 0.0),
+                            lambda lr: jnp.minimum(1e-2, lr * 1.5),
+                            lambda lr: lr,
+                            lr,
+                        ),
+                        current_lr,
+                    )
+                    new_opt_state = train_state.opt_state._replace(
+                        inner_state=train_state.opt_state.inner_state._replace(
+                            hyperparams={'learning_rate': new_lr}
+                        )
+                    )
+                    train_state = train_state.replace(opt_state=new_opt_state)
+
                 update_state = (train_state, traj_batch, advantages, targets, rng)
                 return update_state, total_loss
 
@@ -336,10 +379,33 @@ class PPOJax(JaxRLAlgorithmBase):
 
             logged_metrics = traj_batch.metrics
 
-            metric = SummaryMetrics(
+            # aggregate loss metrics across epochs and minibatches
+            mean_value_loss = jnp.mean(loss_info[1][0])
+            mean_actor_loss = jnp.mean(loss_info[1][1])
+            mean_entropy = jnp.mean(loss_info[1][2])
+            mean_approx_kl = jnp.mean(loss_info[1][3])
+            mean_clip_fraction = jnp.mean(loss_info[1][4])
+
+            # extract current learning rate
+            desired_kl = getattr(config, 'desired_kl', None)
+            if config.anneal_lr:
+                current_lr = cls._linear_lr_schedule(train_state.step, config.num_minibatches,
+                                                     config.update_epochs, config.lr, config.num_updates)
+            elif desired_kl is not None:
+                current_lr = train_state.opt_state.inner_state.hyperparams['learning_rate']
+            else:
+                current_lr = jnp.array(config.lr)
+
+            metric = PPOSummaryMetrics(
                 mean_episode_return=jnp.sum(jnp.where(logged_metrics.done, logged_metrics.returned_episode_returns, 0.0)) / jnp.sum(logged_metrics.done),
                 mean_episode_length=jnp.sum(jnp.where(logged_metrics.done, logged_metrics.returned_episode_lengths, 0.0)) / jnp.sum(logged_metrics.done),
                 max_timestep=jnp.max(logged_metrics.timestep * config.num_envs),
+                mean_value_loss=mean_value_loss,
+                mean_actor_loss=mean_actor_loss,
+                mean_entropy=mean_entropy,
+                mean_approx_kl=mean_approx_kl,
+                mean_clip_fraction=mean_clip_fraction,
+                learning_rate=current_lr,
             )
 
             def _evaluation_step():

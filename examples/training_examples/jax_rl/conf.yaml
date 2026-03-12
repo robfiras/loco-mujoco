@@ -62,6 +62,7 @@ experiment:
   max_grad_norm: 0.5
   activation: tanh
   anneal_lr: false
+  desired_kl: 0.01
   weight_decay: 0.0
   normalize_env: true
   debug: false

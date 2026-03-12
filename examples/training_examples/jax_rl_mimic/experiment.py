@@ -70,9 +70,9 @@ def experiment(config: DictConfig):
             validation_metrics = jax.tree.map(lambda x: jnp.mean(jnp.atleast_2d(x), axis=0), validation_metrics)
 
             for i in range(len(training_metrics.mean_episode_return)):
-                run.log({"Mean Episode Return": training_metrics.mean_episode_return[i],
-                         "Mean Episode Length": training_metrics.mean_episode_length[i]},
-                        step=int(training_metrics.max_timestep[i]))
+                metrics_to_log = {f"Training/{field.name}": getattr(training_metrics, field.name)[i]
+                                  for field in fields(training_metrics) if field.name != "max_timestep"}
+                run.log(metrics_to_log, step=int(training_metrics.max_timestep[i]))
 
                 if (i+1) % config.experiment.validation_interval == 0 and config.experiment.validation.active:
                     run.log({"Validation Info/Mean Episode Return": validation_metrics.mean_episode_return[i],
