@@ -81,7 +81,9 @@ class TargetVelocityTrajReward(TrajectoryBasedReward):
                  model: Union[MjModel, Model],
                  data: Union[MjData, Data],
                  carry: Any,
-                 backend: ModuleType) -> Tuple[float, Any]:
+                 backend: ModuleType,
+                 traj_model=None,
+                 traj_data=None) -> Tuple[float, Any]:
         """
         Computes a tracking reward based on the deviation from the trajectory velocity.
         Tracking is done on the x, y, and yaw velocities of the root.
@@ -222,7 +224,9 @@ class MimicReward(TrajectoryBasedReward):
                    key: Any,
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
-                   backend: ModuleType):
+                   backend: ModuleType,
+                   traj_model=None,
+                   traj_data=None):
         """
         Initialize the reward state.
 
@@ -244,7 +248,9 @@ class MimicReward(TrajectoryBasedReward):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType):
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None):
         """
         Reset the reward state.
 
@@ -259,7 +265,7 @@ class MimicReward(TrajectoryBasedReward):
             Tuple[Union[MjData, Data], Any]: The updated data and carry.
 
         """
-        reward_state = self.init_state(env, None, model, data, backend)
+        reward_state = self.init_state(env, None, model, data, backend, traj_model, traj_data)
         carry = carry.replace(reward_state=reward_state)
         return data, carry
 
@@ -274,7 +280,9 @@ class MimicReward(TrajectoryBasedReward):
                  model: Union[MjModel, Model],
                  data: Union[MjData, Data],
                  carry: Any,
-                 backend: ModuleType) -> Tuple[float, Any]:
+                 backend: ModuleType,
+                 traj_model=None,
+                 traj_data=None) -> Tuple[float, Any]:
         """
         Computes a deep mimic tracking reward based on the deviation from the trajectory. The reward is computed as the
         negative exponential of the squared difference between the current state and the trajectory state. The reward

@@ -7,7 +7,7 @@ from mujoco import MjData, MjModel
 from mujoco.mjx import Data, Model
 
 from loco_mujoco.core.stateful_object import StatefulObject
-from loco_mujoco.trajectory import TrajectoryHandler
+from loco_mujoco.core.trajectory import TrajectoryHandler
 from loco_mujoco.core.utils.backend import assert_backend_is_supported
 
 
@@ -33,7 +33,9 @@ class TerminalStateHandler(StatefulObject):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the terminal state handler.
 
@@ -58,7 +60,9 @@ class TerminalStateHandler(StatefulObject):
                      obs: np.ndarray,
                      info: Dict[str, Any],
                      data: MjData,
-                     carry: Any) -> Union[bool, Any]:
+                     carry: Any,
+                     traj_model=None,
+                     traj_data=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. Function for CPU Mujoco.
 
@@ -82,7 +86,9 @@ class TerminalStateHandler(StatefulObject):
                          obs: jnp.ndarray,
                          info: Dict[str, Any],
                          data: Data,
-                         carry: Any) -> Union[bool, Any]:
+                         carry: Any,
+                         traj_model=None,
+                         traj_data=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. Function for Mjx.
 
@@ -107,7 +113,9 @@ class TerminalStateHandler(StatefulObject):
                              info: Dict[str, Any],
                              data: Union[MjData, Data],
                              carry: Any,
-                             backend: ModuleType) -> Union[bool, Any]:
+                             backend: ModuleType,
+                             traj_model=None,
+                             traj_data=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. Compatible with both CPU Mujoco and Mjx.
 

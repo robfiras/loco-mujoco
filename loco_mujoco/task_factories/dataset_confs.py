@@ -1,7 +1,7 @@
 from typing import Union, ClassVar, List
 from dataclasses import dataclass
 
-from loco_mujoco.trajectory.dataclasses import Trajectory
+from loco_mujoco.core.trajectory.dataclasses import Trajectory
 
 
 @dataclass

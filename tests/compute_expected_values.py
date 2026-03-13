@@ -64,7 +64,7 @@ def main():
         TrajectoryData,
         TrajectoryModel,
     )
-    from loco_mujoco.trajectory import Trajectory as TrajClass
+    from loco_mujoco.core.trajectory import Trajectory as TrajClass
     import mujoco
 
     DEFAULTS = {"horizon": 1000, "gamma": 0.99, "n_envs": 1}

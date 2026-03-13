@@ -4,7 +4,7 @@ import numpy as np
 import mujoco
 
 from loco_mujoco import LocoEnv
-from loco_mujoco.trajectory import Trajectory, TrajectoryInfo, TrajectoryModel, TrajectoryData
+from loco_mujoco.core.trajectory import Trajectory, TrajectoryInfo, TrajectoryModel, TrajectoryData
 
 
 """

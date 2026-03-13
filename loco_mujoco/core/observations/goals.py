@@ -67,7 +67,7 @@ class Goal(StatefulObservation):
                     model: Union[MjModel, Model],
                     data: Union[MjData, Data],
                     carry: Any,
-                    backend: ModuleType) -> Tuple[Union[MjData, Any], Any]:
+                    backend: ModuleType, traj_model=None, traj_data=None) -> Tuple[Union[MjData, Any], Any]:
         """
         Reset the state of the goal.
 
@@ -223,7 +223,7 @@ class NoGoal(Goal):
                                  model: Union[MjModel, Model],
                                  data: Union[MjData, Data],
                                  carry: Any,
-                                 backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                                 backend: ModuleType, traj_model=None, traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Get the observation and update the state. Always returns an empty array for NoGoal.
 
@@ -336,7 +336,7 @@ class GoalRandomRootVelocity(Goal, RootVelocityArrowVisualizer):
                    key: jax.random.PRNGKey,
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
-                   backend: ModuleType) -> GoalRandomRootVelocityState:
+                   backend: ModuleType, traj_model=None, traj_data=None) -> GoalRandomRootVelocityState:
         """
         Initialize the goal state.
 
@@ -357,7 +357,7 @@ class GoalRandomRootVelocity(Goal, RootVelocityArrowVisualizer):
                     model: Union[MjModel, Model],
                     data: Union[MjData, Data],
                     carry: Any,
-                    backend: ModuleType) -> Tuple[Union[MjData, Any], Any]:
+                    backend: ModuleType, traj_model=None, traj_data=None) -> Tuple[Union[MjData, Any], Any]:
         """
         Reset the goal state with random velocities.
 
@@ -395,7 +395,7 @@ class GoalRandomRootVelocity(Goal, RootVelocityArrowVisualizer):
                                  model: Union[MjModel, Model],
                                  data: Union[MjData, Data],
                                  carry: Any,
-                                 backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                                 backend: ModuleType, traj_model=None, traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Get the current goal observation and update the state.
 
@@ -517,7 +517,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
                    key: jax.random.PRNGKey,
                    model: Union[MjModel, Any],
                    data: Union[MjData, Any],
-                   backend: ModuleType) -> GoalTrajRootVelocityState:
+                   backend: ModuleType, traj_model=None, traj_data=None) -> GoalTrajRootVelocityState:
         """
         Initialize the goal state.
 
@@ -538,7 +538,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
                                  model: Union[MjModel, Model],
                                  data: Union[MjData, Data],
                                  carry: Any,
-                                 backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                                 backend: ModuleType, traj_model=None, traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Get the current goal observation and update the state.
 
@@ -812,7 +812,7 @@ class GoalTrajMimic(Goal):
                                  model: Union[MjModel, Model],
                                  data: Union[MjData, Data],
                                  carry: Any,
-                                 backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                                 backend: ModuleType, traj_model=None, traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Get the current goal observation and update the state.
 

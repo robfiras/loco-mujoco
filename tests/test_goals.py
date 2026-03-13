@@ -7,7 +7,7 @@ from test_conf import DummyHumamoidEnv
 from loco_mujoco.core.observations.goals import Goal
 from loco_mujoco.environments.base import TrajState
 
-from loco_mujoco.trajectory import Trajectory
+from loco_mujoco.core.trajectory import Trajectory
 from test_conf import *
 
 DEFAULTS = {"horizon": 1000, "gamma": 0.99, "n_envs": 1}

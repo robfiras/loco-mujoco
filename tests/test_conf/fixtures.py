@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 import jax.random as jr
 import numpy.random as nr
 
-from loco_mujoco.trajectory import (
+from loco_mujoco.core.trajectory import (
     Trajectory,
     TrajectoryInfo,
     TrajectoryModel,

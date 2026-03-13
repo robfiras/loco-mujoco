@@ -30,7 +30,7 @@ from loco_mujoco.smpl import SMPLH_BONE_ORDER_NAMES
 from loco_mujoco.smpl.utils.smoothing import gaussian_filter_1d_batch
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.core.utils.math import quat_scalarlast2scalarfirst, quat_scalarfirst2scalarlast
-from loco_mujoco.trajectory import (
+from loco_mujoco.core.trajectory import (
     Trajectory,
     TrajectoryInfo,
     TrajectoryModel,

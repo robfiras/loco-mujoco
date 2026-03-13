@@ -42,7 +42,9 @@ class ControlFunction(StatefulObject):
                         model: Union[MjModel, Model],
                         data: Union[MjData, Data],
                         carry: Any,
-                        backend: ModuleType) -> Tuple[Union[np.ndarray, jax.Array], Any]:
+                        backend: ModuleType,
+                        traj_model=None,
+                        traj_data=None) -> Tuple[Union[np.ndarray, jax.Array], Any]:
         """
         Call the action with control function.
 
@@ -68,7 +70,9 @@ class ControlFunction(StatefulObject):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset control-function state (and optionally modify data/carry) at env reset.
 

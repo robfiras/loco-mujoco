@@ -25,6 +25,7 @@ from loco_mujoco.core.terminal_state_handler.base import TerminalStateHandler
 from loco_mujoco.core.visuals import MjvScene, MujocoViewer
 from importlib.resources import files
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
+from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData
 
 
 @struct.dataclass
@@ -108,6 +109,7 @@ class Mujoco:
                  init_state_params: Dict = None,
                  control_type: str = "DefaultControl",
                  control_params: Dict = None,
+                 max_num_samples_traj: int = 10_000,
                  **viewer_params):
 
         # set the timestep if provided, else read it from model
@@ -197,8 +199,9 @@ class Mujoco:
         self._video_file_path = None
         self._added_carry_visual_to_user_scene = False
         self._added_carry_visual_start_idx = None
+        self._max_num_samples_traj = max_num_samples_traj
 
-    def reset(self, key=None) -> np.ndarray:
+    def reset(self, key=None, traj_model: Optional[TrajectoryModel] = None, traj_data: Optional[TrajectoryData] = None) -> np.ndarray:
         """
         Resets the environment to the initial state.
 
@@ -217,19 +220,20 @@ class Mujoco:
         mujoco.mj_resetData(self._model, self._data)
         mujoco.mj_forward(self._model, self._data)
         # todo: replace all cur_step_in_episode to use additional info!
-        self._additional_carry = self._init_additional_carry(key, self._model, self._data, np)
+        self._additional_carry = self._init_additional_carry(key, self._model, self._data, np, traj_model, traj_data)
         self._data, self._additional_carry =\
-            self._reset_carry(self._model, self._data, self._additional_carry)
+            self._reset_carry(self._model, self._data, self._additional_carry, traj_model, traj_data)
 
         # reset all stateful entities
         self._data, self._additional_carry = self.obs_container.reset_state(self, self._model, self._data,
-                                                                            self._additional_carry, jnp)
+                                                                            self._additional_carry, jnp,
+                                                                            traj_model, traj_data)
         self._obs, self._additional_carry = self._create_observation(self._model, self._data, self._additional_carry)
         self._info = self._reset_info_dictionary(self._obs, self._data, subkey)
         self._cur_step_in_episode = 0
         return self._obs
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
+    def step(self, action: np.ndarray, traj_model: Optional[TrajectoryModel] = None, traj_data: Optional[TrajectoryData] = None) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """
         Takes a step in the environment.
 
@@ -247,40 +251,40 @@ class Mujoco:
         carry = carry.replace(last_action=action)
 
         # preprocess action
-        processed_action, carry = self._preprocess_action(action, self._model, self._data, carry)
+        processed_action, carry = self._preprocess_action(action, self._model, self._data, carry, traj_model, traj_data)
 
         # modify data and model during simulation, before main step
-        self._model, self._data, carry = self._simulation_pre_step(self._model, self._data, carry)
+        self._model, self._data, carry = self._simulation_pre_step(self._model, self._data, carry, traj_model, traj_data)
 
         for i in range(self._n_intermediate_steps):
 
             # compute the action at every intermediate step
-            ctrl_action, carry = self._compute_action(processed_action, self._model, self._data, carry)
+            ctrl_action, carry = self._compute_action(processed_action, self._model, self._data, carry, traj_model, traj_data)
 
             # main mujoco step, runs the sim for n_substeps
             self._data.ctrl[self._action_indices] = ctrl_action
             mujoco.mj_step(self._model, self._data, self._n_substeps)
 
         # modify data during simulation, after main step (does nothing by default)
-        self._data, carry = self._simulation_post_step(self._model, self._data, carry)
+        self._data, carry = self._simulation_post_step(self._model, self._data, carry, traj_model, traj_data)
 
         # create the final observation
         cur_obs, carry = self._create_observation(self._model, self._data, carry)
 
         # modify obs and data, before stepping in the env (does nothing by default)
-        cur_obs, self._data, cur_info, carry = self._step_finalize(cur_obs, self._model, self._data, cur_info, carry)
+        cur_obs, self._data, cur_info, carry = self._step_finalize(cur_obs, self._model, self._data, cur_info, carry, traj_model, traj_data)
 
         # update info (does nothing by default)
         cur_info = self._update_info_dictionary(cur_info, cur_obs, self._data, carry)
 
         # check if the current state is an absorbing state
-        absorbing, carry = self._is_absorbing(cur_obs, cur_info, self._data, carry)
+        absorbing, carry = self._is_absorbing(cur_obs, cur_info, self._data, carry, traj_model, traj_data)
 
         # calculate the reward
-        reward, carry = self._reward(self._obs, action, cur_obs, absorbing, cur_info, self._model, self._data, carry)
+        reward, carry = self._reward(self._obs, action, cur_obs, absorbing, cur_info, self._model, self._data, carry, traj_model, traj_data)
 
         # calculate flag indicating whether this is the last obs before resetting
-        done = self._is_done(cur_obs, absorbing, cur_info, self._data, carry)
+        done = self._is_done(cur_obs, absorbing, cur_info, self._data, carry, traj_model, traj_data)
 
         self._obs = cur_obs
         self._cur_step_in_episode += 1
@@ -351,7 +355,9 @@ class Mujoco:
     def _is_absorbing(self, obs: np.ndarray,
                       info: Dict,
                       data: MjData,
-                      carry: AdditionalCarry) -> Tuple[bool, AdditionalCarry]:
+                      carry: AdditionalCarry,
+                      traj_model=None,
+                      traj_data=None) -> Tuple[bool, AdditionalCarry]:
         """
         Check whether the given state is an absorbing state or not.
 
@@ -365,13 +371,15 @@ class Mujoco:
             A boolean flag indicating whether this state is absorbing or not.
 
         """
-        return self._terminal_state_handler.is_absorbing(self, obs, info, data, carry)
+        return self._terminal_state_handler.is_absorbing(self, obs, info, data, carry, traj_model, traj_data)
 
     def _is_done(self, obs: np.ndarray,
                  absorbing: bool,
                  info: Dict,
                  data: MjData,
-                 carry: AdditionalCarry) -> bool:
+                 carry: AdditionalCarry,
+                 traj_model=None,
+                 traj_data=None) -> bool:
         """
         Check whether the episode is done or not.
 
@@ -391,7 +399,9 @@ class Mujoco:
 
     def _reset_carry(self, model: MjModel,
                      data: MjData,
-                     carry: AdditionalCarry) -> Tuple[MjData, AdditionalCarry]:
+                     carry: AdditionalCarry,
+                     traj_model: Optional[TrajectoryModel] = None,
+                     traj_data: Optional[TrajectoryData] = None) -> Tuple[MjData, AdditionalCarry]:
         """
         Resets the additional carry. Also allows modification to the MjData.
 
@@ -404,12 +414,12 @@ class Mujoco:
             The updated carry and data.
 
         """
-        data, carry = self._terminal_state_handler.reset(self, model, data, carry, np)
-        data, carry = self._terrain.reset(self, model, data, carry, np)
-        data, carry = self._init_state_handler.reset(self, model, data, carry, np)
-        data, carry = self._domain_randomizer.reset(self, model, data, carry, np)
-        data, carry = self._reward_function.reset(self, model, data, carry, np)
-        data, carry = self._control_func.reset(self, model, data, carry, np)
+        data, carry = self._terminal_state_handler.reset(self, model, data, carry, np, traj_model, traj_data)
+        data, carry = self._terrain.reset(self, model, data, carry, np, traj_model, traj_data)
+        data, carry = self._init_state_handler.reset(self, model, data, carry, np, traj_model, traj_data)
+        data, carry = self._domain_randomizer.reset(self, model, data, carry, np, traj_model, traj_data)
+        data, carry = self._reward_function.reset(self, model, data, carry, np, traj_model, traj_data)
+        data, carry = self._control_func.reset(self, model, data, carry, np, traj_model, traj_data)
 
         return data, carry
 
@@ -417,7 +427,9 @@ class Mujoco:
                        model: MjModel,
                        data: MjData,
                        info: Dict,
-                       carry: AdditionalCarry) -> Tuple[np.ndarray, MjData, Dict, AdditionalCarry]:
+                       carry: AdditionalCarry,
+                       traj_model=None,
+                       traj_data=None) -> Tuple[np.ndarray, MjData, Dict, AdditionalCarry]:
         """
         Allows information to be accessed at the end of the step function.
 
@@ -433,7 +445,7 @@ class Mujoco:
 
         """
 
-        obs, carry = self._domain_randomizer.update_observation(self, obs, model, data, carry, np)
+        obs, carry = self._domain_randomizer.update_observation(self, obs, model, data, carry, np, traj_model, traj_data)
 
         return obs, data, info, carry
 
@@ -476,7 +488,9 @@ class Mujoco:
     def _preprocess_action(self, action: np.ndarray,
                            model: MjModel,
                            data: MjData,
-                           carry: AdditionalCarry) -> Tuple[np.ndarray, AdditionalCarry]:
+                           carry: AdditionalCarry,
+                           traj_model=None,
+                           traj_data=None) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Compute a transformation of the action provided to the
         environment. This is done once in the beginning of the step function.
@@ -492,13 +506,15 @@ class Mujoco:
             The action to be used for the current step and the updated carry.
 
         """
-        action, carry = self._domain_randomizer.update_action(self, action, model, data, carry, np)
+        action, carry = self._domain_randomizer.update_action(self, action, model, data, carry, np, traj_model, traj_data)
         return action, carry
 
     def _compute_action(self, action: np.ndarray,
                         model: MjModel,
                         data: MjData,
-                        carry: AdditionalCarry) -> Tuple[np.ndarray, AdditionalCarry]:
+                        carry: AdditionalCarry,
+                        traj_model=None,
+                        traj_data=None) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Compute a transformation of the action at every intermediate step.
         Useful to add control signals simulated directly in python.
@@ -514,12 +530,14 @@ class Mujoco:
             The action to be used for the current step and the updated carry.
 
         """
-        action, carry = self._control_func.generate_action(self, action, model, data, carry, np)
+        action, carry = self._control_func.generate_action(self, action, model, data, carry, np, traj_model, traj_data)
         return action, carry
 
     def _simulation_pre_step(self, model: MjModel,
                              data: MjData,
-                             carry: AdditionalCarry) -> Tuple[MjModel, MjData, AdditionalCarry]:
+                             carry: AdditionalCarry,
+                             traj_model=None,
+                             traj_data=None) -> Tuple[MjModel, MjData, AdditionalCarry]:
         """
         Allows to access and modify the model, data and carry to be modified before the main simulation step.
         Here, this function is used to modify the model and data before the simulation step using domain randomization.
@@ -533,13 +551,15 @@ class Mujoco:
             The updated model, data and carry.
 
         """
-        model, data, carry = self._terrain.update(self, model, data, carry, np)
-        model, data, carry = self._domain_randomizer.update(self, model, data, carry, np)
+        model, data, carry = self._terrain.update(self, model, data, carry, np, traj_model, traj_data)
+        model, data, carry = self._domain_randomizer.update(self, model, data, carry, np, traj_model, traj_data)
         return model, data, carry
 
     def _simulation_post_step(self, model: MjModel,
                               data: MjData,
-                              carry: AdditionalCarry) -> Tuple[MjData, AdditionalCarry]:
+                              carry: AdditionalCarry,
+                              traj_model=None,
+                              traj_data=None) -> Tuple[MjData, AdditionalCarry]:
         """
         Allows to access and modify the model, data and carry to be modified after the main simulation step.
 
@@ -665,7 +685,9 @@ class Mujoco:
                 info: Dict,
                 model: MjModel,
                 data: MjData,
-                carry: AdditionalCarry) -> Tuple[float, AdditionalCarry]:
+                carry: AdditionalCarry,
+                traj_model: Optional[TrajectoryModel] = None,
+                traj_data: Optional[TrajectoryData] = None) -> Tuple[float, AdditionalCarry]:
         """
         Computes the reward for the current transition.
 
@@ -682,7 +704,7 @@ class Mujoco:
         Returns:
             Tuple[float, AdditionalCarry]: The computed reward and updated carry.
         """
-        return self._reward_function(obs, action, next_obs, absorbing, info, self, model, data, carry, np)
+        return self._reward_function(obs, action, next_obs, absorbing, info, self, model, data, carry, np, traj_model, traj_data)
 
     def _create_observation(self,
                             model: MjModel,
@@ -705,7 +727,9 @@ class Mujoco:
                                    model: MjModel,
                                    data: MjData,
                                    carry: AdditionalCarry,
-                                   backend: ModuleType) -> Tuple[np.ndarray, AdditionalCarry]:
+                                   backend: ModuleType,
+                                   traj_model: Optional[TrajectoryModel] = None,
+                                   traj_data: Optional[TrajectoryData] = None) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Creates the observation array by concatenating extracted observations from all types.
 
@@ -727,7 +751,7 @@ class Mujoco:
 
         obs_stateful = []
         for obs in self.obs_container.list_all_stateful():
-            obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend)
+            obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj_model, traj_data)
             obs_stateful.append(obs_s)
 
         obs_stateful = backend.concatenate(obs_stateful)
@@ -817,7 +841,9 @@ class Mujoco:
                                key: jax.Array,
                                model: MjModel,
                                data: MjData,
-                               backend: ModuleType) -> AdditionalCarry:
+                               backend: ModuleType,
+                               traj_model: Optional[TrajectoryModel] = None,
+                               traj_data: Optional[TrajectoryData] = None) -> AdditionalCarry:
         """
         Initializes the additional carry structure.
 
@@ -836,13 +862,13 @@ class Mujoco:
             key=key,
             cur_step_in_episode=1,
             last_action=backend.zeros(self.info.action_space.shape),
-            observation_states=self.obs_container.init_state(self, _k1, model, data, backend),
-            reward_state=self._reward_function.init_state(self, _k2, model, data, backend),
-            domain_randomizer_state=self._domain_randomizer.init_state(self, _k3, model, data, backend),
-            terrain_state=self._terrain.init_state(self, _k4, model, data, backend),
-            init_state_handler_state=self._init_state_handler.init_state(self, _k5, model, data, backend),
-            control_func_state=self._control_func.init_state(self, _k6, model, data, backend),
-            terminal_state_handler_state=self._terminal_state_handler.init_state(self, _k7, model, data, backend),
+            observation_states=self.obs_container.init_state(self, _k1, model, data, backend, traj_model, traj_data),
+            reward_state=self._reward_function.init_state(self, _k2, model, data, backend, traj_model, traj_data),
+            domain_randomizer_state=self._domain_randomizer.init_state(self, _k3, model, data, backend, traj_model, traj_data),
+            terrain_state=self._terrain.init_state(self, _k4, model, data, backend, traj_model, traj_data),
+            init_state_handler_state=self._init_state_handler.init_state(self, _k5, model, data, backend, traj_model, traj_data),
+            control_func_state=self._control_func.init_state(self, _k6, model, data, backend, traj_model, traj_data),
+            terminal_state_handler_state=self._terminal_state_handler.init_state(self, _k7, model, data, backend, traj_model, traj_data),
             user_scene=MjvScene.init_for_all_stateful_objects(backend))
 
         return carry

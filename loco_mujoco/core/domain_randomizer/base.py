@@ -35,7 +35,9 @@ class DomainRandomizer(StatefulObject):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the domain randomizer.
 
@@ -60,7 +62,9 @@ class DomainRandomizer(StatefulObject):
                model: Union[MjModel, Model],
                data: Union[MjData, Data],
                carry: Any,
-               backend: ModuleType) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
+               backend: ModuleType,
+               traj_model=None,
+               traj_data=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
         Update the domain randomizer.
 
@@ -86,7 +90,9 @@ class DomainRandomizer(StatefulObject):
                            model: Union[MjModel, Model],
                            data: Union[MjData, Data],
                            carry: Any,
-                           backend: ModuleType) -> Tuple[Union[np.ndarray, jax.Array], Any]:
+                           backend: ModuleType,
+                           traj_model=None,
+                           traj_data=None) -> Tuple[Union[np.ndarray, jax.Array], Any]:
         """
         Update the observation with domain randomization effects.
 
@@ -113,7 +119,9 @@ class DomainRandomizer(StatefulObject):
                       model: Union[MjModel, Model],
                       data: Union[MjData, Data],
                       carry: Any,
-                      backend: ModuleType) -> Tuple[Union[np.ndarray, jax.Array], Any]:
+                      backend: ModuleType,
+                      traj_model=None,
+                      traj_data=None) -> Tuple[Union[np.ndarray, jax.Array], Any]:
         """
         Update the action with domain randomization effects.
 

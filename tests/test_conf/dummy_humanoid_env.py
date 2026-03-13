@@ -11,7 +11,7 @@ from loco_mujoco.environments import LocoEnv
 from loco_mujoco.core.observations import ObservationType
 from loco_mujoco.core.utils import info_property
 
-from loco_mujoco.trajectory import TrajectoryTransitions
+from loco_mujoco.core.trajectory import TrajectoryTransitions
 
 
 from dataclasses import replace

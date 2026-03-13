@@ -69,7 +69,9 @@ class DefaultRandomizer(DomainRandomizer):
                    key: Any,
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
-                   backend: ModuleType) -> DefaultRandomizerState:
+                   backend: ModuleType,
+                   traj_model=None,
+                   traj_data=None) -> DefaultRandomizerState:
         """
         Initialize the randomizer state.
 
@@ -103,7 +105,9 @@ class DefaultRandomizer(DomainRandomizer):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the randomizer, applying domain randomization.
 
@@ -174,7 +178,9 @@ class DefaultRandomizer(DomainRandomizer):
                model: Union[MjModel, Model],
                data: Union[MjData, Data],
                carry: Any,
-               backend: ModuleType) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
+               backend: ModuleType,
+               traj_model=None,
+               traj_data=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
         Update the randomizer by applying the state changes to the model.
 
@@ -255,7 +261,9 @@ class DefaultRandomizer(DomainRandomizer):
                            model: Union[MjModel, Model],
                            data: Union[MjData, Data],
                            carry: Any,
-                           backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                           backend: ModuleType,
+                           traj_model=None,
+                           traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Update the observation with randomization effects.
 
@@ -364,7 +372,9 @@ class DefaultRandomizer(DomainRandomizer):
                       model: Union[MjModel, Model],
                       data: Union[MjData, Data],
                       carry: Any,
-                      backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                      backend: ModuleType,
+                      traj_model=None,
+                      traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Update the action with randomization effects.
 

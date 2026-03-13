@@ -6,10 +6,10 @@ import jax
 import mujoco
 from mujoco import MjModel, MjData, mj_id2name
 from jax import lax
-from loco_mujoco.trajectory.dataclasses import interpolate_trajectories
+from loco_mujoco.core.trajectory.dataclasses import interpolate_trajectories
 
 
-from loco_mujoco.trajectory import (
+from loco_mujoco.core.trajectory import (
     Trajectory,
     TrajectoryInfo,
     TrajectoryData,

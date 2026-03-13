@@ -8,7 +8,7 @@ from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms import AMPJax
 from loco_mujoco.utils.metrics import QuantityContainer
 from loco_mujoco.utils import MetricsHandler
-from loco_mujoco.trajectory import Trajectory
+from loco_mujoco.core.trajectory import Trajectory
 
 import hydra
 from hydra.core.hydra_config import HydraConfig

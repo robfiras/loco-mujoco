@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from flax import struct
 
 from loco_mujoco.core.stateful_object import StatefulObject
-from loco_mujoco.trajectory.dataclasses import Trajectory, interpolate_trajectories
+from loco_mujoco.core.trajectory.dataclasses import Trajectory, interpolate_trajectories
 
 
 @struct.dataclass
@@ -77,6 +77,14 @@ class TrajectoryHandler(StatefulObject):
     @property
     def n_trajectories(self):
         return len(self.traj.data.split_points) - 1
+
+    @property
+    def traj_model(self):
+        return self.traj.info.model
+
+    @property
+    def traj_data(self):
+        return self.traj.data
 
     @staticmethod
     def filter_and_extend(traj_data, traj_info, model):
@@ -227,10 +235,10 @@ class TrajectoryHandler(StatefulObject):
 
         return traj_data, traj_info
 
-    def init_state(self, env, key, model, data, backend):
+    def init_state(self, env, key, model, data, backend, traj_model=None, traj_data=None):
         return TrajState(0, 0, 0)
 
-    def reset_state(self, env, model, data, carry, backend):
+    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
 
         key = carry.key
 
@@ -255,7 +263,7 @@ class TrajectoryHandler(StatefulObject):
         return data, carry.replace(key=key, traj_state=TrajState(new_traj_no, new_subtraj_step_no,
                                                                  new_subtraj_step_no_init))
 
-    def update_state(self, env, model, data, carry, backend):
+    def update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
 
         traj_state = carry.traj_state
         traj_no = traj_state.traj_no
@@ -284,15 +292,15 @@ class TrajectoryHandler(StatefulObject):
 
         return carry.replace(traj_state=traj_state)
 
-    def get_current_traj_data(self, carry, backend):
+    def get_current_traj_data(self, traj_data, carry, backend):
         traj_no = carry.traj_state.traj_no
         subtraj_step_no = carry.traj_state.subtraj_step_no
-        return self.traj.data.get(traj_no, subtraj_step_no, backend)
+        return traj_data.get(traj_no, subtraj_step_no, backend)
 
-    def get_init_traj_data(self, carry, backend):
+    def get_init_traj_data(self, traj_data, carry, backend):
         traj_no = carry.traj_state.traj_no
         subtraj_step_no_init = carry.traj_state.subtraj_step_no_init
-        return self.traj.data.get(traj_no, subtraj_step_no_init, backend)
+        return traj_data.get(traj_no, subtraj_step_no_init, backend)
 
     def to_numpy(self):
         if not self._is_numpy:

@@ -6,7 +6,7 @@ import yaml
 
 import loco_mujoco
 from loco_mujoco.environments.base import LocoEnv
-from loco_mujoco.trajectory import Trajectory, TrajectoryHandler
+from loco_mujoco.core.trajectory import Trajectory, TrajectoryHandler
 from loco_mujoco.smpl.retargeting import load_retargeted_amass_trajectory, extend_motion, load_robot_conf_file
 from loco_mujoco.smpl.const import AMASS_LOCOMOTION_DATASETS
 from loco_mujoco.datasets.humanoids.LAFAN1 import load_lafan1_trajectory
@@ -100,7 +100,7 @@ class ImitationFactory(TaskFactory):
         # add to the environment
         env.load_trajectory(traj=all_trajs, warn=False)
 
-        return env
+        return env, env.th.traj
 
     @staticmethod
     def get_default_traj(env, default_dataset_conf) -> Trajectory:

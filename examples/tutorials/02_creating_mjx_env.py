@@ -9,8 +9,10 @@ from loco_mujoco import ImitationFactory
 os.environ['XLA_FLAGS'] = (
     '--xla_gpu_triton_gemm_any=True ')
 
-# create env
-env = ImitationFactory.make("MjxUnitreeG1", disable_arms=True, default_dataset_conf=dict(task="stepinplace1"), use_mjwarp=False)
+# create env and trajectory
+env, traj = ImitationFactory.make("MjxUnitreeG1", disable_arms=True, default_dataset_conf=dict(task="stepinplace1"), use_mjwarp=False)
+traj_model = traj.info.model
+traj_data = traj.data
 
 # create keys
 key = jax.random.key(0)
@@ -19,12 +21,12 @@ keys = jax.random.split(key, n_envs + 1)
 key, env_keys = keys[0], keys[1:]
 
 # jit and vmap all functions needed
-rng_reset = jax.jit(jax.vmap(env.mjx_reset))
-rng_step = jax.jit(jax.vmap(env.mjx_step))
+rng_reset = jax.jit(jax.vmap(env.mjx_reset, in_axes=(0, None, None)))
+rng_step = jax.jit(jax.vmap(env.mjx_step, in_axes=(0, 0, None, None)))
 rng_sample_uni_action = jax.jit(jax.vmap(env.sample_action_space))
 
 # reset env
-state = rng_reset(env_keys)
+state = rng_reset(env_keys, traj_model, traj_data)
 
 step = 0
 previous_time = time.time()
@@ -36,7 +38,7 @@ while i < 100000:
     keys = jax.random.split(key, n_envs + 1)
     key, action_keys = keys[0], keys[1:]
     action = rng_sample_uni_action(action_keys)
-    state = rng_step(state, action)
+    state = rng_step(state, action, traj_model, traj_data)
 
     # parallel render
     env.mjx_render(state)

@@ -7,7 +7,7 @@ from mujoco import MjData, MjModel
 from mujoco.mjx import Data, Model
 
 from loco_mujoco.core.stateful_object import StatefulObject
-from loco_mujoco.trajectory.handler import TrajectoryHandler
+from loco_mujoco.core.trajectory.handler import TrajectoryHandler
 
 
 class Reward(StatefulObject):
@@ -60,7 +60,9 @@ class Reward(StatefulObject):
                  model: Union[MjModel, Model],
                  data: Union[MjData, Data],
                  carry: Any,
-                 backend: ModuleType) -> Tuple[float, Any]:
+                 backend: ModuleType,
+                 traj_model=None,
+                 traj_data=None) -> Tuple[float, Any]:
         """
         Compute the reward.
 
@@ -89,7 +91,9 @@ class Reward(StatefulObject):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType):
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None):
         """
         Reset the reward.
 

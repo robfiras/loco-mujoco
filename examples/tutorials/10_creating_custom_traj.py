@@ -5,7 +5,7 @@ import mujoco
 
 from loco_mujoco.task_factories import ImitationFactory, CustomDatasetConf
 from loco_mujoco.environments import UnitreeH1
-from loco_mujoco.trajectory import Trajectory, TrajectoryInfo, TrajectoryModel, TrajectoryData
+from loco_mujoco.core.trajectory import Trajectory, TrajectoryInfo, TrajectoryModel, TrajectoryData
 from loco_mujoco.core.utils.mujoco import mj_jntname2qposid
 
 """

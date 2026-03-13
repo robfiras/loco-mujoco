@@ -100,7 +100,9 @@ class PDControl(ControlFunction):
                    key: Union[jax.random.PRNGKey, Any],
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
-                   backend: ModuleType) -> PDControlState:
+                   backend: ModuleType,
+                   traj_model=None,
+                   traj_data=None) -> PDControlState:
         """
         Initialize the state for PDControl.
 
@@ -128,7 +130,9 @@ class PDControl(ControlFunction):
                         model: Union[MjModel, Model],
                         data: Union[MjData, Data],
                         carry: Any,
-                        backend: ModuleType) -> Tuple[Union[np.ndarray, jax.Array], Any]:
+                        backend: ModuleType,
+                        traj_model=None,
+                        traj_data=None) -> Tuple[Union[np.ndarray, jax.Array], Any]:
         """
         Generate the action using the PD controller. This function expects the action to be in the range [-1, 1].
 

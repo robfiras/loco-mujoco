@@ -27,7 +27,7 @@ experiment:
         dataset_name:
           - walk1_subject5
   env_params:
-    env_name: MjxUnitreeH1
+    env_name: MjxUnitreeG1
     # use_mjwarp: True
     # nconmax: 7000
     # njmax: 200
@@ -62,7 +62,7 @@ experiment:
   gamma: 0.99
   gae_lambda: 0.95
   clip_eps: 0.2
-  init_std: 0.2
+  init_std: 0.05
   learnable_std: false
   ent_coef: 0.0
   vf_coef: 0.5

@@ -7,7 +7,7 @@ from mujoco import MjSpec
 from loco_mujoco.core import ObservationType
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.core.utils import info_property
-from loco_mujoco.trajectory import Trajectory, TrajectoryInfo, TrajectoryModel, TrajectoryData, TrajectoryHandler
+from loco_mujoco.core.trajectory import Trajectory, TrajectoryInfo, TrajectoryModel, TrajectoryData, TrajectoryHandler
 from loco_mujoco.smpl.retargeting import extend_motion
 
 

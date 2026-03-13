@@ -18,7 +18,7 @@ from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStat
                                     TrainStateBuffer, MetricHandlerTransition)
 from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, NormalizeVecReward, SummaryMetrics
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
-from loco_mujoco.trajectory import TrajectoryTransitions
+from loco_mujoco.core.trajectory import TrajectoryTransitions
 
 
 @struct.dataclass

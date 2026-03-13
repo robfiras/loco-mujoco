@@ -17,7 +17,7 @@ from loco_mujoco.core.utils.mujoco import (
     mj_jntid2qvelid,
     mj_jntname2qposid,
     mj_jntname2qvelid)
-from loco_mujoco.trajectory import (
+from loco_mujoco.core.trajectory import (
     Trajectory,
     TrajectoryInfo,
     TrajectoryModel,

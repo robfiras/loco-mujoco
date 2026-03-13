@@ -19,7 +19,9 @@ class NoDomainRandomization(DomainRandomizer):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset with no randomization applied.
 
@@ -40,7 +42,9 @@ class NoDomainRandomization(DomainRandomizer):
                model: Union[MjModel, Model],
                data: Union[MjData, Data],
                carry: Any,
-               backend: ModuleType) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
+               backend: ModuleType,
+               traj_model=None,
+               traj_data=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
         Update with no randomization applied.
 
@@ -62,7 +66,9 @@ class NoDomainRandomization(DomainRandomizer):
                            model: Union[MjModel, Model],
                            data: Union[MjData, Data],
                            carry: Any,
-                           backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                           backend: ModuleType,
+                           traj_model=None,
+                           traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Update the observation with no randomization applied.
 
@@ -85,7 +91,9 @@ class NoDomainRandomization(DomainRandomizer):
                       model: Union[MjModel, Model],
                       data: Union[MjData, Data],
                       carry: Any,
-                      backend: ModuleType) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                      backend: ModuleType,
+                      traj_model=None,
+                      traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Update the action with no randomization applied.
 

@@ -22,7 +22,9 @@ class TrajInitialStateHandler(InitialStateHandler):
               model: Union[MjModel, Model],
               data: Union[MjData, Data],
               carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType,
+              traj_model=None,
+              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the init state handler with its state.
 
@@ -41,10 +43,11 @@ class TrajInitialStateHandler(InitialStateHandler):
         """
         assert_backend_is_supported(backend)
 
+        assert traj_data is not None, "If TrajInitialStateHandler is used, traj_data must be passed."
         assert env.th is not None, "If TrajInitialStateHandler is used, a trajectory has to be loaded."
 
-        # Get the current trajectory data
-        traj_data_sample = env.th.get_current_traj_data(carry, backend)
+        # Get the current trajectory data sample
+        traj_data_sample = env.th.get_current_traj_data(traj_data, carry, backend)
 
         if backend == np:
             data = env.set_sim_state_from_traj_data(data, traj_data_sample, carry)
