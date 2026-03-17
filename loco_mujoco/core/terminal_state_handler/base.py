@@ -7,7 +7,6 @@ from mujoco import MjData, MjModel
 from mujoco.mjx import Data, Model
 
 from loco_mujoco.core.stateful_object import StatefulObject
-from loco_mujoco.core.trajectory import TrajectoryHandler
 from loco_mujoco.core.utils.backend import assert_backend_is_supported
 
 
@@ -135,12 +134,12 @@ class TerminalStateHandler(StatefulObject):
         """
         raise NotImplementedError
 
-    def init_from_traj(self, th: TrajectoryHandler) -> None:
+    def init_from_traj(self, traj) -> None:
         """
         Initialize the TerminalStateHandler from a trajectory handler (optional).
 
         Args:
-            th (TrajectoryHandler): The trajectory handler containing the trajectory.
+            traj: The trajectory containing the trajectory data.
         """
         pass
 

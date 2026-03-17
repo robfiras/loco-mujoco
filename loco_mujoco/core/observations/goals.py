@@ -501,15 +501,15 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
         self._free_jnt_qposid = np.array(mj_jntname2qposid(self.free_jnt_name, model))
         self._free_jnt_qvelid = np.array(mj_jntname2qvelid(self.free_jnt_name, model))
 
-    def init_from_traj(self, traj_handler: Any):
+    def init_from_traj(self, traj: Any):
         """
-        Initialize from a trajectory handler.
+        Initialize from a trajectory.
 
         Args:
-            traj_handler (Any): The trajectory handler.
+            traj (Any): The trajectory.
         """
-        assert traj_handler is not None, (f"Trajectory handler is None, "
-                                          f"using {__class__.__name__} requires a trajectory.")
+        assert traj is not None, (f"Trajectory is None, "
+                                  f"using {__class__.__name__} requires a trajectory.")
         self._initialized_from_traj = True
 
     def init_state(self,
@@ -558,7 +558,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
             R = jnp_R
 
         # Get trajectory data and state
-        traj_data = env.th.traj.data
+        traj_data = env._traj.data
         traj_state = carry.traj_state
 
         # Get a slice of the trajectory data
@@ -609,7 +609,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
         Returns:
             bool: Whether the goal is done.
         """
-        steps_till_end = self._steps_till_end(env.th.traj.data, carry.traj_state)
+        steps_till_end = self._steps_till_end(env._traj.data, carry.traj_state)
         return steps_till_end < self._n_steps_average
 
     def mjx_is_done(self,
@@ -634,7 +634,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
         Returns:
             bool: Whether the goal is done.
         """
-        steps_till_end = self._steps_till_end(env.th.traj.data, carry.traj_state)
+        steps_till_end = self._steps_till_end(env._traj.data, carry.traj_state)
         return jax.lax.cond(steps_till_end < self._n_steps_average, lambda: True, lambda: False)
 
     def _steps_till_end(self,
@@ -796,15 +796,15 @@ class GoalTrajMimic(Goal):
 
         self._initialized_from_mj = True
 
-    def init_from_traj(self, traj_handler: Any):
+    def init_from_traj(self, traj: Any):
         """
-        Initialize from a trajectory handler.
+        Initialize from a trajectory.
 
         Args:
-            traj_handler (Any): The trajectory handler.
+            traj (Any): The trajectory.
         """
-        assert traj_handler is not None, (f"Trajectory handler is None, "
-                                          f"using {__class__.__name__} requires a trajectory.")
+        assert traj is not None, (f"Trajectory is None, "
+                                  f"using {__class__.__name__} requires a trajectory.")
         self._initialized_from_traj = True
 
     def get_obs_and_update_state(self,
@@ -826,7 +826,7 @@ class GoalTrajMimic(Goal):
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: Goal observation and updated carry.
         """
-        traj_data = env.th.traj.data
+        traj_data = env._traj.data
         traj_state = carry.traj_state
 
         traj_data_single = traj_data.get(traj_state.traj_no, traj_state.subtraj_step_no, backend)
@@ -902,7 +902,7 @@ class GoalTrajMimic(Goal):
         else:
             R = jnp_R
 
-        traj_data = env.th.traj.data
+        traj_data = env._traj.data
         traj_state = carry.traj_state
         user_scene = carry.user_scene
         goal_geoms = user_scene.geoms
@@ -1058,7 +1058,7 @@ class GoalTrajMimicv2(GoalTrajMimic):
         else:
             R = jnp_R
 
-        traj_data = env.th.traj.data
+        traj_data = env._traj.data
         traj_state = carry.traj_state
         user_scene = carry.user_scene
         goal_geoms = user_scene.geoms

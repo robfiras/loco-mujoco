@@ -9,7 +9,6 @@ from mujoco.mjx import Data, Model
 
 from loco_mujoco.core.terminal_state_handler.base import TerminalStateHandler
 from loco_mujoco.core.utils.math import quat_scalarfirst2scalarlast
-from loco_mujoco.core.trajectory import TrajectoryHandler
 from loco_mujoco.core.utils.backend import assert_backend_is_supported
 
 
@@ -72,17 +71,16 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         assert_backend_is_supported(backend)
         return data, carry
     
-    def init_from_traj(self, th: TrajectoryHandler) -> None:
+    def init_from_traj(self, traj) -> None:
         """
         Initialize the TerminalStateHandler from a Trajectory.
 
         Args:
-            th (TrajectoryHandler): The trajectory handler containing the trajectory.
+            traj: The trajectory containing the trajectory data.
 
         """
-        assert th is not None, f"{self.__class__.__name__} requires a TrajectoryHandler to be initialized."
+        assert traj is not None, f"{self.__class__.__name__} requires a Trajectory to be initialized."
 
-        traj = th.traj
         root_ind = traj.info.joint_name2ind_qpos[self.root_joint_name]
         self.root_xy = root_ind[:2]
         self.root_height_ind = root_ind[2]

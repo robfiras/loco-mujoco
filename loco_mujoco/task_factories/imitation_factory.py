@@ -98,9 +98,9 @@ class ImitationFactory(TaskFactory):
         all_trajs = Trajectory.concatenate(all_trajs)
 
         # add to the environment
-        env.load_trajectory(traj=all_trajs, warn=False)
+        env.process_trajectory(all_trajs)
 
-        return env, env.th.traj
+        return env, env._traj
 
     @staticmethod
     def get_default_traj(env, default_dataset_conf) -> Trajectory:
@@ -173,11 +173,10 @@ class ImitationFactory(TaskFactory):
                 if cached_file_path:
                     traj.save(cached_file_path)
 
-            # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
-            # and to filter out or add necessary entities is needed
-            default_th = TrajectoryHandler(env.model, control_dt=env.dt, traj=traj)
+            # filter, extend, and interpolate to match the environment
+            traj = TrajectoryHandler.process(traj, env._model, env.dt)
 
-            trajs.append(default_th.traj)
+            trajs.append(traj)
 
         trajs = Trajectory.concatenate(trajs)
 
@@ -214,11 +213,8 @@ class ImitationFactory(TaskFactory):
         # Load AMASS Trajectory
         traj = load_retargeted_amass_trajectory(env.__class__.__name__, dataset_paths)
 
-        # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
-        # and to filter out or add necessary entities is needed
-        default_th = TrajectoryHandler(env.model, control_dt=env.dt, traj=traj)
-
-        return default_th.traj
+        # filter, extend, and interpolate to match the environment
+        return TrajectoryHandler.process(traj, env._model, env.dt)
 
     @staticmethod
     def get_lafan1_traj(env, lafan1_dataset_conf: LAFAN1DatasetConf) -> Trajectory:
@@ -253,11 +249,8 @@ class ImitationFactory(TaskFactory):
         # Load LAFAN1 Trajectory
         traj = load_lafan1_trajectory(env.__class__.__name__, dataset_paths)
 
-        # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
-        # and to filter out or add necessary entities is needed
-        default_th = TrajectoryHandler(env.model, control_dt=env.dt, traj=traj)
-
-        return default_th.traj
+        # filter, extend, and interpolate to match the environment
+        return TrajectoryHandler.process(traj, env._model, env.dt)
 
     @staticmethod
     def get_custom_dataset(env, custom_dataset_conf: CustomDatasetConf) -> Trajectory:
@@ -280,8 +273,5 @@ class ImitationFactory(TaskFactory):
         #
         #     traj = extend_motion(env_name, env_params, traj)
 
-        # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
-        # and to filter out or add necessary entities is needed
-        default_th = TrajectoryHandler(env.model, control_dt=env.dt, traj=traj)
-
-        return default_th.traj
+        # filter, extend, and interpolate to match the environment
+        return TrajectoryHandler.process(traj, env._model, env.dt)

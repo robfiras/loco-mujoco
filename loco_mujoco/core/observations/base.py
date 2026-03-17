@@ -258,12 +258,12 @@ class Observation:
         """
         raise NotImplementedError
 
-    def init_from_traj(self, traj_handler):
+    def init_from_traj(self, traj):
         """
         Optionally, initialize the observation type to store relevant information from the trajectory.
 
         Args:
-            traj_handler: Trajectory Handler class.
+            traj: Trajectory.
 
         """
         pass

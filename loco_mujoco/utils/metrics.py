@@ -51,7 +51,7 @@ class MetricsHandler:
         self._config = config.experiment
 
         if env.th is not None:
-            self._traj_data = env.th.traj.data
+            self._traj_data = env._traj.data
         else:
             self._traj_data = None
 

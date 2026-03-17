@@ -181,7 +181,7 @@ def main():
         if trajectory is not None:
             if backend == "numpy":
                 trajectory.data = trajectory.data.to_numpy()
-            mjx_env.load_trajectory(trajectory)
+            mjx_env.process_trajectory(trajectory)
         return mjx_env
 
     for backend in ["numpy", "jax"]:

@@ -71,7 +71,7 @@ traj = Trajectory(traj_info, traj_data)
 #traj = Trajectory.load("trajectory.npz")
 
 # add the trajectory to the environment
-env.load_trajectory(traj)
+env.process_trajectory(traj)
 
 # replay the trajectory
 env.play_trajectory(n_steps_per_episode=N_steps)

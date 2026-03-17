@@ -134,7 +134,7 @@ def test_GoalTrajRootVelocity(backend, standing_trajectory):
     )
 
     trajectory: Trajectory = standing_trajectory
-    mjx_env.load_trajectory(trajectory)
+    mjx_env.process_trajectory(trajectory)
 
     backend = jnp if backend == "jax" else np
 
@@ -157,7 +157,7 @@ def test_GoalTrajRootVelocity(backend, standing_trajectory):
 
     # Simulate a scenario where the trajectory is ending
     traj_no = carry.traj_state.traj_no
-    idx_of_next_traj = mjx_env.th.traj.data.split_points[traj_no + 1]
+    idx_of_next_traj = mjx_env._traj.data.split_points[traj_no + 1]
     current_step = idx_of_next_traj - 1
 
     carry = carry.replace(
@@ -207,7 +207,7 @@ def test_GoalTrajMimic(backend, standing_trajectory):
     )
 
     trajectory: Trajectory = standing_trajectory
-    mjx_env.load_trajectory(trajectory)
+    mjx_env.process_trajectory(trajectory)
 
     backend = jnp if backend == "jax" else np
 

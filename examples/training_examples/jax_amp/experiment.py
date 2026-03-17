@@ -43,13 +43,13 @@ def experiment(config: DictConfig):
         if not os.path.exists(expert_dataset_path):
             expert_dataset = env.create_dataset()
             # save trajectory with expert transitions to speed-up loading next time
-            new_traj = Trajectory(info=env.th.traj.info, data=env.th.traj.data,
+            new_traj = Trajectory(info=env._traj.info, data=env._traj.data,
                                   obs_container=env.obs_container, transitions=expert_dataset)
             new_traj.save(expert_dataset_path)
         else:
             # if it exists, load it
             new_traj = Trajectory.load(expert_dataset_path)
-            env.load_trajectory(new_traj)
+            env.process_trajectory(new_traj)
             expert_dataset = env.create_dataset()
 
         # get initial agent configuration

@@ -629,10 +629,11 @@ def motion_transfer_robot_to_robot(
         traj_source = extend_motion(env_name_source, robot_conf_source.env_params, traj_source, logger)
 
         # load the source trajectory
-        env.load_trajectory(traj_source, warn=False)
+        env.process_trajectory(traj_source)
 
         # convert traj to numpy
-        env.th.to_numpy()
+        from dataclasses import replace as dc_replace
+        env._traj = dc_replace(env._traj, data=TrajectoryHandler.to_numpy(env._traj.data))
 
         # get the body_shape of the source robot
         path_to_source_robot_smpl_shape = os.path.join(path_source_robot_smpl_data, OPTIMIZED_SHAPE_FILE_NAME)
@@ -647,9 +648,9 @@ def motion_transfer_robot_to_robot(
         # get the source site positions used as a target for optimization
         sites_for_mimic = env.sites_for_mimic
         site_ids = np.array([mujoco.mj_name2id(env._model, mujoco.mjtObj.mjOBJ_SITE, s) for s in sites_for_mimic])
-        target_site_pos = torch.from_numpy(env.th.traj.data.site_xpos[:, site_ids])
-        target_site_mat = torch.from_numpy(env.th.traj.data.site_xmat[:, site_ids])
-        len_dataset = env.th.traj.data.n_samples
+        target_site_pos = torch.from_numpy(env._traj.data.site_xpos[:, site_ids])
+        target_site_mat = torch.from_numpy(env._traj.data.site_xmat[:, site_ids])
+        len_dataset = env._traj.data.n_samples
 
         # define the optimization variables
         pose = np.zeros([len_dataset, 156]).reshape(-1, 52, 3)
@@ -729,7 +730,7 @@ def motion_transfer_robot_to_robot(
                 env._data.mocap_pos = new_global_pos
                 env._data.mocap_quat = quat_scalarlast2scalarfirst(
                     sRot.from_matrix(new_smpl_rot_mats).as_quat())
-                env._data.qpos = env.th.traj.data.qpos[index]
+                env._data.qpos = env._traj.data.qpos[index]
                 mujoco.mj_forward(env._model, env._data)
                 env.render()
 
@@ -749,7 +750,7 @@ def motion_transfer_robot_to_robot(
 
         motion_file = {"pose_aa": pose.cpu().detach().numpy().reshape(-1, 156),
                        "trans": trans.cpu().detach().numpy(),
-                       "fps": env.th.traj.info.frequency}
+                       "fps": env._traj.info.frequency}
 
         # account for scale
         motion_file["pose_aa"] /= scale_source.cpu().detach().numpy()
@@ -811,12 +812,12 @@ def extend_motion(
     traj_data, traj_info = interpolate_trajectories(traj.data, traj.info, 1.0 / env.dt)
     traj = Trajectory(info=traj_info, data=traj_data)
 
-    env.load_trajectory(traj, warn=False)
-    traj_data, traj_info = env.th.traj.data, env.th.traj.info
+    env.process_trajectory(traj)
+    traj_data, traj_info = env._traj.data, env._traj.info
 
     callback = ExtendTrajData(env, model=env._model, n_samples=traj_data.n_samples)
     env.play_trajectory(
-        n_episodes=env.th.n_trajectories,
+        n_episodes=env.th.n_trajectories(env._traj.data),
         render=False,
         callback_class=callback
     )

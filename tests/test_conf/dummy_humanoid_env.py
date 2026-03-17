@@ -144,7 +144,7 @@ class DummyHumamoidEnv(LocoEnv):
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
 
-        if self.th.traj.transitions is None:
+        if self._traj.transitions is None:
 
             # get a new model and data
             if self.use_default_spec:
@@ -161,7 +161,7 @@ class DummyHumamoidEnv(LocoEnv):
             if rng_key is None:
                 rng_key = jax.random.key(0)
 
-            for i in range(self.th.n_trajectories):
+            for i in range(self.th.n_trajectories(self._traj.data)):
 
                 # set configuration to the first state of the current trajectory
                 self.th.fixed_start_conf = (i, 0)
@@ -176,7 +176,7 @@ class DummyHumamoidEnv(LocoEnv):
                 data = self.set_sim_state_from_traj_data(data, traj_data_single, carry)
                 mujoco.mj_forward(model, data)
 
-                data, carry = self._reset_carry(model, data, carry)
+                data, carry = self._reset_carry(model, data, carry, traj_data=self._traj.data)
                 data, carry = (
                     self.obs_container.reset_state(self, model, data, carry, np))
                 obs, carry = self._create_observation(model, data, carry)
@@ -198,14 +198,14 @@ class DummyHumamoidEnv(LocoEnv):
                     data = self.set_sim_state_from_traj_data(data, traj_data_single, carry)
                     mujoco.mj_forward(model, data)
 
-                    data, carry = self._simulation_post_step(model, data, carry)
+                    data, carry = self._simulation_post_step(model, data, carry, traj_data=self._traj.data)
                     obs, carry = self._create_observation(model, data, carry)
                     obs, data, info, carry = (
                         self._step_finalize(obs, model, data, info, carry))
                     observations.append(obs)
 
                     # check if the current state is an absorbing state
-                    is_absorbing, carry = self._is_absorbing(obs, info, data, carry)
+                    is_absorbing, carry = self._is_absorbing(obs, info, data, carry, traj_data=self._traj.data)
                     absorbing_flags.append(is_absorbing)
 
                     # compute reward
@@ -235,9 +235,9 @@ class DummyHumamoidEnv(LocoEnv):
                                                 rewards=all_rewards
                                                 )
 
-            self.th.traj = replace(self.th.traj, transitions=transitions)
+            self._traj = replace(self._traj, transitions=transitions)
 
-        return self.th.traj.transitions
+        return self._traj.transitions
 
     def mjx_generate_trajectory_from_nominal(self, nominal_traj, horizon=None, rng_key=None):
 
@@ -248,13 +248,13 @@ class DummyHumamoidEnv(LocoEnv):
             data = self.mjx_set_sim_state_from_traj_data(data, traj_data_single, carry)
             data = mjx_forward(sys, data)
 
-            data, carry = self._mjx_simulation_post_step(model, data, carry)
+            data, carry = self._mjx_simulation_post_step(model, data, carry, traj_data=self._traj.data)
             obs, carry = self._mjx_create_observation(model, data, carry)
             obs, data, info, carry = (
                 self._mjx_step_finalize(obs, model, data, info, carry))
 
             # check if the current state is an absorbing state
-            absorbing, carry = self._mjx_is_absorbing(obs, info, data, carry)
+            absorbing, carry = self._mjx_is_absorbing(obs, info, data, carry, traj_data=self._traj.data)
 
             # compute reward
             action = jnp.zeros(self.info.action_space.shape)
@@ -266,7 +266,7 @@ class DummyHumamoidEnv(LocoEnv):
             raise ValueError("No trajectory was passed to the environment. "
                              "To create a dataset pass a trajectory first.")
 
-        if self.th.traj.transitions is None:
+        if self._traj.transitions is None:
 
             # compile mjx_step function
             mjx_step = jax.jit(_mjx_step)
@@ -292,7 +292,7 @@ class DummyHumamoidEnv(LocoEnv):
             if rng_key is None:
                 rng_key = jax.random.key(0)
 
-            for i in range(self.th.n_trajectories):
+            for i in range(self.th.n_trajectories(self._traj.data)):
 
                 # set configuration to the first state of the current trajectory
                 self.th.fixed_start_conf = (i, 0)
@@ -308,7 +308,7 @@ class DummyHumamoidEnv(LocoEnv):
                 data_mjx = self.mjx_set_sim_state_from_traj_data(data_mjx, traj_data_single, carry)
                 data_mjx = mjx_forward(sys, data_mjx)
 
-                data_mjx, carry = self._mjx_reset_carry(model, data_mjx, carry)
+                data_mjx, carry = self._mjx_reset_carry(model, data_mjx, carry, traj_data=self._traj.data)
                 data_mjx, carry = (
                     self.obs_container.reset_state(self, model, data_mjx, carry, jnp))
                 obs, carry = self._mjx_create_observation(model, data_mjx, carry)
@@ -352,6 +352,6 @@ class DummyHumamoidEnv(LocoEnv):
                                                 rewards=all_rewards
                                                 )
 
-            self.th.traj = replace(self.th.traj, transitions=transitions)
+            self._traj = replace(self._traj, transitions=transitions)
 
-        return self.th.traj.transitions
+        return self._traj.transitions

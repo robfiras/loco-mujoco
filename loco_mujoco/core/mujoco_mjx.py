@@ -103,6 +103,17 @@ class Mjx(Mujoco):
 
         """
 
+        # resolve trajectory from self._traj if not explicitly provided
+        if self._traj is not None:
+            if traj_data is None:
+                traj_data = self._traj.data
+            if traj_model is None:
+                traj_model = self._traj.info.model
+        if traj_data is not None and isinstance(traj_data.qpos, np.ndarray):
+            raise ValueError("Trajectory is in numpy format, but you are attempting to run the MJX backend. "
+                             "Please convert your trajectory to JAX first: "
+                             "traj_data = TrajectoryHandler.to_jax(traj_data)")
+
         key, subkey = jax.random.split(key)
 
         # reset data
@@ -175,6 +186,13 @@ class Mjx(Mujoco):
             MjxState: The next state of the environment.
 
         """
+
+        # resolve trajectory from self._traj if not explicitly provided
+        if self._traj is not None:
+            if traj_data is None:
+                traj_data = self._traj.data
+            if traj_model is None:
+                traj_model = self._traj.info.model
 
         data = state.data
         cur_info = state.info

@@ -200,6 +200,7 @@ class Mujoco:
         self._added_carry_visual_to_user_scene = False
         self._added_carry_visual_start_idx = None
         self._max_num_samples_traj = max_num_samples_traj
+        self._traj = None
 
     def reset(self, key=None, traj_model: Optional[TrajectoryModel] = None, traj_data: Optional[TrajectoryData] = None) -> np.ndarray:
         """
@@ -208,11 +209,22 @@ class Mujoco:
         Args:
             key: Random key. For now, not used in the Mujoco environment.
                 Could be used in future to set the numpy seed.
+            traj_model: Trajectory model (optional). Falls back to self._traj.info.model if not provided.
+            traj_data: Trajectory data (optional). Falls back to self._traj.data if not provided.
 
         Returns:
             The initial observation as a numpy array.
 
         """
+        # resolve trajectory from self._traj if not explicitly provided
+        if self._traj is not None:
+            if traj_data is None:
+                traj_data = self._traj.data
+            if traj_model is None:
+                traj_model = self._traj.info.model
+        # ensure numpy format for CPU reset
+        if traj_data is not None and not isinstance(traj_data.qpos, np.ndarray):
+            traj_data = traj_data.to_numpy()
 
         if key is None:
             key = jax.random.key(0)
@@ -239,12 +251,20 @@ class Mujoco:
 
         Args:
             action (np.ndarray): The action to take in the environment.
+            traj_model: Trajectory model (optional). Falls back to self._traj.info.model if not provided.
+            traj_data: Trajectory data (optional). Falls back to self._traj.data if not provided.
 
         Returns:
             A tuple containing the next observation, the reward, a flag indicating whether the state is absorbing,
             a flag indicating whether the episode is done, and a dictionary containing additional information.
 
         """
+        # resolve trajectory from self._traj if not explicitly provided
+        if self._traj is not None:
+            if traj_data is None:
+                traj_data = self._traj.data
+            if traj_model is None:
+                traj_model = self._traj.info.model
 
         cur_info = self._info.copy()
         carry = self._additional_carry

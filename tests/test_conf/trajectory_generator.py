@@ -21,7 +21,7 @@ def generate_test_trajectories(expert_traj, nominal_traj, backend, horizon=None,
         expert_traj.data = expert_traj.data.to_numpy()
         nominal_traj.data = nominal_traj.data.to_numpy()
 
-    mjx_env.load_trajectory(expert_traj)
+    mjx_env.process_trajectory(expert_traj)
 
     # Create dataset of transitions using the nominal trajectory
     if backend == "numpy":

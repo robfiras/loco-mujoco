@@ -323,13 +323,13 @@ def optimize_for_collisions(
     traj_data, traj_info = interpolate_trajectories(traj.data, traj.info, 1.0 / env.dt)
     traj = Trajectory(info=traj_info, data=traj_data)
 
-    env.load_trajectory(traj, warn=False)
-    traj_data, traj_info = env.th.traj.data, env.th.traj.info
+    env.process_trajectory(traj)
+    traj_data, traj_info = env._traj.data, env._traj.info
 
     callback = CollisionExtender(env, model=env._model, target_qpos=traj_data.qpos, sites_for_mimic=sites_for_mimic,
                                  n_samples=traj_data.n_samples, max_steps=max_steps)
     env.play_trajectory(
-        n_episodes=env.th.n_trajectories,
+        n_episodes=env.th.n_trajectories(env._traj.data),
         render=False,
         callback_class=callback
     )

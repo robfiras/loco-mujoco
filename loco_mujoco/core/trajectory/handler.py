@@ -18,73 +18,70 @@ class TrajState:
 
 class TrajectoryHandler(StatefulObject):
     """
-    General class to handle Trajectories. It filters and extends the trajectory data to match
-    the current model's joints, bodies and sites. The key idea is to ensure that TrajectoryData has the same
-    dimensionality and order for all its attributes as in the Mujoco data structure. So TrajectoryData is a
-    simplified version of the Mujoco data structure with fewer attributes. This class also automatically
-    interpolates the trajectory to the desired control frequency.
+    General class to handle Trajectories. It stores only traj_info (not the full trajectory).
+    The full trajectory data is stored on LocoEnv as self._traj.
 
     """
-    def __init__(self, model, traj_path=None, traj: Trajectory = None, control_dt=0.01, random_start=True,
-                 fixed_start_conf=None, clip_trajectory_to_joint_ranges=False, warn=True):
+    def __init__(self, traj_info, control_dt=0.01, random_start=True, fixed_start_conf=None):
         """
         Constructor.
 
         Args:
-            model (mjModel): Current model.
-            traj_path (string): path with the trajectory for the model to follow. Should be a numpy zipped file (.npz)
-                with a 'traj_data' array and possibly a 'split_points' array inside. The 'traj_data'
-                should be in the shape (joints x observations). If traj_files is specified, this should be None.
-            traj (Trajectory): Datastructure containing all trajectory files. If traj_path is specified, this
-                should be None.
-            control_dt (float): Model control frequency used to interpolate the trajectory.
-            clip_trajectory_to_joint_ranges (bool): If True, the joint positions in the trajectory are clipped
-                between the low and high values in the trajectory. todo
-            warn (bool): If True, a warning will be raised, if some trajectory ranges are violated. todo
+            traj_info (TrajectoryInfo): Information about the trajectory.
+            control_dt (float): Model control frequency.
+            random_start (bool): If True, the trajectory is started at a random position.
+            fixed_start_conf (tuple): If not None, the trajectory is started at the specified position.
 
         """
-
-        assert (traj_path is not None) != (traj is not None), ("Please specify either traj_path or "
-                                                               "trajectory, but not both.")
-
-        # load data
-        if traj_path is not None:
-            traj = Trajectory.load(traj_path)
-
-        # filter/extend the trajectory based on the model/data
-        traj_data, traj_info = self.filter_and_extend(traj.data, traj.info, model)
-
-        # todo: implement this in observation types in init_from_traj!
-        #self.check_if_trajectory_is_in_range(low, high, keys, joint_pos_idx, warn, clip_trajectory_to_joint_ranges)
-
         assert (fixed_start_conf is not None) != random_start, "Please specify either fixed_start_conf or random_start."
+        self._traj_info = traj_info
         self.random_start = random_start
         self.fixed_start_conf = fixed_start_conf
         self.use_fixed_start = True if fixed_start_conf is not None else False
-
-        self.traj_dt = 1 / traj_info.frequency
         self.control_dt = control_dt
 
-        if self.traj_dt != self.control_dt:
-            traj_data, traj_info = interpolate_trajectories(traj_data, traj_info, 1.0 / self.control_dt)
+    def len_trajectory(self, traj_ind, traj_data):
+        return traj_data.split_points[traj_ind + 1] - traj_data.split_points[traj_ind]
 
-        self._is_numpy = True if isinstance(traj_data.qpos, np.ndarray) else False
-        self.traj = replace(traj, data=traj_data, info=traj_info)
-
-    def len_trajectory(self, traj_ind):
-        return self.traj.data.split_points[traj_ind + 1] - self.traj.data.split_points[traj_ind]
+    def n_trajectories(self, traj_data):
+        return traj_data.split_points.shape[0] - 1
 
     @property
-    def n_trajectories(self):
-        return len(self.traj.data.split_points) - 1
+    def traj_info(self):
+        return self._traj_info
 
-    @property
-    def traj_model(self):
-        return self.traj.info.model
+    @staticmethod
+    def is_numpy(traj_data):
+        return isinstance(traj_data.qpos, np.ndarray)
 
-    @property
-    def traj_data(self):
-        return self.traj.data
+    @staticmethod
+    def to_numpy(traj_data):
+        return traj_data.to_numpy()
+
+    @staticmethod
+    def to_jax(traj_data):
+        return traj_data.to_jax()
+
+    @staticmethod
+    def process(traj, model, control_dt):
+        """
+        Filter, extend, and interpolate a trajectory to match the given model and control frequency.
+
+        Args:
+            traj (Trajectory): Raw trajectory to process.
+            model (mjModel): Current model.
+            control_dt (float): Desired control timestep.
+
+        Returns:
+            Trajectory: Processed trajectory.
+        """
+        from loco_mujoco.core.trajectory import interpolate_trajectories
+        from dataclasses import replace as dc_replace
+        traj_data, traj_info = TrajectoryHandler.filter_and_extend(traj.data, traj.info, model)
+        traj_dt = 1 / traj_info.frequency
+        if traj_dt != control_dt:
+            traj_data, traj_info = interpolate_trajectories(traj_data, traj_info, 1.0 / control_dt)
+        return dc_replace(traj, data=traj_data, info=traj_info)
 
     @staticmethod
     def filter_and_extend(traj_data, traj_info, model):
@@ -245,12 +242,12 @@ class TrajectoryHandler(StatefulObject):
         if self.random_start:
             if backend == jnp:
                 key, _k1, _k2 = jax.random.split(key, 3)
-                traj_idx = jax.random.randint(_k1, shape=(1,), minval=0, maxval=self.n_trajectories)
-                subtraj_step_idx = jax.random.randint(_k2, shape=(1,), minval=0, maxval=self.len_trajectory(traj_idx))
+                traj_idx = jax.random.randint(_k1, shape=(1,), minval=0, maxval=self.n_trajectories(traj_data))
+                subtraj_step_idx = jax.random.randint(_k2, shape=(1,), minval=0, maxval=self.len_trajectory(traj_idx, traj_data))
                 idx = [traj_idx[0], subtraj_step_idx[0]]
             else:
-                traj_idx = np.random.randint(0, self.n_trajectories)
-                subtraj_step_idx = np.random.randint(0, self.len_trajectory(traj_idx))
+                traj_idx = np.random.randint(0, self.n_trajectories(traj_data))
+                subtraj_step_idx = np.random.randint(0, self.len_trajectory(traj_idx, traj_data))
                 idx = [traj_idx, subtraj_step_idx]
         elif self.use_fixed_start:
             idx = self.fixed_start_conf
@@ -270,7 +267,7 @@ class TrajectoryHandler(StatefulObject):
         subtraj_step_no = traj_state.subtraj_step_no
         subtraj_step_no_init = traj_state.subtraj_step_no_init
 
-        length_trajectory = self.len_trajectory(traj_no)
+        length_trajectory = self.len_trajectory(traj_no, traj_data)
 
         subtraj_step_no += 1
 
@@ -280,11 +277,11 @@ class TrajectoryHandler(StatefulObject):
         if backend == jnp:
             # check whether to go to the next trajectory
             next_traj_no = jax.lax.cond(next_subtraj_step_no == 0, lambda t, nt: jnp.mod(t+1, nt),
-                                        lambda t, nt: t, traj_no, self.n_trajectories)
+                                        lambda t, nt: t, traj_no, self.n_trajectories(traj_data))
             next_subtraj_step_no_init = jax.lax.cond(next_traj_no != traj_no, lambda: 0,
                                                      lambda: subtraj_step_no_init)
         else:
-            next_traj_no = traj_no if next_subtraj_step_no != 0 else (traj_no + 1) % self.n_trajectories
+            next_traj_no = traj_no if next_subtraj_step_no != 0 else (traj_no + 1) % self.n_trajectories(traj_data)
             next_subtraj_step_no_init = 0 if traj_no != next_traj_no else subtraj_step_no_init
 
         traj_state = traj_state.replace(traj_no=next_traj_no, subtraj_step_no=next_subtraj_step_no,
@@ -301,49 +298,3 @@ class TrajectoryHandler(StatefulObject):
         traj_no = carry.traj_state.traj_no
         subtraj_step_no_init = carry.traj_state.subtraj_step_no_init
         return traj_data.get(traj_no, subtraj_step_no_init, backend)
-
-    def to_numpy(self):
-        if not self._is_numpy:
-            traj_model = self.traj.info.model.to_numpy()
-            traj_info = replace(self.traj.info, model=traj_model)
-            self.traj = replace(self.traj, data=self.traj.data.to_numpy(), info=traj_info)
-            self._is_numpy = True
-
-    def to_jax(self):
-        if self._is_numpy:
-            traj_model = self.traj.info.model.to_numpy()
-            traj_info = replace(self.traj.info, model=traj_model)
-            self.traj = replace(self.traj, data=self.traj.data.to_jax(), info=traj_info)
-            self._is_numpy = False
-
-    @property
-    def is_numpy(self):
-        return self._is_numpy
-
-    # def check_if_trajectory_is_in_range(self, low, high, keys, j_idx, warn, clip_trajectory_to_joint_ranges):
-    #
-    #     if warn or clip_trajectory_to_joint_ranges:
-    #
-    #         # get q_pos indices
-    #         j_idx = j_idx[2:]   # exclude x and y
-    #         highs = dict(zip(keys[2:], high))
-    #         lows = dict(zip(keys[2:], low))
-    #
-    #         # check if they are in range
-    #         for i, item in enumerate(self._trajectory_files.items()):
-    #             k, d = item
-    #             if i in j_idx and k in keys:
-    #                 if warn:
-    #                     clip_message = "Clipping the trajectory into range!" if clip_trajectory_to_joint_ranges else ""
-    #                     if np.max(d) > highs[k]:
-    #                         warnings.warn("Trajectory violates joint range in %s. Maximum in trajectory is %f "
-    #                                       "and maximum range is %f. %s"
-    #                                       % (k, np.max(d), highs[k], clip_message), RuntimeWarning)
-    #                     elif np.min(d) < lows[k]:
-    #                         warnings.warn("Trajectory violates joint range in %s. Minimum in trajectory is %f "
-    #                                       "and minimum range is %f. %s"
-    #                                       % (k, np.min(d), lows[k], clip_message), RuntimeWarning)
-    #
-    #                 # clip trajectory to min & max
-    #                 if clip_trajectory_to_joint_ranges:
-    #                     self._trajectory_files[k] = np.clip(self._trajectory_files[k], lows[k], highs[k])

@@ -1,5 +1,4 @@
 from typing import Union, List, Tuple
-import warnings
 import numpy as np
 import mujoco
 from mujoco import MjSpec
@@ -323,65 +322,35 @@ class BaseSkeleton(LocoEnv):
 
         return mjspec
 
-    def load_trajectory(self, traj: Trajectory = None,
-                        traj_path: str = None,
-                        warn: bool = True) -> None:
+    def process_trajectory(self, traj: Trajectory) -> Trajectory:
         """
-        Loads trajectories. If there were trajectories loaded already, this function overrides the latter.
-
-        Args:
-            traj (Trajectory): Datastructure containing all trajectory files. If traj_path is specified, this
-                should be None.
-            traj_path (string): Path with the trajectory for the model to follow. Should be a numpy zipped file (.npz)
-                with a 'traj_data' array and possibly a 'split_points' array inside. The 'traj_data'
-                should be in the shape (joints x observations). If traj_files is specified, this should be None.
-            warn (bool): If True, a warning will be raised.
+        Processes a trajectory. If scaling != 1.0, scales qpos/qvel and re-extends
+        before delegating to the parent.
         """
-
-        if self.th is not None and warn:
-            warnings.warn("New trajectories loaded, which overrides the old ones.", RuntimeWarning)
-
-        th_params = self._th_params if self._th_params is not None else {}
-        self.th = TrajectoryHandler(model=self._model, warn=warn, traj_path=traj_path,
-                                    traj=traj, control_dt=self.dt, **th_params)
-
-        if self.th.traj.obs_container is not None:
-            assert self.obs_container == self.th.traj.obs_container, \
-                ("Observation containers of trajectory and environment do not match. \n"
-                 "Please, either load a trajectory with the same observation container or "
-                 "set the observation container of the environment to the one of the trajectory.")
-
         if self.scaling != 1.0:
-            # scale trajectory
-            traj_info = self.th.traj.info
-            traj_data = self.th.traj.data
+            # first pass: filter+extend+interpolate to get correct joint indices
+            processed = super().process_trajectory(traj)
+
+            traj_info = processed.info
+            traj_data = processed.data
             free_jnt_pos_id = self.free_jnt_qpos_id[:, :3].reshape(-1)
             free_jnt_lin_vel_id = self.free_jnt_qvel_id[:, :3].reshape(-1)
 
-            # scale trajectory (only qpos and qvel)
-            traj_data_new = TrajectoryData(qpos=traj_data.qpos.at[:, free_jnt_pos_id].mul(self.scaling),
-                                       qvel=traj_data.qvel.at[:, free_jnt_lin_vel_id].mul(self.scaling),
-                                       split_points=traj_data.split_points)
-
-            # create a new traj info
+            traj_data_scaled = TrajectoryData(
+                qpos=traj_data.qpos.at[:, free_jnt_pos_id].mul(self.scaling),
+                qvel=traj_data.qvel.at[:, free_jnt_lin_vel_id].mul(self.scaling),
+                split_points=traj_data.split_points)
             traj_model = TrajectoryModel(njnt=traj_info.model.njnt, jnt_type=traj_info.model.jnt_type)
-            traj_info = TrajectoryInfo(joint_names=traj_info.joint_names,
-                                       model=traj_model, frequency=traj_info.frequency)
+            traj_info_scaled = TrajectoryInfo(joint_names=traj_info.joint_names,
+                                              model=traj_model, frequency=traj_info.frequency)
+            scaled_traj = extend_motion(self.__class__.__name__, {},
+                                        Trajectory(info=traj_info_scaled, data=traj_data_scaled))
 
-            # combine to trajectory
-            traj = Trajectory(info=traj_info, data=traj_data_new)
+            # second pass: reprocess with scaled traj, reset handler first
+            self.th = None
+            return super().process_trajectory(scaled_traj)
 
-            # extend trajectory
-            traj = extend_motion(self.__class__.__name__, {}, traj)
-
-            # update trajectory handler
-            self.th = TrajectoryHandler(model=self._model, warn=warn, traj=traj, control_dt=self.dt, **th_params)
-
-        # setup trajectory information in observation_dict, goal and reward if needed
-        for obs_entry in self.obs_container.entries():
-            obs_entry.init_from_traj(self.th)
-        self._goal.init_from_traj(self.th)
-        self._terminal_state_handler.init_from_traj(self.th)
+        return super().process_trajectory(traj)
 
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:

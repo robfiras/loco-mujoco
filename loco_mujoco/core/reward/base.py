@@ -7,7 +7,6 @@ from mujoco import MjData, MjModel
 from mujoco.mjx import Data, Model
 
 from loco_mujoco.core.stateful_object import StatefulObject
-from loco_mujoco.core.trajectory.handler import TrajectoryHandler
 
 
 class Reward(StatefulObject):
@@ -41,12 +40,12 @@ class Reward(StatefulObject):
         """
         return cls.__name__
 
-    def init_from_traj(self, traj_handler: TrajectoryHandler = None) -> None:
+    def init_from_traj(self, traj=None) -> None:
         """
         Initialize the reward class from a trajectory.
 
         Args:
-            traj_handler (TrajectoryHandler, optional): The trajectory handler. Defaults to None.
+            traj (optional): The trajectory. Defaults to None.
         """
         pass
 
