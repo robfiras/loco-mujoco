@@ -33,8 +33,7 @@ class NoReward(Reward):
                  data: Union[MjData, Data],
                  carry: Any,
                  backend: ModuleType,
-                 traj_model=None,
-                 traj_data=None) -> Tuple[float, Any]:
+                 traj=None) -> Tuple[float, Any]:
         """
         Return zero.
 
@@ -89,8 +88,7 @@ class TargetXVelocityReward(Reward):
                  data: Union[MjData, Data],
                  carry: Any,
                  backend: ModuleType,
-                 traj_model=None,
-                 traj_data=None) -> Tuple[float, Any]:
+                 traj=None) -> Tuple[float, Any]:
         """
         Compute the reward based on deviation from target velocity in x-direction.
 
@@ -162,8 +160,7 @@ class TargetVelocityGoalReward(Reward):
                  data: Union[MjData, Data],
                  carry: Any,
                  backend: ModuleType,
-                 traj_model=None,
-                 traj_data=None) -> Tuple[float, Any]:
+                 traj=None) -> Tuple[float, Any]:
         """
         Computes a tracking reward based on the deviation from the goal velocity.Tracking is done on the x, y, and yaw
         velocities of the root.
@@ -287,8 +284,7 @@ class LocomotionReward(TargetVelocityGoalReward):
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
                    backend: ModuleType,
-                   traj_model=None,
-                   traj_data=None):
+                   traj=None):
         """
         Initialize the reward state.
 
@@ -312,8 +308,7 @@ class LocomotionReward(TargetVelocityGoalReward):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None):
+              traj=None):
         """
         Reset the reward state.
 
@@ -328,7 +323,7 @@ class LocomotionReward(TargetVelocityGoalReward):
             Tuple[Union[MjData, Data], Any]: The updated data and carry.
 
         """
-        reward_state = self.init_state(env, None, model, data, backend, traj_model, traj_data)
+        reward_state = self.init_state(env, None, model, data, backend, traj)
         carry = carry.replace(reward_state=reward_state)
         return data, carry
 
@@ -343,8 +338,7 @@ class LocomotionReward(TargetVelocityGoalReward):
                  data: Union[MjData, Data],
                  carry: Any,
                  backend: ModuleType,
-                 traj_model=None,
-                 traj_data=None) -> Tuple[float, Any]:
+                 traj=None) -> Tuple[float, Any]:
         """
         Based on the tracking reward, this reward function adds typical penalties and regularization terms
         for locomotion.
@@ -510,7 +504,7 @@ class LocomotionReward(TargetVelocityGoalReward):
 
         # total reward
         tracking_reward, _ = super().__call__(state, action, next_state, absorbing, info,
-                                              env, model, data, carry, backend, traj_model, traj_data)
+                                              env, model, data, carry, backend, traj)
         penality_rewards = (z_vel_reward + roll_pitch_vel_reward + roll_pitch_reward + joint_qpos_reward
                             + joint_position_limit_reward + joint_vel_reward + acceleration_reward
                             + torque_reward + action_rate_reward + air_time_reward

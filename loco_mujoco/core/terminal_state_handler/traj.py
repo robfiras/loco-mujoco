@@ -52,8 +52,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the terminal state handler.
 
@@ -107,8 +106,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
                      info: Dict[str, Any],
                      data: MjData,
                      carry: Any,
-                     traj_model=None,
-                     traj_data=None) -> Union[bool, Any]:
+                     traj=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. The state is terminal if the root height is outside the range or the
         root rotation is outside the valid threshold. Function for CPU Mujoco.
@@ -119,14 +117,14 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             info (dict): the info dictionary
             data (MjData): Mujoco data structure
             carry (Any): additional carry.
+            traj: Trajectory to use (optional).
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
         if self.initialized:
-            return self._is_absorbing_compat(env, obs, info, data, carry, backend=np,
-                                             traj_model=traj_model, traj_data=traj_data)
+            return self._is_absorbing_compat(env, obs, info, data, carry, backend=np, traj=traj)
         else:
             return False, carry
 
@@ -136,8 +134,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
                          info: Dict[str, Any],
                          data: Data,
                          carry: Any,
-                         traj_model=None,
-                         traj_data=None) -> Union[bool, Any]:
+                         traj=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. The state is terminal if the root height is outside the range or the
         root rotation is outside the valid threshold. Function for Mjx.
@@ -147,14 +144,14 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             info (dict): the info dictionary
             data (Data): Mjx data structure
             carry (Any): additional carry.
+            traj: Trajectory to use (optional).
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
         if self.initialized:
-            return self._is_absorbing_compat(env, obs, info, data, carry, backend=jnp,
-                                             traj_model=traj_model, traj_data=traj_data)
+            return self._is_absorbing_compat(env, obs, info, data, carry, backend=jnp, traj=traj)
         else:
             return False, carry
 
@@ -165,8 +162,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
                              data: Union[MjData, Data],
                              carry: Any,
                              backend: ModuleType,
-                             traj_model=None,
-                             traj_data=None) -> Union[bool, Any]:
+                             traj=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. The state is terminal if the root height is outside the range or the
         root rotation is outside the valid threshold.
@@ -177,6 +173,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): Mujoco data structure
             carry (Any): additional carry.
             backend (ModuleType): the backend to use (np or jnp)
+            traj: Trajectory to use (optional).
 
         Returns:
             Boolean indicating whether the current state is terminal or not.
@@ -188,8 +185,8 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         root_quat = quat_scalarfirst2scalarlast(data.qpos[self.root_quat_ind])
 
         # check if the root position is outside the maximum deviation
-        traj_data_cur = env.th.get_current_traj_data(traj_data, carry, backend)
-        traj_data_init = env.th.get_init_traj_data(traj_data, carry, backend)
+        traj_data_cur = env.th.get_current_traj_data(traj.data, carry, backend)
+        traj_data_init = env.th.get_init_traj_data(traj.data, carry, backend)
         traj_root_pos = traj_data_cur.qpos[self.root_xy] - traj_data_init.qpos[self.root_xy]
         pos_deviation = backend.linalg.norm(pos - traj_root_pos)
         pos_cond = backend.greater(pos_deviation, self.max_root_pos_deviation)

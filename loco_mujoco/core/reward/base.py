@@ -60,8 +60,7 @@ class Reward(StatefulObject):
                  data: Union[MjData, Data],
                  carry: Any,
                  backend: ModuleType,
-                 traj_model=None,
-                 traj_data=None) -> Tuple[float, Any]:
+                 traj=None) -> Tuple[float, Any]:
         """
         Compute the reward.
 
@@ -91,8 +90,7 @@ class Reward(StatefulObject):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None):
+              traj=None):
         """
         Reset the reward.
 

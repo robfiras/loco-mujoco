@@ -116,7 +116,7 @@ class LocoEnv(Mjx):
         if traj_dt != self.dt:
             traj_data, traj_info = interpolate_trajectories(traj_data, traj_info, 1.0 / self.dt)
 
-        processed_traj = replace(traj, data=traj_data, info=traj_info)
+        processed_traj = traj.replace(data=traj_data, info=traj_info)
 
         # create or validate TrajectoryHandler using _th_params
         th_params = self._th_params if self._th_params is not None else {}
@@ -154,8 +154,7 @@ class LocoEnv(Mjx):
                  info: Dict,
                  data: MjData,
                  carry: LocoCarry,
-                 traj_model=None,
-                 traj_data=None) -> bool:
+                 traj=None) -> bool:
         """
         Check whether the episode is done or not.
 
@@ -165,18 +164,19 @@ class LocoEnv(Mjx):
             info (dict): additional information.
             data (MjData): Mujoco data structure.
             carry (LocoCarry): Additional carry information.
+            traj: Trajectory to use (optional).
 
         Returns:
             A boolean flag indicating whether the episode is done or not.
 
         """
-        done = super()._is_done(obs, absorbing, info, data, carry, traj_model, traj_data)
+        done = super()._is_done(obs, absorbing, info, data, carry, traj)
 
         if self._goal.requires_trajectory or self._reward_function.requires_trajectory:
             # either the goal or the reward function requires the trajectory at each step, so we need to check
             # if the end of the trajectory is reached, if so, we set done to True
             traj_state = carry.traj_state
-            if traj_state.subtraj_step_no >= self.th.len_trajectory(traj_state.traj_no, traj_data) - 1:
+            if traj_state.subtraj_step_no >= self.th.len_trajectory(traj_state.traj_no, traj.data) - 1:
                 done |= True
             else:
                 done |= False
@@ -191,8 +191,7 @@ class LocoEnv(Mjx):
                      info: Dict,
                      data: Data,
                      carry: LocoCarry,
-                     traj_model=None,
-                     traj_data=None) -> bool:
+                     traj=None) -> bool:
         """
         Determines if the episode is done.
 
@@ -202,17 +201,18 @@ class LocoEnv(Mjx):
             info (Dict): Information dictionary.
             data (Data): Mujoco data structure.
             carry (LocoCarry): Additional carry information.
+            traj: Trajectory to use (optional).
 
         Returns:
             bool: True if the episode is done, False otherwise.
         """
-        done = super()._mjx_is_done(obs, absorbing, info, data, carry, traj_model, traj_data)
+        done = super()._mjx_is_done(obs, absorbing, info, data, carry, traj)
 
         if self._goal.requires_trajectory or self._reward_function.requires_trajectory:
             # either the goal or the reward function requires the trajectory at each step, so we need to check
             # if the end of the trajectory is reached, if so, we set done to True
             traj_state = carry.traj_state
-            len_traj = self.th.len_trajectory(traj_state.traj_no, traj_data)
+            len_traj = self.th.len_trajectory(traj_state.traj_no, traj.data)
             reached_end_of_traj = jax.lax.cond(jnp.greater_equal(traj_state.subtraj_step_no, len_traj - 1),
                                                lambda: True, lambda: False)
             done = jnp.logical_or(done, reached_end_of_traj)
@@ -224,8 +224,7 @@ class LocoEnv(Mjx):
     def _simulation_post_step(self, model: MjModel,
                               data: MjData,
                               carry: LocoCarry,
-                              traj_model=None,
-                              traj_data=None) -> Tuple[MjData, LocoCarry]:
+                              traj=None) -> Tuple[MjData, LocoCarry]:
         """
         Allows to access and modify the model, data and carry to be modified after the main simulation step.
 
@@ -233,27 +232,27 @@ class LocoEnv(Mjx):
             model (MjModel): Mujoco model.
             data (MjData): Mujoco data structure.
             carry (AdditionalCarry): Additional carry information.
-            traj_model: Trajectory model (optional).
-            traj_data: Trajectory data (optional).
+            traj: Trajectory to use (optional).
 
         Returns:
             The updated model, data and carry.
 
         """
         # call parent to update domain randomization and terrain
-        data, carry = super()._simulation_post_step(model, data, carry, traj_model, traj_data)
+        data, carry = super()._simulation_post_step(model, data, carry, traj)
 
         # update trajectory state
         if self.th is not None:
-            carry = self.th.update_state(self, model, data, carry, np, traj_model=traj_model, traj_data=traj_data)
+            carry = self.th.update_state(self, model, data, carry, np,
+                                         traj_model=traj.info.model if traj is not None else None,
+                                         traj_data=traj.data if traj is not None else None)
 
         return data, carry
 
     def _mjx_simulation_post_step(self, model: Model,
                                   data: Data,
                                   carry: LocoCarry,
-                                  traj_model=None,
-                                  traj_data=None) -> Tuple[Data, LocoCarry]:
+                                  traj=None) -> Tuple[Data, LocoCarry]:
         """
         Applies post-step modifications to the data and carry.
 
@@ -261,18 +260,19 @@ class LocoEnv(Mjx):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (LocoCarry): Additional carry information.
-            traj_model: Trajectory model (optional).
-            traj_data: Trajectory data (optional).
+            traj: Trajectory to use (optional).
 
         Returns:
             Tuple[Data, LocoCarry]: Updated data and carry.
         """
         # call parent to update domain randomization and terrain
-        data, carry = super()._mjx_simulation_post_step(model, data, carry, traj_model, traj_data)
+        data, carry = super()._mjx_simulation_post_step(model, data, carry, traj)
 
         # update trajectory state
         if self.th is not None:
-            carry = self.th.update_state(self, self._model, data, carry, jnp, traj_model=traj_model, traj_data=traj_data)
+            carry = self.th.update_state(self, self._model, data, carry, jnp,
+                                         traj_model=traj.info.model if traj is not None else None,
+                                         traj_data=traj.data if traj is not None else None)
 
         return data, carry
 
@@ -400,7 +400,7 @@ class LocoEnv(Mjx):
 
                 self.th = orig_th
                 self._traj = orig_traj
-                self._traj = replace(self._traj, transitions=transitions)
+                self._traj = self._traj.replace(transitions=transitions)
 
             return self._traj.transitions
 
@@ -439,7 +439,7 @@ class LocoEnv(Mjx):
 
         if not TrajectoryHandler.is_numpy(self._traj.data):
             was_jax = True
-            self._traj = replace(self._traj, data=TrajectoryHandler.to_numpy(self._traj.data))
+            self._traj = self._traj.replace(data=TrajectoryHandler.to_numpy(self._traj.data))
         else:
             was_jax = False
 
@@ -544,7 +544,7 @@ class LocoEnv(Mjx):
             recorder.stop()
 
         if was_jax:
-            self._traj = replace(self._traj, data=TrajectoryHandler.to_jax(self._traj.data))
+            self._traj = self._traj.replace(data=TrajectoryHandler.to_jax(self._traj.data))
 
     def play_trajectory_from_velocity(self, n_episodes: int = None,
                                       n_steps_per_episode: int = None,
@@ -632,8 +632,7 @@ class LocoEnv(Mjx):
                                model: MjModel,
                                data: MjData,
                                backend: ModuleType,
-                               traj_model=None,
-                               traj_data=None) -> LocoCarry:
+                               traj=None) -> LocoCarry:
         """
         Initializes the additional carry structure.
 
@@ -642,21 +641,22 @@ class LocoEnv(Mjx):
             model (MjModel): The Mujoco model.
             data (MjData): The Mujoco data structure.
             backend (ModuleType): The numerical backend to use (NumPy or JAX NumPy).
-            traj_model: Trajectory model (optional).
-            traj_data: Trajectory data (optional).
+            traj: Trajectory to use (optional).
 
         Returns:
             AdditionalCarry: The initialized additional carry structure.
         """
 
-        carry = super()._init_additional_carry(key, model, data, backend, traj_model, traj_data)
+        carry = super()._init_additional_carry(key, model, data, backend, traj)
 
         key = carry.key
         key, _k = jax.random.split(key)
 
         # create additional carry
         carry = LocoCarry(
-            traj_state=self.th.init_state(self, _k, model, data, backend, traj_model, traj_data) if self.th is not None else EmptyState(),
+            traj_state=self.th.init_state(self, _k, model, data, backend,
+                                          traj.info.model if traj is not None else None,
+                                          traj.data if traj is not None else None) if self.th is not None else EmptyState(),
             **vars(carry.replace(key=key)))
 
         return carry
@@ -664,8 +664,7 @@ class LocoEnv(Mjx):
     def _reset_carry(self, model: MjModel,
                      data: MjData,
                      carry: LocoCarry,
-                     traj_model=None,
-                     traj_data=None) -> Tuple[MjData, LocoCarry]:
+                     traj=None) -> Tuple[MjData, LocoCarry]:
         """
         Resets the additional carry. Also allows modification to the MjData.
 
@@ -673,8 +672,7 @@ class LocoEnv(Mjx):
             model (MjModel): Mujoco model.
             data (MjData): Mujoco data structure.
             carry (AdditionalCarry): Additional carry information.
-            traj_model: Trajectory model (optional).
-            traj_data: Trajectory data (optional).
+            traj: Trajectory to use (optional).
 
         Returns:
             The updated carry and data.
@@ -683,18 +681,18 @@ class LocoEnv(Mjx):
 
         # reset trajectory state
         if self.th is not None:
-            data, carry = self.th.reset_state(self, self._model, data, carry, np, traj_data=traj_data)
+            data, carry = self.th.reset_state(self, self._model, data, carry, np,
+                                              traj_data=traj.data if traj is not None else None)
 
         # call parent to apply domain randomization and terrain
-        data, carry = super()._reset_carry(model, data, carry, traj_model, traj_data)
+        data, carry = super()._reset_carry(model, data, carry, traj)
 
         return data, carry
 
     def _mjx_reset_carry(self, model: Model,
                          data: Data,
                          carry: MjxAdditionalCarry,
-                         traj_model=None,
-                         traj_data=None) -> Tuple[Data, MjxAdditionalCarry]:
+                         traj=None) -> Tuple[Data, MjxAdditionalCarry]:
         """
         Resets the additional carry and allows modification to the Mujoco data.
 
@@ -702,8 +700,7 @@ class LocoEnv(Mjx):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
-            traj_model: Trajectory model (optional).
-            traj_data: Trajectory data (optional).
+            traj: Trajectory to use (optional).
 
         Returns:
             Tuple[Data, MjxAdditionalCarry]: Updated data and carry.
@@ -711,10 +708,11 @@ class LocoEnv(Mjx):
 
         # reset trajectory state
         if self.th is not None:
-            data, carry = self.th.reset_state(self, self._model, data, carry, jnp, traj_data=traj_data)
+            data, carry = self.th.reset_state(self, self._model, data, carry, jnp,
+                                              traj_data=traj.data if traj is not None else None)
 
         # call parent to apply domain randomization and terrain
-        data, carry = super()._mjx_reset_carry(model, data, carry, traj_model, traj_data)
+        data, carry = super()._mjx_reset_carry(model, data, carry, traj)
 
         return data, carry
 

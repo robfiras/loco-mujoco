@@ -43,8 +43,7 @@ class DefaultControl(ControlFunction):
                         data: Union[MjData, Data],
                         carry: Any,
                         backend: ModuleType,
-                        traj_model=None,
-                        traj_data=None) -> Tuple[Union[np.ndarray, jax.Array], Any]:
+                        traj=None) -> Tuple[Union[np.ndarray, jax.Array], Any]:
         """
         Calculates the action. This function scales the action from [-1, 1] to the original action space.
 

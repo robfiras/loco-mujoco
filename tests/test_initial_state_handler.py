@@ -22,7 +22,7 @@ def _create_env(backend, init_state_type, init_state_params=None, trajectory=Non
 
     if trajectory is not None:
         if backend == "numpy":
-            trajectory.data = trajectory.data.to_numpy()
+            trajectory = trajectory.replace(data=trajectory.data.to_numpy())
 
         mjx_env.process_trajectory(trajectory)
 

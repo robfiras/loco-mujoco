@@ -27,8 +27,7 @@ class InitialStateHandler(StatefulObject):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the init state handler with its state.
 

@@ -176,7 +176,7 @@ class DummyHumamoidEnv(LocoEnv):
                 data = self.set_sim_state_from_traj_data(data, traj_data_single, carry)
                 mujoco.mj_forward(model, data)
 
-                data, carry = self._reset_carry(model, data, carry, traj_data=self._traj.data)
+                data, carry = self._reset_carry(model, data, carry, traj=self._traj)
                 data, carry = (
                     self.obs_container.reset_state(self, model, data, carry, np))
                 obs, carry = self._create_observation(model, data, carry)
@@ -198,14 +198,14 @@ class DummyHumamoidEnv(LocoEnv):
                     data = self.set_sim_state_from_traj_data(data, traj_data_single, carry)
                     mujoco.mj_forward(model, data)
 
-                    data, carry = self._simulation_post_step(model, data, carry, traj_data=self._traj.data)
+                    data, carry = self._simulation_post_step(model, data, carry, traj=self._traj)
                     obs, carry = self._create_observation(model, data, carry)
                     obs, data, info, carry = (
                         self._step_finalize(obs, model, data, info, carry))
                     observations.append(obs)
 
                     # check if the current state is an absorbing state
-                    is_absorbing, carry = self._is_absorbing(obs, info, data, carry, traj_data=self._traj.data)
+                    is_absorbing, carry = self._is_absorbing(obs, info, data, carry, traj=self._traj)
                     absorbing_flags.append(is_absorbing)
 
                     # compute reward
@@ -235,7 +235,7 @@ class DummyHumamoidEnv(LocoEnv):
                                                 rewards=all_rewards
                                                 )
 
-            self._traj = replace(self._traj, transitions=transitions)
+            self._traj = self._traj.replace(transitions=transitions)
 
         return self._traj.transitions
 
@@ -248,13 +248,13 @@ class DummyHumamoidEnv(LocoEnv):
             data = self.mjx_set_sim_state_from_traj_data(data, traj_data_single, carry)
             data = mjx_forward(sys, data)
 
-            data, carry = self._mjx_simulation_post_step(model, data, carry, traj_data=self._traj.data)
+            data, carry = self._mjx_simulation_post_step(model, data, carry, traj=self._traj)
             obs, carry = self._mjx_create_observation(model, data, carry)
             obs, data, info, carry = (
                 self._mjx_step_finalize(obs, model, data, info, carry))
 
             # check if the current state is an absorbing state
-            absorbing, carry = self._mjx_is_absorbing(obs, info, data, carry, traj_data=self._traj.data)
+            absorbing, carry = self._mjx_is_absorbing(obs, info, data, carry, traj=self._traj)
 
             # compute reward
             action = jnp.zeros(self.info.action_space.shape)
@@ -308,7 +308,7 @@ class DummyHumamoidEnv(LocoEnv):
                 data_mjx = self.mjx_set_sim_state_from_traj_data(data_mjx, traj_data_single, carry)
                 data_mjx = mjx_forward(sys, data_mjx)
 
-                data_mjx, carry = self._mjx_reset_carry(model, data_mjx, carry, traj_data=self._traj.data)
+                data_mjx, carry = self._mjx_reset_carry(model, data_mjx, carry, traj=self._traj)
                 data_mjx, carry = (
                     self.obs_container.reset_state(self, model, data_mjx, carry, jnp))
                 obs, carry = self._mjx_create_observation(model, data_mjx, carry)
@@ -352,6 +352,6 @@ class DummyHumamoidEnv(LocoEnv):
                                                 rewards=all_rewards
                                                 )
 
-            self._traj = replace(self._traj, transitions=transitions)
+            self._traj = self._traj.replace(transitions=transitions)
 
         return self._traj.transitions

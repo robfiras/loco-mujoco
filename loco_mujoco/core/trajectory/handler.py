@@ -76,12 +76,11 @@ class TrajectoryHandler(StatefulObject):
             Trajectory: Processed trajectory.
         """
         from loco_mujoco.core.trajectory import interpolate_trajectories
-        from dataclasses import replace as dc_replace
         traj_data, traj_info = TrajectoryHandler.filter_and_extend(traj.data, traj.info, model)
         traj_dt = 1 / traj_info.frequency
         if traj_dt != control_dt:
             traj_data, traj_info = interpolate_trajectories(traj_data, traj_info, 1.0 / control_dt)
-        return dc_replace(traj, data=traj_data, info=traj_info)
+        return traj.replace(data=traj_data, info=traj_info)
 
     @staticmethod
     def filter_and_extend(traj_data, traj_info, model):

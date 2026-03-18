@@ -70,8 +70,7 @@ class DefaultRandomizer(DomainRandomizer):
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
                    backend: ModuleType,
-                   traj_model=None,
-                   traj_data=None) -> DefaultRandomizerState:
+                   traj=None) -> DefaultRandomizerState:
         """
         Initialize the randomizer state.
 
@@ -106,8 +105,7 @@ class DefaultRandomizer(DomainRandomizer):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the randomizer, applying domain randomization.
 
@@ -179,8 +177,7 @@ class DefaultRandomizer(DomainRandomizer):
                data: Union[MjData, Data],
                carry: Any,
                backend: ModuleType,
-               traj_model=None,
-               traj_data=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
+               traj=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
         Update the randomizer by applying the state changes to the model.
 
@@ -262,8 +259,7 @@ class DefaultRandomizer(DomainRandomizer):
                            data: Union[MjData, Data],
                            carry: Any,
                            backend: ModuleType,
-                           traj_model=None,
-                           traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                           traj=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Update the observation with randomization effects.
 
@@ -373,8 +369,7 @@ class DefaultRandomizer(DomainRandomizer):
                       data: Union[MjData, Data],
                       carry: Any,
                       backend: ModuleType,
-                      traj_model=None,
-                      traj_data=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
+                      traj=None) -> Tuple[Union[np.ndarray, jnp.ndarray], Any]:
         """
         Update the action with randomization effects.
 

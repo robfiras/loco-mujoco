@@ -38,8 +38,7 @@ class Terrain(StatefulObject):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the terrain.
 
@@ -64,8 +63,7 @@ class Terrain(StatefulObject):
                data: Union[MjData, Data],
                carry: Any,
                backend: ModuleType,
-               traj_model=None,
-               traj_data=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
+               traj=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
         Update the terrain.
 

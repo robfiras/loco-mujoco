@@ -114,7 +114,7 @@ class ObservationContainer(UserDict):
         """
         return np.concatenate([obs.obs_ind for obs in self._stateful_obs]).astype(int)
 
-    def init_state(self, env, key, model, data, backend, traj_model=None, traj_data=None):
+    def init_state(self, env, key, model, data, backend, traj=None):
         """
         Builds a dataclass from the stateful observations in the container.
         """
@@ -122,7 +122,7 @@ class ObservationContainer(UserDict):
         # Get all stateful observations
         stateful_obs = self.list_all_stateful()
         # Create a dictionary with the stateful observations
-        stateful_obs_dict = {obs.name: obs.init_state(env, key, model, data, backend, traj_model, traj_data) for obs in stateful_obs}
+        stateful_obs_dict = {obs.name: obs.init_state(env, key, model, data, backend, traj) for obs in stateful_obs}
         # Dynamically create a class with fields from the dictionary
         dynamic_class = make_dataclass("ObservationStates", stateful_obs_dict.keys())
         # convert to flax dataclass
@@ -179,12 +179,12 @@ class ObservationContainer(UserDict):
         """
         return np.concatenate([obs.obs_ind for obs in self.values() if obs.allow_randomization]).astype(int)
 
-    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def reset_state(self, env, model, data, carry, backend, traj=None):
         # Get all stateful observations
         stateful_obs = self.list_all_stateful()
         # Reset the state of each stateful observation
         for obs in stateful_obs:
-             data, carry = obs.reset_state(env, model, data, carry, backend, traj_model, traj_data)
+             data, carry = obs.reset_state(env, model, data, carry, backend, traj)
         return data, carry
 
     def lock(self):
@@ -409,7 +409,7 @@ class StatefulObservation(Observation, StatefulObject):
         """ this function is not allowed to be called in this class. """
         raise NotImplementedError("Stateful observations do not support this function.")
 
-    def get_obs_and_update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
         Get the observation and update the state.
 
@@ -419,6 +419,7 @@ class StatefulObservation(Observation, StatefulObject):
             data: The Mujoco data structure.
             carry: The state carry.
             backend: The backend to use, either np or jnp.
+            traj: Trajectory to use (optional).
 
         Returns:
             The observation and the updated state.
@@ -926,7 +927,7 @@ class LastAction(StatefulObservation):
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
         self._initialized_from_mj = True
 
-    def get_obs_and_update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
         Get the observation and update the state.
 
@@ -960,7 +961,7 @@ class ModelInfo(StatefulObservation):
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
         self._initialized_from_mj = True
 
-    def get_obs_and_update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
         Get the observation and update the state.
 
@@ -970,6 +971,7 @@ class ModelInfo(StatefulObservation):
             data: The Mujoco data structure.
             carry: The state carry.
             backend: The backend to use, either np or jnp.
+            traj: Trajectory to use (optional).
 
         Returns:
             The observation and the updated state.
@@ -994,7 +996,7 @@ class HeightMatrix(StatefulObservation):
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
         self._initialized_from_mj = True
 
-    def get_obs_and_update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
         Get the observation and update the state.
 
@@ -1004,6 +1006,7 @@ class HeightMatrix(StatefulObservation):
             data: The Mujoco data structure.
             carry: The state carry.
             backend: The backend to use, either np or jnp.
+            traj: Trajectory to use (optional).
 
         Returns:
             The observation and the updated state.
@@ -1055,7 +1058,7 @@ class RelativeSiteQuantaties(StatefulObservation):
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
         self._initialized_from_mj = True
 
-    def get_obs_and_update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
         Get the observation and update the state.
 
@@ -1065,6 +1068,7 @@ class RelativeSiteQuantaties(StatefulObservation):
             data: The Mujoco data structure.
             carry: The state carry.
             backend: The backend to use, either np or jnp.
+            traj: Trajectory to use (optional).
 
         Returns:
             The observation and the updated state.

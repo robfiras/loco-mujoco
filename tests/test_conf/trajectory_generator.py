@@ -18,8 +18,8 @@ def generate_test_trajectories(expert_traj, nominal_traj, backend, horizon=None,
                                **DEFAULTS)
 
     if backend == "numpy":
-        expert_traj.data = expert_traj.data.to_numpy()
-        nominal_traj.data = nominal_traj.data.to_numpy()
+        expert_traj = expert_traj.replace(data=expert_traj.data.to_numpy())
+        nominal_traj = nominal_traj.replace(data=nominal_traj.data.to_numpy())
 
     mjx_env.process_trajectory(expert_traj)
 

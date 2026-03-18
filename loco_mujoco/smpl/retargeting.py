@@ -632,8 +632,7 @@ def motion_transfer_robot_to_robot(
         env.process_trajectory(traj_source)
 
         # convert traj to numpy
-        from dataclasses import replace as dc_replace
-        env._traj = dc_replace(env._traj, data=TrajectoryHandler.to_numpy(env._traj.data))
+        env._traj = env._traj.replace(data=TrajectoryHandler.to_numpy(env._traj.data))
 
         # get the body_shape of the source robot
         path_to_source_robot_smpl_shape = os.path.join(path_source_robot_smpl_data, OPTIMIZED_SHAPE_FILE_NAME)
@@ -822,7 +821,7 @@ def extend_motion(
         callback_class=callback
     )
     traj_data, traj_info = callback.extend_trajectory_data(traj_data, traj_info)
-    traj = replace(traj, data=traj_data, info=traj_info)
+    traj = traj.replace(data=traj_data, info=traj_info)
 
     return traj
 

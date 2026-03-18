@@ -19,7 +19,7 @@ from types import ModuleType
 from loco_mujoco.core.observations.base import ObservationContainer
 
 
-@dataclass
+@struct.dataclass
 class Trajectory:
     """
     Main data structure to store the trajectories.
@@ -34,10 +34,10 @@ class Trajectory:
             observation from Mujoco data/model. (optional)
     """
 
-    info: TrajectoryInfo
+    info: TrajectoryInfo = struct.field(pytree_node=False)
     data: TrajectoryData
-    transitions: TrajectoryTransitions = None
-    obs_container: ObservationContainer = None
+    transitions: TrajectoryTransitions = struct.field(pytree_node=False, default=None)
+    obs_container: ObservationContainer = struct.field(pytree_node=False, default=None)
 
     @staticmethod
     def concatenate(trajs: list, backend: ModuleType = jnp):
@@ -141,6 +141,8 @@ class TrajectoryInfo:
     body_names: list[str] = None
     site_names: list[str] = None
     metadata: dict = None
+
+    __hash__ = object.__hash__
 
     def __post_init__(self):
         self.joint_name2ind_qpos = {}

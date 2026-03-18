@@ -17,10 +17,10 @@ class StatefulObject:
         self.visual_geoms_idx = None
         self._instances.append(self)
 
-    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+    def reset_state(self, env, model, data, carry, backend, traj=None):
         return data, carry
 
-    def init_state(self, env, key, model, data, backend, traj_model=None, traj_data=None):
+    def init_state(self, env, key, model, data, backend, traj=None):
         return EmptyState()
 
     @classmethod

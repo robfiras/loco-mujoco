@@ -96,8 +96,7 @@ class RoughTerrain(DynamicTerrain):
                    model: Union[MjModel, Model],
                    data: Union[MjData, Data],
                    backend: ModuleType,
-                   traj_model=None,
-                   traj_data=None) -> RoughTerrainState:
+                   traj=None) -> RoughTerrainState:
         """
         Initialize the state of the rough terrain.
 
@@ -147,8 +146,7 @@ class RoughTerrain(DynamicTerrain):
     def reset(self, env: Any,
               model: Union[MjModel, Model], data: Union[MjData, Data], carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the rough terrain and update its state.
 
@@ -183,8 +181,7 @@ class RoughTerrain(DynamicTerrain):
                data: Union[MjData, Data],
                carry: Any,
                backend: ModuleType,
-               traj_model=None,
-               traj_data=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
+               traj=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
         Update the rough terrain and simulation state.
 

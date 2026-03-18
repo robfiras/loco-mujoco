@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 from loco_mujoco.core.mujoco_base import Mujoco, AdditionalCarry
 from loco_mujoco.core.visuals import MujocoViewer
-from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData
+from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
 
 @struct.dataclass
@@ -91,12 +91,13 @@ class Mjx(Mujoco):
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
 
-    def mjx_reset(self, key: jax.random.PRNGKey, traj_model: Optional[TrajectoryModel] = None, traj_data: Optional[TrajectoryData] = None) -> MjxState:
+    def mjx_reset(self, key: jax.random.PRNGKey, traj: Optional[Trajectory] = None) -> MjxState:
         """
         Resets the environment.
 
         Args:
             key (jax.random.PRNGKey): Random key for the reset.
+            traj (Trajectory, optional): Trajectory to use. Falls back to self._traj if not provided.
 
         Returns:
             MjxState: The reset state of the environment.
@@ -104,12 +105,9 @@ class Mjx(Mujoco):
         """
 
         # resolve trajectory from self._traj if not explicitly provided
-        if self._traj is not None:
-            if traj_data is None:
-                traj_data = self._traj.data
-            if traj_model is None:
-                traj_model = self._traj.info.model
-        if traj_data is not None and isinstance(traj_data.qpos, np.ndarray):
+        if traj is None:
+            traj = self._traj
+        if traj is not None and isinstance(traj.data.qpos, np.ndarray):
             raise ValueError("Trajectory is in numpy format, but you are attempting to run the MJX backend. "
                              "Please convert your trajectory to JAX first: "
                              "traj_data = TrajectoryHandler.to_jax(traj_data)")
@@ -119,14 +117,14 @@ class Mjx(Mujoco):
         # reset data
         data = self._first_data
 
-        carry = self._init_additional_carry(key, self._model, data, jnp, traj_model, traj_data)
+        carry = self._init_additional_carry(key, self._model, data, jnp, traj)
 
-        data, carry = self._mjx_reset_carry(self.sys, data, carry, traj_model, traj_data)
+        data, carry = self._mjx_reset_carry(self.sys, data, carry, traj)
 
         # reset all stateful entities
-        data, carry = self.obs_container.reset_state(self, self._model, data, carry, jnp, traj_model, traj_data)
+        data, carry = self.obs_container.reset_state(self, self._model, data, carry, jnp, traj)
 
-        obs, carry = self._mjx_create_observation(self._model, data, carry, traj_model, traj_data)
+        obs, carry = self._mjx_create_observation(self._model, data, carry, traj)
         reward = 0.0
         absorbing = jnp.array(False, dtype=bool)
         done = jnp.array(False, dtype=bool)
@@ -135,13 +133,14 @@ class Mjx(Mujoco):
         return MjxState(data=data, observation=obs, reward=reward, absorbing=absorbing, done=done,
                         info=info, additional_carry=carry)
 
-    def _mjx_reset_in_step(self, state: MjxState, traj_model: Optional[TrajectoryModel] = None, traj_data: Optional[TrajectoryData] = None) -> MjxState:
+    def _mjx_reset_in_step(self, state: MjxState, traj: Optional[Trajectory] = None) -> MjxState:
         """
         Resets the environment if the episode is done. This function is called in the step function for asynchronous
         resetting of the environments.
 
         Args:
             state (MjxState): Current state of the environment.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             MjxState: The reset state of the environment.
@@ -159,7 +158,7 @@ class Mjx(Mujoco):
         else:
             data = self._first_data
 
-        data, carry = self._mjx_reset_carry(self.sys, data, carry, traj_model, traj_data)
+        data, carry = self._mjx_reset_carry(self.sys, data, carry, traj)
 
         # reset carry
         carry = carry.replace(cur_step_in_episode=1,
@@ -168,19 +167,20 @@ class Mjx(Mujoco):
                               final_info=state.info)
 
         # update all stateful entities
-        data, carry = self.obs_container.reset_state(self, self._model, data, carry, jnp, traj_model, traj_data)
+        data, carry = self.obs_container.reset_state(self, self._model, data, carry, jnp, traj)
 
         # create new observation
-        obs, carry = self._mjx_create_observation(self._model, data, carry, traj_model, traj_data)
+        obs, carry = self._mjx_create_observation(self._model, data, carry, traj)
 
         return state.replace(data=data, observation=obs, additional_carry=carry)
 
-    def mjx_step(self, state: MjxState, action: jax.Array, traj_model: Optional[TrajectoryModel] = None, traj_data: Optional[TrajectoryData] = None) -> MjxState:
+    def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None) -> MjxState:
         """
 
         Args:
             state (MjxState): Current state of the environment.
             action (jax.Array): Action to take in the environment.
+            traj (Trajectory, optional): Trajectory to use. Falls back to self._traj if not provided.
 
         Returns:
             MjxState: The next state of the environment.
@@ -188,11 +188,8 @@ class Mjx(Mujoco):
         """
 
         # resolve trajectory from self._traj if not explicitly provided
-        if self._traj is not None:
-            if traj_data is None:
-                traj_data = self._traj.data
-            if traj_model is None:
-                traj_model = self._traj.info.model
+        if traj is None:
+            traj = self._traj
 
         data = state.data
         cur_info = state.info
@@ -203,16 +200,16 @@ class Mjx(Mujoco):
         state = state.replace(done=jnp.zeros_like(state.done, dtype=bool))
 
         # preprocess action
-        processed_action, carry = self._mjx_preprocess_action(action, self._model, data, carry, traj_model, traj_data)
+        processed_action, carry = self._mjx_preprocess_action(action, self._model, data, carry, traj)
 
         # modify data and model *before* step if needed
-        sys, data, carry = self._mjx_simulation_pre_step(self.sys, data, carry, traj_model, traj_data)
+        sys, data, carry = self._mjx_simulation_pre_step(self.sys, data, carry, traj)
 
         def _inner_loop(idx, _runner_state):
 
             _data, _carry = _runner_state
 
-            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry, traj_model, traj_data)
+            ctrl_action, _carry = self._mjx_compute_action(processed_action, self._model, _data, _carry, traj)
 
             # step in the environment using the action
             ctrl = _data.ctrl.at[jnp.array(self._action_indices)].set(ctrl_action)
@@ -226,25 +223,25 @@ class Mjx(Mujoco):
         data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
 
         # modify data *after* step if needed (does nothing by default)
-        data, carry = self._mjx_simulation_post_step(self._model, data, carry, traj_model, traj_data)
+        data, carry = self._mjx_simulation_post_step(self._model, data, carry, traj)
 
         # create the observation
-        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj_model, traj_data)
+        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj)
 
         # modify the observation and the data if needed (does nothing by default)
-        cur_obs, data, cur_info, carry = self._mjx_step_finalize(cur_obs, self._model, data, cur_info, carry, traj_model, traj_data)
+        cur_obs, data, cur_info, carry = self._mjx_step_finalize(cur_obs, self._model, data, cur_info, carry, traj)
 
         # create info
         cur_info = self._mjx_update_info_dictionary(cur_info, cur_obs, data, carry)
 
         # check if the next obs is an absorbing state
-        absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry, traj_model, traj_data)
+        absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry, traj)
 
         # calculate the reward
-        reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data, carry, traj_model, traj_data)
+        reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data, carry, traj)
 
         # check if done
-        done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry, traj_model, traj_data)
+        done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry, traj)
 
         done = jnp.logical_or(done, jnp.any(jnp.isnan(cur_obs)))
         cur_obs = jnp.nan_to_num(cur_obs, nan=0.0)
@@ -254,9 +251,9 @@ class Mjx(Mujoco):
         state = state.replace(data=data, observation=cur_obs, reward=reward,
                               absorbing=absorbing, done=done, info=cur_info, additional_carry=carry)
 
-        # reset state if done (capture traj_model/traj_data via closure so lax.cond operand stays as state only)
+        # reset state if done (capture traj via closure so lax.cond operand stays as state only)
         state = jax.lax.cond(state.done,
-                             lambda s: self._mjx_reset_in_step(s, traj_model, traj_data),
+                             lambda s: self._mjx_reset_in_step(s, traj),
                              lambda s: s,
                              state)
 
@@ -265,8 +262,7 @@ class Mjx(Mujoco):
     def _mjx_create_observation(self, model: Model,
                                 data: Data,
                                 carry: MjxAdditionalCarry,
-                                traj_model: Optional[TrajectoryModel] = None,
-                                traj_data: Optional[TrajectoryData] = None) -> jax.Array:
+                                traj: Optional[Trajectory] = None) -> jax.Array:
         """
         Creates the observation for the environment.
 
@@ -274,12 +270,13 @@ class Mjx(Mujoco):
             model (Model): Mjx model.
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             jax.Array: The observation of the environment.
 
         """
-        return self._create_observation_compat(model, data, carry, jnp, traj_model, traj_data)
+        return self._create_observation_compat(model, data, carry, jnp, traj)
 
     def _mjx_reset_info_dictionary(self, obs: jnp.ndarray,
                                    data: Data,
@@ -324,8 +321,7 @@ class Mjx(Mujoco):
                     model: Model,
                     data: Data,
                     carry: MjxAdditionalCarry,
-                    traj_model: Optional[TrajectoryModel] = None,
-                    traj_data: Optional[TrajectoryData] = None) -> Tuple[float, MjxAdditionalCarry]:
+                    traj: Optional[Trajectory] = None) -> Tuple[float, MjxAdditionalCarry]:
         """
         Calls the reward function of the environment.
 
@@ -338,20 +334,20 @@ class Mjx(Mujoco):
             model (Model): Mjx model.
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[float, MjxAdditionalCarry]: The reward and the updated carry.
 
         """
-        reward, carry = self._reward_function(obs, action, next_obs, absorbing, info, self, model, data, carry, jnp, traj_model, traj_data)
+        reward, carry = self._reward_function(obs, action, next_obs, absorbing, info, self, model, data, carry, jnp, traj)
         return reward, carry
 
     def _mjx_is_absorbing(self, obs: jnp.ndarray,
                           info: Dict,
                           data: Data,
                           carry: MjxAdditionalCarry,
-                          traj_model: Optional[TrajectoryModel] = None,
-                          traj_data: Optional[TrajectoryData] = None) -> bool:
+                          traj: Optional[Trajectory] = None) -> bool:
         """
         Determines if the current state is absorbing.
 
@@ -360,19 +356,19 @@ class Mjx(Mujoco):
             info (Dict): Information dictionary.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             bool: True if the state is absorbing, False otherwise.
         """
-        return self._terminal_state_handler.mjx_is_absorbing(self, obs, info, data, carry, traj_model, traj_data)
+        return self._terminal_state_handler.mjx_is_absorbing(self, obs, info, data, carry, traj)
 
     def _mjx_is_done(self, obs: jnp.ndarray,
                      absorbing: bool,
                      info: Dict,
                      data: Data,
                      carry: MjxAdditionalCarry,
-                     traj_model: Optional[TrajectoryModel] = None,
-                     traj_data: Optional[TrajectoryData] = None) -> bool:
+                     traj: Optional[Trajectory] = None) -> bool:
         """
         Determines if the episode is done.
 
@@ -382,6 +378,7 @@ class Mjx(Mujoco):
             info (Dict): Information dictionary.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             bool: True if the episode is done, False otherwise.
@@ -393,8 +390,7 @@ class Mjx(Mujoco):
     def _mjx_simulation_pre_step(self, model: Model,
                                  data: Data,
                                  carry: MjxAdditionalCarry,
-                                 traj_model: Optional[TrajectoryModel] = None,
-                                 traj_data: Optional[TrajectoryData] = None) -> Tuple[Model, Data, MjxAdditionalCarry]:
+                                 traj: Optional[Trajectory] = None) -> Tuple[Model, Data, MjxAdditionalCarry]:
         """
         Applies pre-step modifications to the model, data, and carry.
 
@@ -402,19 +398,19 @@ class Mjx(Mujoco):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[Model, Data, MjxAdditionalCarry]: Updated model, data, and carry.
         """
-        model, data, carry = self._terrain.update(self, model, data, carry, jnp, traj_model, traj_data)
-        model, data, carry = self._domain_randomizer.update(self, model, data, carry, jnp, traj_model, traj_data)
+        model, data, carry = self._terrain.update(self, model, data, carry, jnp, traj)
+        model, data, carry = self._domain_randomizer.update(self, model, data, carry, jnp, traj)
         return model, data, carry
 
     def _mjx_simulation_post_step(self, model: Model,
                                   data: Data,
                                   carry: MjxAdditionalCarry,
-                                  traj_model: Optional[TrajectoryModel] = None,
-                                  traj_data: Optional[TrajectoryData] = None) -> Tuple[Data, MjxAdditionalCarry]:
+                                  traj: Optional[Trajectory] = None) -> Tuple[Data, MjxAdditionalCarry]:
         """
         Applies post-step modifications to the data and carry.
 
@@ -422,6 +418,7 @@ class Mjx(Mujoco):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[Data, MjxAdditionalCarry]: Updated data and carry.
@@ -432,8 +429,7 @@ class Mjx(Mujoco):
                                model: Model,
                                data: Data,
                                carry: MjxAdditionalCarry,
-                               traj_model: Optional[TrajectoryModel] = None,
-                               traj_data: Optional[TrajectoryData] = None) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
+                               traj: Optional[Trajectory] = None) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
         """
         Transforms the action before applying it to the environment.
 
@@ -442,19 +438,19 @@ class Mjx(Mujoco):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[jnp.ndarray, MjxAdditionalCarry]: Processed action and updated carry.
         """
-        action, carry = self._domain_randomizer.update_action(self, action, model, data, carry, jnp, traj_model, traj_data)
+        action, carry = self._domain_randomizer.update_action(self, action, model, data, carry, jnp, traj)
         return action, carry
 
     def _mjx_compute_action(self, action: jnp.ndarray,
                             model: Model,
                             data: Data,
                             carry: MjxAdditionalCarry,
-                            traj_model: Optional[TrajectoryModel] = None,
-                            traj_data: Optional[TrajectoryData] = None) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
+                            traj: Optional[Trajectory] = None) -> Tuple[jnp.ndarray, MjxAdditionalCarry]:
         """
         Applies transformations to the action at intermediate steps.
 
@@ -463,18 +459,18 @@ class Mjx(Mujoco):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[jnp.ndarray, MjxAdditionalCarry]: Computed action and updated carry.
         """
-        action, carry = self._control_func.generate_action(self, action, model, data, carry, jnp, traj_model, traj_data)
+        action, carry = self._control_func.generate_action(self, action, model, data, carry, jnp, traj)
         return action, carry
 
     def _mjx_reset_carry(self, model: Model,
                          data: Data,
                          carry: MjxAdditionalCarry,
-                         traj_model: Optional[TrajectoryModel] = None,
-                         traj_data: Optional[TrajectoryData] = None) -> Tuple[Data, MjxAdditionalCarry]:
+                         traj: Optional[Trajectory] = None) -> Tuple[Data, MjxAdditionalCarry]:
         """
         Resets the additional carry and allows modification to the Mujoco data.
 
@@ -482,16 +478,17 @@ class Mjx(Mujoco):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[Data, MjxAdditionalCarry]: Updated data and carry.
         """
-        data, carry = self._terminal_state_handler.reset(self, model, data, carry, jnp, traj_model, traj_data)
-        data, carry = self._terrain.reset(self, model, data, carry, jnp, traj_model, traj_data)
-        data, carry = self._init_state_handler.reset(self, model, data, carry, jnp, traj_model, traj_data)
-        data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp, traj_model, traj_data)
-        data, carry = self._reward_function.reset(self, model, data, carry, jnp, traj_model, traj_data)
-        data, carry = self._control_func.reset(self, model, data, carry, jnp, traj_model, traj_data)
+        data, carry = self._terminal_state_handler.reset(self, model, data, carry, jnp, traj)
+        data, carry = self._terrain.reset(self, model, data, carry, jnp, traj)
+        data, carry = self._init_state_handler.reset(self, model, data, carry, jnp, traj)
+        data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp, traj)
+        data, carry = self._reward_function.reset(self, model, data, carry, jnp, traj)
+        data, carry = self._control_func.reset(self, model, data, carry, jnp, traj)
 
         return data, carry
 
@@ -500,8 +497,7 @@ class Mjx(Mujoco):
                            data: Data,
                            info: Dict,
                            carry: MjxAdditionalCarry,
-                           traj_model: Optional[TrajectoryModel] = None,
-                           traj_data: Optional[TrajectoryData] = None) -> Tuple[jnp.ndarray, Data, Dict, MjxAdditionalCarry]:
+                           traj: Optional[Trajectory] = None) -> Tuple[jnp.ndarray, Data, Dict, MjxAdditionalCarry]:
         """
         Allows information to be accessed at the end of a step.
 
@@ -511,11 +507,12 @@ class Mjx(Mujoco):
             data (Data): Mujoco data structure.
             info (Dict): Information dictionary.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             Tuple[jnp.ndarray, Data, Dict, MjxAdditionalCarry]: Updated observation, data, info, and carry.
         """
-        obs, carry = self._domain_randomizer.update_observation(self, obs, model, data, carry, jnp, traj_model, traj_data)
+        obs, carry = self._domain_randomizer.update_observation(self, obs, model, data, carry, jnp, traj)
         return obs, data, info, carry
 
     @staticmethod
@@ -624,8 +621,7 @@ class Mjx(Mujoco):
                                model: Model,
                                data: Data,
                                backend: ModuleType,
-                               traj_model: Optional[TrajectoryModel] = None,
-                               traj_data: Optional[TrajectoryData] = None) -> MjxAdditionalCarry:
+                               traj: Optional[Trajectory] = None) -> MjxAdditionalCarry:
         """
         Initializes additional carry parameters.
 
@@ -634,11 +630,12 @@ class Mjx(Mujoco):
             model (Model): Mujoco model.
             data (Data): Mujoco data structure.
             backend (ModuleType): Computational backend (either numpy or jax.numpy).
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
             MjxAdditionalCarry: Initialized carry object.
         """
-        carry = super()._init_additional_carry(key, model, data, backend, traj_model, traj_data)
+        carry = super()._init_additional_carry(key, model, data, backend, traj)
         return MjxAdditionalCarry(final_observation=backend.zeros(self.info.observation_space.shape),
                                   final_info={},
                                   **vars(carry))

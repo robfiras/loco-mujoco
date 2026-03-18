@@ -35,8 +35,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the terminal state handler.
 
@@ -62,8 +61,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
                      info: Dict[str, Any],
                      data: MjData,
                      carry: Any,
-                     traj_model=None,
-                     traj_data=None) -> Union[bool, Any]:
+                     traj=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. Function for CPU Mujoco.
 
@@ -86,8 +84,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
                          info: Dict[str, Any],
                          data: Data,
                          carry: Any,
-                         traj_model=None,
-                         traj_data=None) -> Union[bool, Any]:
+                         traj=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. Function for Mjx.
 
@@ -111,8 +108,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
                              data: Union[MjData, Data],
                              carry: Any,
                              backend: ModuleType,
-                             traj_model=None,
-                             traj_data=None) -> Union[bool, Any]:
+                             traj=None) -> Union[bool, Any]:
         """
         Check if the current state is terminal. Compatible with both CPU Mujoco and Mjx.
 

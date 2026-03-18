@@ -33,8 +33,7 @@ class NoTerminalStateHandler(TerminalStateHandler):
               data: Union[MjData, Data],
               carry: Any,
               backend: ModuleType,
-              traj_model=None,
-              traj_data=None) -> Tuple[Union[MjData, Data], Any]:
+              traj=None) -> Tuple[Union[MjData, Data], Any]:
         """
         Reset the terminal state handler.
 
@@ -58,8 +57,7 @@ class NoTerminalStateHandler(TerminalStateHandler):
                      info: Dict[str, Any],
                      data: MjData,
                      carry: Any,
-                     traj_model=None,
-                     traj_data=None) -> Union[bool, Any]:
+                     traj=None) -> Union[bool, Any]:
         """
         Always returns false. Function for CPU Mujoco.
 
@@ -82,8 +80,7 @@ class NoTerminalStateHandler(TerminalStateHandler):
                          info: Dict[str, Any],
                          data: Data,
                          carry: Any,
-                         traj_model=None,
-                         traj_data=None) -> Union[bool, Any]:
+                         traj=None) -> Union[bool, Any]:
         """
         Always returns false. Function for Mjx.
 
