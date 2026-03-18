@@ -3,7 +3,7 @@ from loco_mujoco import ImitationFactory
 
 # switch from torque control to position control (envs can use torque *or* position control as default!)
 # note: the gains can also be an array of length action_dim!
-env = ImitationFactory.make("FourierGR1T2", default_dataset_conf=dict(task="stepinplace1"),
+env, traj = ImitationFactory.make("FourierGR1T2", default_dataset_conf=dict(task="stepinplace1"),
                             control_type="PDControl", control_params=dict(p_gain=100, d_gain=1))
 
 action_dim = env.info.action_space.shape[0]

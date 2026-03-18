@@ -7,7 +7,7 @@ def experiment(seed=0):
     np.random.seed(seed)
 
     # # example --> you can add as many datasets as you want in the lists!
-    env = ImitationFactory.make("UnitreeH1",
+    env, traj = ImitationFactory.make("UnitreeH1",
                                 # if SMPL and AMASS are installed, you can use the following:
                                 amass_dataset_conf=AMASSDatasetConf(["DanceDB/DanceDB/20120911_TheodorosSourmelis/Capoeira_Theodoros_v2_C3D_poses"]),
                                 n_substeps=20)

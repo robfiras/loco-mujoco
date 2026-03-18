@@ -37,14 +37,13 @@ def experiment(config: DictConfig):
         factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
 
         # create env
-        env = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+        env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
 
         # check if dataset file exists
         if not os.path.exists(expert_dataset_path):
             expert_dataset = env.create_dataset()
             # save trajectory with expert transitions to speed-up loading next time
-            new_traj = Trajectory(info=env._traj.info, data=env._traj.data,
-                                  obs_container=env.obs_container, transitions=expert_dataset)
+            new_traj = env._traj.replace(obs_container=env.obs_container, transitions=expert_dataset)
             new_traj.save(expert_dataset_path)
         else:
             # if it exists, load it
@@ -68,7 +67,7 @@ def experiment(config: DictConfig):
         # get rng keys and run training
         rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]  # create rngs from seed
         rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
-        out = train_fn(_rng)
+        out = train_fn(_rng, traj)
 
         # save agent state
         agent_state = out["agent_state"]
@@ -122,7 +121,7 @@ def experiment(config: DictConfig):
         print(f"Time taken to log metrics: {time.time() - t_start}s")
         # run the environment with the trained agent to record video
         GAILJax.play_policy(env, agent_conf, agent_state, deterministic=True, n_steps=200, n_envs=20, record=True,
-                            train_state_seed=0)
+                            train_state_seed=0, traj=traj)
         video_file = env.video_file_path
         run.log({"Agent Video": wandb.Video(video_file)})
         wandb.finish()

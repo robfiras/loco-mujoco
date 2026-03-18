@@ -32,7 +32,7 @@ def test_PPO_Jax_build_train_fn(ppo_rl_config):
     factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
 
     # create env
-    env = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
 
     # get initial agent configuration
     agent_conf = PPOJax.init_agent_conf(env, config)
@@ -48,7 +48,7 @@ def test_PPO_Jax_build_train_fn(ppo_rl_config):
         rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
         rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
 
-        jaxpr = make_jaxpr(train_fn)(_rng)
+        jaxpr = make_jaxpr(train_fn)(_rng, traj)
 
         assert jaxpr is not None
     except Exception as e:
@@ -66,13 +66,13 @@ def test_PPO_save_and_load_agent(ppo_rl_config, tmp_path):
         config.experiment.validation.num = 1
 
     factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
-    env = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
     agent_conf = PPOJax.init_agent_conf(env, config)
     train_fn = PPOJax.build_train_fn(env, agent_conf)
     train_fn = jax.jit(train_fn)
 
     rng = jax.random.PRNGKey(0)
-    result = train_fn(rng)
+    result = train_fn(rng, traj)
     agent_state = result["agent_state"]
 
     save_path = PPOJax.save_agent(tmp_path, agent_conf, agent_state)
@@ -101,7 +101,7 @@ def test_Imitation_save_and_load_agent(algorithm, imitation_config, tmp_path):
         config.experiment.validation.active = False
 
     factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
-    env = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
     expert_dataset = env.create_dataset()
     agent_conf = alg_cls.init_agent_conf(env, config)
     agent_conf = agent_conf.add_expert_dataset(expert_dataset)
@@ -110,7 +110,7 @@ def test_Imitation_save_and_load_agent(algorithm, imitation_config, tmp_path):
     train_fn = jax.jit(train_fn)
 
     rng = jax.random.PRNGKey(0)
-    result = train_fn(rng)
+    result = train_fn(rng, traj)
     agent_state = result["agent_state"]
 
     save_path = alg_cls.save_agent(tmp_path, agent_conf, agent_state)
@@ -139,7 +139,7 @@ def test_Imitation_Jax_build_train_fn(algorithm, imitation_config):
     factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
 
     # create env
-    env = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
 
     # create an expert dataset
     expert_dataset = env.create_dataset()
@@ -162,7 +162,7 @@ def test_Imitation_Jax_build_train_fn(algorithm, imitation_config):
         rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
         rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
 
-        jaxpr = make_jaxpr(train_fn)(_rng)
+        jaxpr = make_jaxpr(train_fn)(_rng, traj)
 
         assert jaxpr is not None
     except Exception as e:

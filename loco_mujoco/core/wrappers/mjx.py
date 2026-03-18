@@ -22,12 +22,12 @@ class LocoMjxWrapper:
         """
         return getattr(self.env, name)
 
-    def reset(self, rng_key):
-        state = self.env.mjx_reset(rng_key)
+    def reset(self, rng_key, traj=None):
+        state = self.env.mjx_reset(rng_key, traj)
         return state.observation, state
 
-    def step(self, state, action):
-        next_state = self.env.mjx_step(state, action)
+    def step(self, state, action, traj=None):
+        next_state = self.env.mjx_step(state, action, traj)
         next_obs = jnp.where(next_state.done, next_state.additional_carry.final_observation, next_state.observation)
         return (next_obs, next_state.reward, next_state.absorbing, next_state.done,
                 next_state.info, next_state)
@@ -67,11 +67,11 @@ class BaseWrapper:
         else:
             self.env = env
 
-    def reset(self, rng_key):
-        return self.env.reset(rng_key)
+    def reset(self, rng_key, traj=None):
+        return self.env.reset(rng_key, traj)
 
-    def step(self, state, action):
-        return self.env.step(state, action)
+    def step(self, state, action, traj=None):
+        return self.env.step(state, action, traj)
 
     def __getattr__(self, name):
 
@@ -123,16 +123,16 @@ class LogWrapper(BaseWrapper):
     """Log the episode returns and lengths."""
 
     @partial(jax.jit, static_argnums=(0,))
-    def reset(self, rng_key):
-        obs, env_state = self.env.reset(rng_key)
+    def reset(self, rng_key, traj=None):
+        obs, env_state = self.env.reset(rng_key, traj)
         state = LogEnvState(env_state, metrics=Metrics(0, 0, 0, 0, 0, False))
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
-    def step(self, state: LogEnvState, action: Union[int, float]):
+    def step(self, state: LogEnvState, action: Union[int, float], traj=None):
 
         # make a step
-        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action)
+        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
 
         new_episode_return = state.metrics.episode_returns + reward
         new_episode_length = state.metrics.episode_lengths + 1
@@ -172,18 +172,18 @@ class NStepWrapper(BaseWrapper):
         new_info.observation_space = observation_space
         return new_info
 
-    def reset(self, rng_key):
-        obs, env_state = self.env.reset(rng_key)
+    def reset(self, rng_key, traj=None):
+        obs, env_state = self.env.reset(rng_key, traj)
         observation_buffer = jnp.tile(jnp.zeros_like(obs), (self.n_steps, 1))
         observation_buffer = observation_buffer.at[-1].set(obs)
         state = NStepWrapperState(env_state, observation_buffer)
         obs = jnp.reshape(observation_buffer, (-1,))
         return obs, state
 
-    def step(self, state: NStepWrapperState, action: Union[int, float]):
+    def step(self, state: NStepWrapperState, action: Union[int, float], traj=None):
 
         # make a step
-        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action)
+        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
 
         # add observation to the buffer
         observation_buffer = state.observation_buffer
@@ -199,8 +199,8 @@ class VecEnv(BaseWrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        self.reset = jax.vmap(self.env.reset, in_axes=(0,))
-        self.step = jax.vmap(self.env.step, in_axes=(0, 0))
+        self.reset = jax.vmap(self.env.reset, in_axes=(0, None))
+        self.step = jax.vmap(self.env.step, in_axes=(0, 0, None))
 
 
 @struct.dataclass
@@ -218,8 +218,8 @@ class NormalizeVecReward(BaseWrapper):
         super().__init__(env)
         self.gamma = gamma
 
-    def reset(self, key):
-        obs, state = self.env.reset(key)
+    def reset(self, key, traj=None):
+        obs, state = self.env.reset(key, traj)
         batch_count = obs.shape[0]
         state = NormalizeVecRewEnvState(
             mean=0.0,
@@ -230,8 +230,8 @@ class NormalizeVecReward(BaseWrapper):
         )
         return obs, state
 
-    def step(self, state, action):
-        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action)
+    def step(self, state, action, traj=None):
+        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
 
         return_val = (state.return_val * self.gamma * (1 - done) + reward)
 

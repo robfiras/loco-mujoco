@@ -44,8 +44,9 @@ class RLFactory(TaskFactory):
         env_cls = LocoEnv.registered_envs[env_name]
 
         # Create and return the environment
-        return env_cls(init_state_type=init_state_type,
-                       terminal_state_type=terminal_state_type,
-                       goal_type=goal_type,
-                       reward_type=reward_type,
-                       **kwargs)
+        env = env_cls(init_state_type=init_state_type,
+                      terminal_state_type=terminal_state_type,
+                      goal_type=goal_type,
+                      reward_type=reward_type,
+                      **kwargs)
+        return env, None

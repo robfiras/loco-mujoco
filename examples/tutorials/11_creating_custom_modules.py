@@ -167,7 +167,7 @@ observation_spec = [
     CustomBodyCOMPosMovingAverage("pelvis_com_mov_avg", "pelvis"),
 ]
 
-env = RLFactory.make(
+env, traj = RLFactory.make(
     "CustomUnitreeG1",
     init_state_type="CustomInitialStateHandler",
     control_type="CustomControlFunction",

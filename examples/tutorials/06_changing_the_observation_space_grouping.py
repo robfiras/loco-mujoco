@@ -16,7 +16,7 @@ observation_spec = [
     # define many more in the order you want ...
 ]
 
-env = ImitationFactory.make("ToddlerBot", observation_spec=observation_spec,
+env, traj = ImitationFactory.make("ToddlerBot", observation_spec=observation_spec,
                             default_dataset_conf=dict(task="walk"))
 
 # checkout the detailed observation space (opens webbrowser)

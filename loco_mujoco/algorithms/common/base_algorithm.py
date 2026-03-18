@@ -62,17 +62,18 @@ class JaxRLAlgorithmBase:
     @classmethod
     def build_train_fn(cls, env, agent_conf: AgentConfBase, mh: MetricsHandler = None):
         """ Returns the main train function of an RL algorithm used to train an agent from scratch. """
-        return lambda rng_key: cls._train_fn(rng_key, env, agent_conf, mh=mh)
+        return lambda rng_key, traj: cls._train_fn(rng_key, env, agent_conf, traj=traj, mh=mh)
 
     @classmethod
     def build_resume_train_fn(cls, env, agent_conf: AgentConfBase, mh: MetricsHandler = None):
         """ Returns the main train function of an RL algorithm used to resume training of an agent. """
-        return lambda rng_key, agent_state: cls._train_fn(rng_key, env, agent_conf, agent_state, mh=mh)
+        return lambda rng_key, agent_state, traj: cls._train_fn(rng_key, env, agent_conf, agent_state, traj=traj, mh=mh)
 
     @classmethod
     def _train_fn(cls, rng, env,
                   agent_conf: AgentConfBase,
                   agent_state: AgentStateBase = None,
+                  traj=None,
                   mh: MetricsHandler = None):
         """ Main training algorithm of an RL algorithm. """
         raise NotImplementedError

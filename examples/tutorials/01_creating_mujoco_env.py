@@ -3,7 +3,7 @@ from loco_mujoco import ImitationFactory
 
 
 # create the environment and task
-env = ImitationFactory.make("MyoSkeleton", default_dataset_conf=dict(task="stepinplace1"))
+env, traj = ImitationFactory.make("MyoSkeleton", default_dataset_conf=dict(task="stepinplace1"))
 
 # get the dataset for the chosen environment and task -- can be used for GAIL-like algorithms
 #expert_data = env.create_dataset()

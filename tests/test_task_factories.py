@@ -53,14 +53,14 @@ def get_custom_traj(env_name):
 
 @pytest.mark.parametrize("env_name", get_numpy_env_names())
 def test_RLFactory_numpy(env_name):
-    env = RLFactory.make(env_name)
+    env, traj = RLFactory.make(env_name)
     assert isinstance(env, LocoEnv.registered_envs[env_name])
 
 
 @pytest.mark.parametrize("env_name", get_jax_env_names())
 def test_RLFactory_jax(env_name):
     gc.collect()
-    env = RLFactory.make(env_name)
+    env, traj = RLFactory.make(env_name)
     assert isinstance(env, LocoEnv.registered_envs[env_name])
 
 
@@ -73,19 +73,19 @@ def test_Gymasium(env_name):
 @pytest.mark.parametrize("env_name", get_numpy_env_names_default_dataset_conf())
 def test_ImitationFactoryDefaultDatasetConf(env_name):
     task = "balance"
-    env = ImitationFactory.make(env_name, default_dataset_conf=DefaultDatasetConf(task))
+    env, traj = ImitationFactory.make(env_name, default_dataset_conf=DefaultDatasetConf(task))
     assert isinstance(env, LocoEnv.registered_envs[env_name])
 
 
 @pytest.mark.parametrize("env_name", get_numpy_env_names_lafan1_dataset_conf())
 def test_ImitationFactorLafan1(env_name):
     dataset_name = "dance1_subject1"
-    env = ImitationFactory.make(env_name, lafan1_dataset_conf=LAFAN1DatasetConf(dataset_name))
+    env, traj = ImitationFactory.make(env_name, lafan1_dataset_conf=LAFAN1DatasetConf(dataset_name))
     assert isinstance(env, LocoEnv.registered_envs[env_name])
 
 
 @pytest.mark.parametrize("env_name", get_numpy_env_names())
 def test_ImitationFactoryCustomDataset(env_name):
     traj = get_custom_traj(env_name)
-    env = ImitationFactory.make(env_name, custom_dataset_conf=CustomDatasetConf(traj))
+    env, traj = ImitationFactory.make(env_name, custom_dataset_conf=CustomDatasetConf(traj))
     assert isinstance(env, LocoEnv.registered_envs[env_name])

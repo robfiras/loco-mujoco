@@ -88,7 +88,7 @@ observation_spec = [
 
 
 # create the environment and task
-env = ImitationFactory.make("ToddlerBot", default_dataset_conf=dict(task="stepinplace1"),
+env, traj = ImitationFactory.make("ToddlerBot", default_dataset_conf=dict(task="stepinplace1"),
                             domain_randomization_type="DefaultRandomizer",
                             domain_randomization_params=randomization_config,
                             observation_spec=observation_spec)

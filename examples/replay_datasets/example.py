@@ -3,7 +3,7 @@ from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf, Defa
 
 
 # # example --> you can add as many datasets as you want in the lists!
-env = ImitationFactory.make("UnitreeH1",
+env, traj = ImitationFactory.make("UnitreeH1",
                             default_dataset_conf=DefaultDatasetConf(["squat", "walk"]),
                             lafan1_dataset_conf=LAFAN1DatasetConf(["dance2_subject4", "walk1_subject1"]),
                             # if SMPL and AMASS are installed, you can use the following:

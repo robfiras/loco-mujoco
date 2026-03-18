@@ -189,6 +189,7 @@ class GAILJax(JaxRLAlgorithmBase):
     def _train_fn(cls, rng, env,
                   agent_conf: GAILAgentConf,
                   agent_state: GAILAgentState = None,
+                  traj=None,
                   mh: MetricsHandler = None):
 
         # extract static agent info
@@ -229,7 +230,7 @@ class GAILJax(JaxRLAlgorithmBase):
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config.num_envs)
-        obsv, env_state = env.reset(reset_rng)
+        obsv, env_state = env.reset(reset_rng, traj)
 
         train_state_buffer = TrainStateBuffer.create(train_state, config.validation.num)
 
@@ -250,7 +251,7 @@ class GAILJax(JaxRLAlgorithmBase):
                 log_prob = pi.log_prob(action)
 
                 # STEP ENV
-                obsv, reward, absorbing, done, info, env_state = env.step(env_state, action)
+                obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
 
                 # GET METRICS
                 log_env_state = env_state.find(LogEnvState)
@@ -486,7 +487,7 @@ class GAILJax(JaxRLAlgorithmBase):
                     action = pi.sample(seed=_rng)
 
                     # STEP ENV
-                    obsv, reward, absorbing, done, info, env_state = env.step(env_state, action)
+                    obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
 
                     # GET METRICS
                     log_env_state = env_state.find(LogEnvState)
@@ -499,7 +500,7 @@ class GAILJax(JaxRLAlgorithmBase):
 
                 rng = runner_state[-1]
                 reset_rng = jax.random.split(rng, config.validation.num_envs)
-                obsv, env_state = env.reset(reset_rng)
+                obsv, env_state = env.reset(reset_rng, traj)
                 runner_state_eval = (train_state, disc_train_state, env_state, obsv, train_state_buffer, rng)
 
                 # do evaluation runs
@@ -590,7 +591,7 @@ class GAILJax(JaxRLAlgorithmBase):
                     n_envs: int, n_steps=None, render=True,
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
-                    train_state_seed=None):
+                    train_state_seed=None, traj=None):
 
         if use_mujoco and wrap_env:
             if hasattr(agent_conf.experiment, "len_obs_history"):
@@ -640,7 +641,7 @@ class GAILJax(JaxRLAlgorithmBase):
             obs = env.reset()
             env_state = None
         else:
-            obs, env_state = env.reset(env_keys)
+            obs, env_state = env.reset(env_keys, traj)
 
         if n_steps is None:
             n_steps = np.iinfo(np.int32).max
@@ -656,7 +657,7 @@ class GAILJax(JaxRLAlgorithmBase):
             if use_mujoco:
                 obs, reward, absorbing, done, info = env.step(action)
             else:
-                obs, reward, absorbing, done, info, env_state = env.step(env_state, action)
+                obs, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
 
             # RENDER
             if use_mujoco:
