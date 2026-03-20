@@ -122,17 +122,25 @@ class LocoEnv(Mjx):
         th_params = self._th_params if self._th_params is not None else {}
         random_start = th_params.get("random_start", True)
         fixed_start_conf = th_params.get("fixed_start_conf", None)
+        max_n_samples = th_params.get("max_n_samples", 100_000)
+        max_n_trajs = th_params.get("max_n_trajs", 100)
         if fixed_start_conf is not None:
             random_start = False
 
         if self.th is None:
             self.th = TrajectoryHandler(traj_info, control_dt=self.dt,
                                         random_start=(fixed_start_conf is None and random_start),
-                                        fixed_start_conf=fixed_start_conf)
+                                        fixed_start_conf=fixed_start_conf,
+                                        max_n_samples=max_n_samples,
+                                        max_n_trajs=max_n_trajs)
         else:
             assert self.th.traj_info == traj_info, (
                 "New trajectory has incompatible structure with existing trajectory handler. "
                 "traj_info must match (same joints, bodies, sites, etc.).")
+
+        # pad traj_data to fixed shapes for JIT shape stability when swapping trajectories
+        padded_data = traj_data.pad(self.th.max_n_samples, self.th.max_n_trajs)
+        processed_traj = processed_traj.replace(data=padded_data)
 
         self._traj = processed_traj
 
@@ -142,10 +150,12 @@ class LocoEnv(Mjx):
                  "Please, either load a trajectory with the same observation container or "
                  "set the observation container of the environment to the one of the trajectory.")
 
+        # init_from_traj must see only valid (non-padded) data; trim the padded zeros before calling
+        traj_for_init = processed_traj.replace(data=processed_traj.data.trim())
         for obs_entry in self.obs_container.entries():
-            obs_entry.init_from_traj(processed_traj)
-        self._goal.init_from_traj(processed_traj)
-        self._terminal_state_handler.init_from_traj(processed_traj)
+            obs_entry.init_from_traj(traj_for_init)
+        self._goal.init_from_traj(traj_for_init)
+        self._terminal_state_handler.init_from_traj(traj_for_init)
 
         return processed_traj
 

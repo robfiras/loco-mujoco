@@ -1043,11 +1043,106 @@ class TrajectoryData(SingleData):
 
     @property
     def n_trajectories(self):
-        return self.split_points.shape[0] - 1
+        sp = self.split_points
+        if isinstance(sp, np.ndarray):
+            mask = sp == -1
+            if np.any(mask):
+                return int(np.argmax(mask)) - 1
+            return sp.shape[0] - 1
+        else:
+            mask = sp == -1
+            has_sentinel = jnp.any(mask)
+            first_sentinel = jnp.argmax(mask)
+            return jnp.where(has_sentinel, first_sentinel, sp.shape[0]) - 1
 
     @property
     def n_samples(self):
-        return self.split_points[-1]
+        return self.split_points[self.n_trajectories]
+
+    def pad(self, max_n_samples, max_n_trajs):
+        """
+        Pad all data arrays to fixed shapes for JIT shape stability when swapping trajectories.
+
+        Arrays are padded with zeros along the sample axis; unused split_points entries are -1.
+        The output format (numpy vs JAX) matches the input format.
+
+        Args:
+            max_n_samples (int): Maximum number of samples to pad to along axis 0.
+            max_n_trajs (int): Maximum number of trajectories to support (split_points padded to max_n_trajs+1).
+
+        Returns:
+            TrajectoryData: New instance with padded arrays. Unused split_points entries are -1.
+        """
+        use_numpy = isinstance(self.qpos, np.ndarray)
+        backend = np if use_numpy else jnp
+
+        n_samp = int(self.n_samples)
+        n_sp = self.split_points.shape[0]  # n_traj + 1 (before any padding)
+        assert n_samp <= max_n_samples, (
+            f"Trajectory has {n_samp} samples but max_n_samples={max_n_samples}. "
+            "Increase max_n_samples.")
+        assert n_sp - 1 <= max_n_trajs, (
+            f"Trajectory has {n_sp - 1} sub-trajectories but max_n_trajs={max_n_trajs}. "
+            "Increase max_n_trajs.")
+
+        pad_samples = max_n_samples - n_samp
+        pad_sp = (max_n_trajs + 1) - n_sp
+
+        def _pad_arr(arr):
+            if arr.size == 0:
+                return arr
+            pad_shape = [(0, pad_samples)] + [(0, 0)] * (arr.ndim - 1)
+            if use_numpy:
+                return np.pad(arr, pad_shape, mode='constant', constant_values=0)
+            else:
+                return jnp.pad(arr, pad_shape, mode='constant', constant_values=0)
+
+        sentinel = np.full(pad_sp, -1, dtype=np.array(self.split_points).dtype)
+        if use_numpy:
+            sp_padded = np.concatenate([self.split_points, sentinel])
+        else:
+            sp_padded = jnp.concatenate([self.split_points, jnp.array(sentinel)])
+
+        return TrajectoryData(
+            qpos=_pad_arr(self.qpos),
+            qvel=_pad_arr(self.qvel),
+            xpos=_pad_arr(self.xpos),
+            xquat=_pad_arr(self.xquat),
+            cvel=_pad_arr(self.cvel),
+            subtree_com=_pad_arr(self.subtree_com),
+            site_xpos=_pad_arr(self.site_xpos),
+            site_xmat=_pad_arr(self.site_xmat),
+            split_points=sp_padded,
+        )
+
+    def trim(self):
+        """
+        Return a new TrajectoryData containing only the valid (non-padded) rows and split_points.
+
+        Useful for Python-side code (e.g. init_from_traj) that must not see the zero-filled
+        padding rows added by pad(). Has no effect on unpadded data.
+        """
+        n_samp = int(self.n_samples)
+        n_traj = int(self.n_trajectories)
+
+        def _trim_arr(arr):
+            if arr.size == 0:
+                return arr
+            return np.array(arr)[:n_samp]
+
+        sp = np.array(self.split_points)[:n_traj + 1]
+
+        return TrajectoryData(
+            qpos=_trim_arr(self.qpos),
+            qvel=_trim_arr(self.qvel),
+            xpos=_trim_arr(self.xpos),
+            xquat=_trim_arr(self.xquat),
+            cvel=_trim_arr(self.cvel),
+            subtree_com=_trim_arr(self.subtree_com),
+            site_xpos=_trim_arr(self.site_xpos),
+            site_xmat=_trim_arr(self.site_xmat),
+            split_points=sp,
+        )
 
     @classmethod
     def get_attribute_names(cls):

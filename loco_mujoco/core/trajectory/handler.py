@@ -22,7 +22,8 @@ class TrajectoryHandler(StatefulObject):
     The full trajectory data is stored on LocoEnv as self._traj.
 
     """
-    def __init__(self, traj_info, control_dt=0.01, random_start=True, fixed_start_conf=None):
+    def __init__(self, traj_info, control_dt=0.01, random_start=True, fixed_start_conf=None,
+                 max_n_samples=100_000, max_n_trajs=100):
         """
         Constructor.
 
@@ -31,6 +32,8 @@ class TrajectoryHandler(StatefulObject):
             control_dt (float): Model control frequency.
             random_start (bool): If True, the trajectory is started at a random position.
             fixed_start_conf (tuple): If not None, the trajectory is started at the specified position.
+            max_n_samples (int): Maximum number of samples for padding (for JIT shape stability).
+            max_n_trajs (int): Maximum number of sub-trajectories for padding (for JIT shape stability).
 
         """
         assert (fixed_start_conf is not None) != random_start, "Please specify either fixed_start_conf or random_start."
@@ -39,12 +42,14 @@ class TrajectoryHandler(StatefulObject):
         self.fixed_start_conf = fixed_start_conf
         self.use_fixed_start = True if fixed_start_conf is not None else False
         self.control_dt = control_dt
+        self.max_n_samples = max_n_samples
+        self.max_n_trajs = max_n_trajs
 
     def len_trajectory(self, traj_ind, traj_data):
         return traj_data.split_points[traj_ind + 1] - traj_data.split_points[traj_ind]
 
     def n_trajectories(self, traj_data):
-        return traj_data.split_points.shape[0] - 1
+        return traj_data.n_trajectories
 
     @property
     def traj_info(self):
