@@ -812,7 +812,7 @@ def extend_motion(
     traj = Trajectory(info=traj_info, data=traj_data)
 
     env.process_trajectory(traj)
-    traj_data, traj_info = env._traj.data, env._traj.info
+    traj_data, traj_info = env._traj.data.trim(), env._traj.info
 
     callback = ExtendTrajData(env, model=env._model, n_samples=traj_data.n_samples)
     env.play_trajectory(
