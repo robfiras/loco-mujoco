@@ -51,6 +51,6 @@ class TrajInitialStateHandler(InitialStateHandler):
         if backend == np:
             data = env.set_sim_state_from_traj_data(data, traj_data_sample, carry)
         else:
-            data = env.mjx_set_sim_state_from_traj_data(data, traj_data_sample, carry)
+            data = env.mjx_set_sim_state_from_traj_data(data, traj_data_sample, carry, traj=traj)
 
         return data, carry

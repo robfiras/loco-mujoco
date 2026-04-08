@@ -506,7 +506,7 @@ class LocoEnv(Mjx):
                         self._simulation_pre_step(self._model, self._data, self._additional_carry))
                     mujoco.mj_forward(self._model, self._data)
                     self._data, self._additional_carry = (
-                        self._simulation_post_step(self._model, self._data, self._additional_carry))
+                        self._simulation_post_step(self._model, self._data, self._additional_carry, self._traj))
                 else:
                     self._model, self._data, self._additional_carry = (
                         callback_class(self, self._model, self._data, traj_data_sample, self._additional_carry))
@@ -614,7 +614,7 @@ class LocoEnv(Mjx):
         traj_data.qpos[all_free_jnt_qpos_id_xy] -= traj_data_init.qpos[robot_free_jnt_qpos_id_xy]
         return Mjx.set_sim_state_from_traj_data(data, traj_data, carry)
 
-    def mjx_set_sim_state_from_traj_data(self, data, traj_data, carry) -> Data:
+    def mjx_set_sim_state_from_traj_data(self, data, traj_data, carry, traj=None) -> Data:
         """
         Sets the simulation state from the trajectory data.
 
@@ -622,16 +622,19 @@ class LocoEnv(Mjx):
             data (Data): Current Mujoco data.
             traj_data (TrajectoryData): Data from the trajectory.
             carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Full trajectory for initial state lookup. Falls back to self._traj.
 
         Returns:
             Data: Updated Mujoco data.
         """
+        if traj is None:
+            traj = self._traj
         robot_free_jnt_name = self.root_free_joint_xml_name
         robot_free_jnt_qpos_id_xy = np.array(mj_jntname2qposid(robot_free_jnt_name, self._model))[:2]
         all_free_jnt_qpos_id_xy = self.free_jnt_qpos_id[:, :2].reshape(-1)
         traj_state = carry.traj_state
         # get the initial state of the current trajectory
-        traj_data_init = self._traj.data.get(traj_state.traj_no, traj_state.subtraj_step_no_init, jnp)
+        traj_data_init = traj.data.get(traj_state.traj_no, traj_state.subtraj_step_no_init, jnp)
         # subtract the initial state from the current state
         traj_data = traj_data.replace(
             qpos=traj_data.qpos.at[all_free_jnt_qpos_id_xy].add(-traj_data_init.qpos[robot_free_jnt_qpos_id_xy]))
