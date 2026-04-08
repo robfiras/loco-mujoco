@@ -41,7 +41,7 @@ def test_PPO_Jax_build_train_fn(ppo_rl_config):
     train_fn = PPOJax.build_train_fn(env, agent_conf)
 
     # jit and vmap training function
-    train_fn = jax.jit(jax.vmap(train_fn)) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
 
     # Use make_jaxpr to check if the function compiles correctly
     try:
@@ -155,7 +155,7 @@ def test_Imitation_Jax_build_train_fn(algorithm, imitation_config):
     train_fn = alg_cls.build_train_fn(env, agent_conf, mh=mh)
 
     # jit and vmap training function
-    train_fn = jax.jit(jax.vmap(train_fn)) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
 
     # Use make_jaxpr to check if the function compiles correctly
     try:

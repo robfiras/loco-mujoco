@@ -46,7 +46,7 @@ def experiment(config: DictConfig):
         train_fn = PPOJax.build_train_fn(env, agent_conf, mh=mh)
 
         # jit and vmap training function
-        train_fn = jax.jit(jax.vmap(train_fn)) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+        train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
 
         # get rng keys and run training
         rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]  # create rngs from seed

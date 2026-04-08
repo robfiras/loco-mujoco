@@ -174,7 +174,7 @@ class TrajectoryInfo:
             for i, s_name in enumerate(self.site_names):
                 self.site_name2ind[s_name] = np.array([i])
 
-    def __eq__(self, other, backend: ModuleType = jnp):
+    def __eq__(self, other, backend: ModuleType = np):
         if not isinstance(other, TrajectoryInfo):
             return False
 
@@ -416,14 +416,14 @@ class TrajectoryModel:
     site_pos: Union[jax.Array, np.ndarray] = struct.field(default_factory=lambda: jnp.empty(0))
     site_quat: Union[jax.Array, np.ndarray] = struct.field(default_factory=lambda: jnp.empty(0))
 
-    def __eq__(self, other, backend: ModuleType = jnp):
+    def __eq__(self, other, backend: ModuleType = np):
         if not isinstance(other, TrajectoryModel):
             return False
 
         return (
-            self.njnt == other.njnt
+            backend.array_equal(self.njnt, other.njnt)
             and backend.array_equal(self.jnt_type, other.jnt_type)
-            and self.nbody == other.nbody
+            and backend.array_equal(self.nbody, other.nbody)
             and backend.array_equal(self.body_rootid, other.body_rootid)
             and backend.array_equal(self.body_weldid, other.body_weldid)
             and backend.array_equal(self.body_mocapid, other.body_mocapid)
@@ -431,7 +431,7 @@ class TrajectoryModel:
             and backend.array_equal(self.body_quat, other.body_quat)
             and backend.array_equal(self.body_ipos, other.body_ipos)
             and backend.array_equal(self.body_iquat, other.body_iquat)
-            and self.nsite == other.nsite
+            and backend.array_equal(self.nsite, other.nsite)
             and backend.array_equal(self.site_bodyid, other.site_bodyid)
             and backend.array_equal(self.site_pos, other.site_pos)
             and backend.array_equal(self.site_quat, other.site_quat)

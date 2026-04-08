@@ -360,7 +360,7 @@ class LocoEnv(Mjx):
                     data = self.set_sim_state_from_traj_data(data, traj_data_single, carry)
                     mujoco.mj_forward(model, data)
 
-                    data, carry = self._reset_carry(model, data, carry)
+                    data, carry = self._reset_carry(model, data, carry, self._traj)
                     data, carry = (
                         self.obs_container.reset_state(self, model, data, carry, np))
                     obs, carry = self._create_observation(model, data, carry)
@@ -374,14 +374,14 @@ class LocoEnv(Mjx):
                         data = self.set_sim_state_from_traj_data(data, traj_data_single, carry)
                         mujoco.mj_forward(model, data)
 
-                        data, carry = self._simulation_post_step(model, data, carry)
+                        data, carry = self._simulation_post_step(model, data, carry, self._traj)
                         obs, carry = self._create_observation(model, data, carry)
                         obs, data, info, carry = (
                             self._step_finalize(obs, model, data, info, carry))
                         observations.append(obs)
 
                         # check if the current state is an absorbing state
-                        is_absorbing, carry = self._is_absorbing(obs, info, data, carry)
+                        is_absorbing, carry = self._is_absorbing(obs, info, data, carry, self._traj)
                         if is_absorbing:
                             warnings.warn("Some of the states in the created dataset are terminal states. "
                                           "This should not happen.")
