@@ -253,9 +253,10 @@ class LocoEnv(Mjx):
 
         # update trajectory state
         if self.th is not None:
+            _traj = traj if traj is not None else self._traj
             carry = self.th.update_state(self, model, data, carry, np,
-                                         traj_model=traj.info.model if traj is not None else None,
-                                         traj_data=traj.data if traj is not None else None)
+                                         traj_model=_traj.info.model if _traj is not None else None,
+                                         traj_data=_traj.data if _traj is not None else None)
 
         return data, carry
 
@@ -280,9 +281,10 @@ class LocoEnv(Mjx):
 
         # update trajectory state
         if self.th is not None:
+            _traj = traj if traj is not None else self._traj
             carry = self.th.update_state(self, self._model, data, carry, jnp,
-                                         traj_model=traj.info.model if traj is not None else None,
-                                         traj_data=traj.data if traj is not None else None)
+                                         traj_model=_traj.info.model if _traj is not None else None,
+                                         traj_data=_traj.data if _traj is not None else None)
 
         return data, carry
 
@@ -663,10 +665,11 @@ class LocoEnv(Mjx):
         key, _k = jax.random.split(key)
 
         # create additional carry
+        _traj = traj if traj is not None else self._traj
         carry = LocoCarry(
             traj_state=self.th.init_state(self, _k, model, data, backend,
-                                          traj.info.model if traj is not None else None,
-                                          traj.data if traj is not None else None) if self.th is not None else EmptyState(),
+                                          _traj.info.model if _traj is not None else None,
+                                          _traj.data if _traj is not None else None) if self.th is not None else EmptyState(),
             **vars(carry.replace(key=key)))
 
         return carry
