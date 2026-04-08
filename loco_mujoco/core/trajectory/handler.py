@@ -68,7 +68,7 @@ class TrajectoryHandler(StatefulObject):
         return traj_data.to_jax()
 
     @staticmethod
-    def process(traj, model, control_dt):
+    def process(traj, model, control_dt, backend=None):
         """
         Filter, extend, and interpolate a trajectory to match the given model and control frequency.
 
@@ -76,19 +76,22 @@ class TrajectoryHandler(StatefulObject):
             traj (Trajectory): Raw trajectory to process.
             model (mjModel): Current model.
             control_dt (float): Desired control timestep.
+            backend: Array backend (jnp or np). Defaults to jnp.
 
         Returns:
             Trajectory: Processed trajectory.
         """
+        if backend is None:
+            backend = jnp
         from loco_mujoco.core.trajectory import interpolate_trajectories
-        traj_data, traj_info = TrajectoryHandler.filter_and_extend(traj.data, traj.info, model)
+        traj_data, traj_info = TrajectoryHandler.filter_and_extend(traj.data, traj.info, model, backend=backend)
         traj_dt = 1 / traj_info.frequency
         if traj_dt != control_dt:
-            traj_data, traj_info = interpolate_trajectories(traj_data, traj_info, 1.0 / control_dt)
+            traj_data, traj_info = interpolate_trajectories(traj_data, traj_info, 1.0 / control_dt, backend=backend)
         return traj.replace(data=traj_data, info=traj_info)
 
     @staticmethod
-    def filter_and_extend(traj_data, traj_info, model):
+    def filter_and_extend(traj_data, traj_info, model, backend=None):
         """
         To ensure that the data structure of the current model and the trajectory data have the same dimensionality
         and order for all supported attributes, this function filters the elements present in the trajectory but not
@@ -101,11 +104,14 @@ class TrajectoryHandler(StatefulObject):
             traj_data (TrajectoryData): Trajectory data to be filtered and extended.
             traj_info (TrajectoryInfo): Trajectory info to be filtered and extended.
             model (mjModel): Current model.
+            backend: Array backend (jnp or np). Defaults to jnp.
 
         Returns:
             TrajectoryData, TrajectoryInfo: Filtered and extended trajectory data and trajectory info.
 
         """
+        if backend is None:
+            backend = jnp
 
         # --- filter the trajectory based on the model and data ---
         # get the joint names from current model
@@ -120,13 +126,13 @@ class TrajectoryHandler(StatefulObject):
             joint_names.append(name)
 
             if j_type == mujoco.mjtJoint.mjJNT_FREE:
-                joint_name2id_qpos[name] = jnp.arange(j_qpos, j_qpos + 7)
-                joint_name2id_qvel[name] = jnp.arange(j_qvel, j_qvel + 6)
+                joint_name2id_qpos[name] = backend.arange(j_qpos, j_qpos + 7)
+                joint_name2id_qvel[name] = backend.arange(j_qvel, j_qvel + 6)
                 j_qpos += 7
                 j_qvel += 6
             elif j_type == mujoco.mjtJoint.mjJNT_SLIDE or j_type == mujoco.mjtJoint.mjJNT_HINGE:
-                joint_name2id_qpos[name] = jnp.array([j_qpos])
-                joint_name2id_qvel[name] = jnp.array([j_qvel])
+                joint_name2id_qpos[name] = backend.array([j_qpos])
+                joint_name2id_qvel[name] = backend.array([j_qvel])
                 j_qpos += 1
                 j_qvel += 1
 
@@ -169,15 +175,15 @@ class TrajectoryHandler(StatefulObject):
 
         # create new traj_data and traj_info with removed joints, bodies and sites
         if joint_to_be_removed_qpos:
-            qpos_ind = jnp.concatenate(list(joint_to_be_removed_qpos.values()))
-            qvel_ind = jnp.concatenate(list(joint_to_be_removed_qvel.values()))
+            qpos_ind = backend.concatenate(list(joint_to_be_removed_qpos.values()))
+            qvel_ind = backend.concatenate(list(joint_to_be_removed_qvel.values()))
             traj_data = traj_data.remove_joints(qpos_ind, qvel_ind)
             traj_info = traj_info.remove_joints(list(joint_to_be_removed_qpos.keys()))
         if bodies_to_be_removed:
-            traj_data = traj_data.remove_bodies(jnp.array(list(bodies_to_be_removed.values())))
+            traj_data = traj_data.remove_bodies(backend.array(list(bodies_to_be_removed.values())))
             traj_info = traj_info.remove_bodies(list(bodies_to_be_removed.keys()))
         if site_to_be_removed:
-            traj_data = traj_data.remove_sites(jnp.array(list(site_to_be_removed.values())))
+            traj_data = traj_data.remove_sites(backend.array(list(site_to_be_removed.values())))
             traj_info = traj_info.remove_sites(list(site_to_be_removed.keys()))
 
         # --- extend the trajectory data's joints, bodies and sites using the current model and data ---
@@ -227,11 +233,11 @@ class TrajectoryHandler(StatefulObject):
         traj_info = traj_info.reorder_joints(new_joint_order_names)
         traj_info = traj_info.reorder_bodies(new_body_order) if traj_info.body_names is not None else traj_info
         traj_info = traj_info.reorder_sites(new_site_order) if traj_info.site_names is not None else traj_info
-        traj_data = traj_data.reorder_joints(jnp.concatenate(new_joint_order_ids_qpos),
-                                             jnp.concatenate(new_joint_order_ids_qvel))
-        traj_data = traj_data.reorder_bodies(jnp.array(new_body_order)) \
+        traj_data = traj_data.reorder_joints(backend.concatenate(new_joint_order_ids_qpos),
+                                             backend.concatenate(new_joint_order_ids_qvel))
+        traj_data = traj_data.reorder_bodies(backend.array(new_body_order)) \
             if traj_info.body_names is not None else traj_data
-        traj_data = traj_data.reorder_sites(jnp.array(new_site_order)) \
+        traj_data = traj_data.reorder_sites(backend.array(new_site_order)) \
             if traj_info.site_names is not None else traj_data
 
         return traj_data, traj_info

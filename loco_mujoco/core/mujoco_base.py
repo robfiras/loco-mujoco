@@ -201,6 +201,7 @@ class Mujoco:
         self._added_carry_visual_start_idx = None
         self._max_num_samples_traj = max_num_samples_traj
         self._traj = None
+        self._strict_traj = False  # when True, traj must be passed explicitly (no self._traj fallback)
 
     def reset(self, key=None, traj: Optional[Trajectory] = None) -> np.ndarray:
         """
@@ -217,6 +218,7 @@ class Mujoco:
         """
         # resolve trajectory from self._traj if not explicitly provided
         if traj is None:
+            assert not self._strict_traj, "traj must be passed explicitly when strict_traj is enabled."
             traj = self._traj
         # ensure numpy format for CPU reset
         if traj is not None and not isinstance(traj.data.qpos, np.ndarray):
@@ -256,6 +258,7 @@ class Mujoco:
         """
         # resolve trajectory from self._traj if not explicitly provided
         if traj is None:
+            assert not self._strict_traj, "traj must be passed explicitly when strict_traj is enabled."
             traj = self._traj
 
         cur_info = self._info.copy()

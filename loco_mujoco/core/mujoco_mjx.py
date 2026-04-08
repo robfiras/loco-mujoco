@@ -106,6 +106,7 @@ class Mjx(Mujoco):
 
         # resolve trajectory from self._traj if not explicitly provided
         if traj is None:
+            assert not self._strict_traj, "traj must be passed explicitly when strict_traj is enabled."
             traj = self._traj
         if traj is not None and isinstance(traj.data.qpos, np.ndarray):
             raise ValueError("Trajectory is in numpy format, but you are attempting to run the MJX backend. "
@@ -189,6 +190,7 @@ class Mjx(Mujoco):
 
         # resolve trajectory from self._traj if not explicitly provided
         if traj is None:
+            assert not self._strict_traj, "traj must be passed explicitly when strict_traj is enabled."
             traj = self._traj
 
         data = state.data
