@@ -98,9 +98,9 @@ class ImitationFactory(TaskFactory):
         all_trajs = Trajectory.concatenate(all_trajs)
 
         # add to the environment
-        env.process_trajectory(all_trajs)
+        traj = env.process_trajectory(all_trajs)
 
-        return env, env._traj
+        return env, traj
 
     @staticmethod
     def get_default_traj(env, default_dataset_conf) -> Trajectory:
