@@ -14,6 +14,7 @@ import optax
 
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStateBase, ActorCritic,
                                     Transition, TrainState, TrainStateBuffer, MetricHandlerTransition)
+from loco_mujoco.algorithms.common.policies import PPOPolicy
 from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, NormalizeVecReward, SummaryMetrics
 
 @struct.dataclass
@@ -185,6 +186,7 @@ class PPOJax(JaxRLAlgorithmBase):
             (agent_conf.config.experiment, agent_conf.network, agent_conf.tx)
 
         env = cls._wrap_env(env, config)
+        policy = PPOPolicy(network)
 
         if agent_state is not None:
             # resume: preserve params, opt_state, and step — only re-attach apply_fn (not serializable)
@@ -219,13 +221,7 @@ class PPOJax(JaxRLAlgorithmBase):
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-                y, updates = network.apply({'params': train_state.params,
-                                                  'run_stats': train_state.run_stats},
-                                                 last_obs, mutable=["run_stats"])
-                pi, value = y
-                train_state = train_state.replace(run_stats=updates['run_stats'])   # update stats
-                action = pi.sample(seed=_rng)
-                log_prob = pi.log_prob(action)
+                action, log_prob, value, train_state = policy.get_action_and_value(last_obs, train_state, _rng)
 
                 # STEP ENV
                 obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
@@ -247,10 +243,7 @@ class PPOJax(JaxRLAlgorithmBase):
 
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, train_state_buffer, rng = runner_state
-            y, _ = network.apply({'params': train_state.params,
-                                              'run_stats': train_state.run_stats},
-                                             last_obs, mutable=["run_stats"])
-            pi, last_val = y
+            _, last_val, _ = policy.get_dist_and_value(last_obs, train_state)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -288,9 +281,8 @@ class PPOJax(JaxRLAlgorithmBase):
 
                     def _loss_fn(params, traj_batch, gae, targets):
                         # RERUN NETWORK
-                        y, _ = network.apply({'params': params, 'run_stats': train_state.run_stats},
-                                             traj_batch.obs, mutable=["run_stats"])
-                        pi, value = y
+                        pi, value, _ = policy.get_dist_and_value(traj_batch.obs,
+                                                                  train_state.replace(params=params))
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
@@ -520,13 +512,10 @@ class PPOJax(JaxRLAlgorithmBase):
         if use_mujoco:
             assert n_envs == 1, "Only one mujoco env can be run at a time."
 
+        _policy = PPOPolicy(agent_conf.network)
+
         def sample_actions(ts, obs, _rng):
-            y, updates = agent_conf.network.apply({'params': ts.params,
-                                                   'run_stats': ts.run_stats},
-                                                  obs, mutable=["run_stats"])
-            ts = ts.replace(run_stats=updates['run_stats'])  # update stats
-            pi, _ = y
-            a = pi.sample(seed=_rng)
+            a, _, _, ts = _policy.get_action_and_value(obs, ts, _rng)
             return a, ts
 
         config = agent_conf.config.experiment
