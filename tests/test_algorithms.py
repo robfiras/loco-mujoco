@@ -37,18 +37,21 @@ def test_PPO_Jax_build_train_fn(ppo_rl_config):
     # get initial agent configuration
     agent_conf = PPOJax.init_agent_conf(env, config)
 
+    # initialize agent state
+    rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
+    rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
+    agent_state = jax.vmap(lambda r: PPOJax.init_agent_state(env, agent_conf, r))(_rng) \
+        if config.experiment.n_seeds > 1 else PPOJax.init_agent_state(env, agent_conf, _rng)
+
     # build training function
     train_fn = PPOJax.build_train_fn(env, agent_conf)
 
     # jit and vmap training function
-    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, 0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
 
     # Use make_jaxpr to check if the function compiles correctly
     try:
-        rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
-        rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
-
-        jaxpr = make_jaxpr(train_fn)(_rng, traj)
+        jaxpr = make_jaxpr(train_fn)(_rng, agent_state, traj)
 
         assert jaxpr is not None
     except Exception as e:
@@ -68,11 +71,12 @@ def test_PPO_save_and_load_agent(ppo_rl_config, tmp_path):
     factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
     env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
     agent_conf = PPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
     train_fn = PPOJax.build_train_fn(env, agent_conf)
     train_fn = jax.jit(train_fn)
 
-    rng = jax.random.PRNGKey(0)
-    result = train_fn(rng, traj)
+    result = train_fn(rng, agent_state, traj)
     agent_state = result["agent_state"]
 
     save_path = PPOJax.save_agent(tmp_path, agent_conf, agent_state)
@@ -106,11 +110,12 @@ def test_Imitation_save_and_load_agent(algorithm, imitation_config, tmp_path):
     agent_conf = alg_cls.init_agent_conf(env, config)
     agent_conf = agent_conf.add_expert_dataset(expert_dataset)
 
+    rng = jax.random.PRNGKey(0)
+    agent_state = alg_cls.init_agent_state(env, agent_conf, rng)
     train_fn = alg_cls.build_train_fn(env, agent_conf, mh=None)
     train_fn = jax.jit(train_fn)
 
-    rng = jax.random.PRNGKey(0)
-    result = train_fn(rng, traj)
+    result = train_fn(rng, agent_state, traj)
     agent_state = result["agent_state"]
 
     save_path = alg_cls.save_agent(tmp_path, agent_conf, agent_state)
@@ -151,18 +156,21 @@ def test_Imitation_Jax_build_train_fn(algorithm, imitation_config):
     # setup metric handler (optional)
     mh = MetricsHandler(config, env) if config.experiment.validation.active else None
 
+    # initialize agent state
+    rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
+    rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
+    agent_state = jax.vmap(lambda r: alg_cls.init_agent_state(env, agent_conf, r))(_rng) \
+        if config.experiment.n_seeds > 1 else alg_cls.init_agent_state(env, agent_conf, _rng)
+
     # build training function
     train_fn = alg_cls.build_train_fn(env, agent_conf, mh=mh)
 
     # jit and vmap training function
-    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, 0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
 
     # Use make_jaxpr to check if the function compiles correctly
     try:
-        rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
-        rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
-
-        jaxpr = make_jaxpr(train_fn)(_rng, traj)
+        jaxpr = make_jaxpr(train_fn)(_rng, agent_state, traj)
 
         assert jaxpr is not None
     except Exception as e:

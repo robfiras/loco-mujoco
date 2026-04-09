@@ -57,10 +57,12 @@ class PPOAgentConf(AgentConfBase):
 @struct.dataclass
 class PPOAgentState(AgentStateBase):
     train_state: TrainState
+    env_state: Any = None   # carried across chunks to preserve normalization stats
+    last_obs: Any = None    # last observation from previous chunk
 
     def serialize(self):
         serialized_train_state = flax.serialization.to_state_dict(self.train_state)
-        return {"train_state": serialized_train_state}
+        return {"train_state": serialized_train_state}  # env_state/last_obs not saved to disk
 
     @classmethod
     def from_dict(cls, d, agent_conf):
@@ -128,6 +130,22 @@ class PPOJax(JaxRLAlgorithmBase):
         return cls._agent_conf(config, network, tx)
 
     @classmethod
+    def init_agent_state(cls, env, agent_conf: PPOAgentConf, rng) -> PPOAgentState:
+        """ Initializes and returns the PPO agent state (network params + optimizer). """
+        config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
+        wrapped_env = cls._wrap_env(env, config)
+        rng, _rng = jax.random.split(rng)
+        init_x = jnp.zeros(wrapped_env.info.observation_space.shape)
+        network_params = network.init(_rng, init_x)
+        train_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params["params"],
+            run_stats=network_params["run_stats"],
+            tx=tx,
+        )
+        return cls._agent_state(train_state=train_state)
+
+    @classmethod
     def _get_optimizer(cls, config):
         desired_kl = getattr(config.experiment, 'desired_kl', None)
         if config.experiment.anneal_lr:
@@ -168,30 +186,28 @@ class PPOJax(JaxRLAlgorithmBase):
 
         env = cls._wrap_env(env, config)
 
-        # extract current agent state
         if agent_state is not None:
-            train_state = agent_state.train_state
+            # resume: preserve params, opt_state, and step — only re-attach apply_fn (not serializable)
+            train_state = agent_state.train_state.replace(apply_fn=network.apply)
         else:
-            train_state = None
-
-        if train_state is None:
-
-            rng, _rng1, _rng2 = jax.random.split(rng, 3)
+            rng, _rng1 = jax.random.split(rng)
             init_x = jnp.zeros(env.info.observation_space.shape)
             network_params = network.init(_rng1, init_x)
+            train_state = TrainState.create(
+                apply_fn=network.apply,
+                params=network_params["params"],
+                run_stats=network_params["run_stats"],
+                tx=tx,
+            )
 
-        # init new train states from old params (or use loaded state when resuming)
-        train_state = TrainState.create(
-            apply_fn=network.apply,
-            params=network_params["params"] if train_state is None else train_state.params,
-            run_stats=network_params["run_stats"] if train_state is None else train_state.run_stats,
-            tx=tx,
-        )
-
-        # INIT ENV
-        rng, _rng = jax.random.split(rng)
-        reset_rng = jax.random.split(_rng, config.num_envs)
-        obsv, env_state = env.reset(reset_rng, traj)
+        # INIT ENV — reuse carried state if available to preserve normalization stats across chunks
+        if agent_state is not None and agent_state.env_state is not None:
+            env_state = agent_state.env_state
+            obsv = agent_state.last_obs
+        else:
+            rng, _rng = jax.random.split(rng)
+            reset_rng = jax.random.split(_rng, config.num_envs)
+            obsv, env_state = env.reset(reset_rng, traj)
 
         train_state_buffer = TrainStateBuffer.create(train_state, config.validation.num)
 
@@ -481,7 +497,9 @@ class PPOJax(JaxRLAlgorithmBase):
             _update_step, runner_state, None, config.num_updates
         )
 
-        agent_state = cls._agent_state(train_state=runner_state[0])
+        agent_state = cls._agent_state(train_state=runner_state[0],
+                                       env_state=runner_state[1],
+                                       last_obs=runner_state[2])
 
         return {"agent_state": agent_state,
                 "training_metrics": metrics[0],

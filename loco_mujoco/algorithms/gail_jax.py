@@ -162,6 +162,30 @@ class GAILJax(JaxRLAlgorithmBase):
         return cls._agent_conf(config, network, discriminator, tx, disc_tx)
 
     @classmethod
+    def init_agent_state(cls, env, agent_conf: GAILAgentConf, rng) -> GAILAgentState:
+        """ Initializes and returns the GAIL agent state (actor + discriminator params and optimizers). """
+        config, network, discriminator, tx, disc_tx = (
+            agent_conf.config.experiment, agent_conf.network, agent_conf.discriminator,
+            agent_conf.tx, agent_conf.disc_tx)
+        rng, _rng1, _rng2 = jax.random.split(rng, 3)
+        init_x = jnp.zeros(env.info.observation_space.shape)
+        network_params = network.init(_rng1, init_x)
+        discrim_params = discriminator.init(_rng2, init_x)
+        train_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params["params"],
+            run_stats=network_params["run_stats"],
+            tx=tx,
+        )
+        disc_train_state = TrainState.create(
+            apply_fn=discriminator.apply,
+            params=discrim_params["params"],
+            run_stats=discrim_params["run_stats"],
+            tx=disc_tx,
+        )
+        return cls._agent_state(train_state=train_state, disc_train_state=disc_train_state)
+
+    @classmethod
     def _get_optimizer(cls, config):
 
         if config.experiment.anneal_lr:
@@ -197,33 +221,27 @@ class GAILJax(JaxRLAlgorithmBase):
             (agent_conf.config.experiment, agent_conf.network,
              agent_conf.discriminator, agent_conf.tx, agent_conf.disc_tx, agent_conf.expert_dataset)
 
-        # extract current agent state
         if agent_state is not None:
-            train_state, disc_train_state = agent_state.train_state, agent_state.disc_train_state
+            # resume: preserve params, opt_state, and step — only re-attach apply_fn (not serializable)
+            train_state = agent_state.train_state.replace(apply_fn=network.apply)
+            disc_train_state = agent_state.disc_train_state.replace(apply_fn=discriminator.apply)
         else:
-            train_state, disc_train_state = None, None
-
-        if train_state is None:
-
             rng, _rng1, _rng2 = jax.random.split(rng, 3)
             init_x = jnp.zeros(env.info.observation_space.shape)
             network_params = network.init(_rng1, init_x)
             discrim_params = discriminator.init(_rng2, init_x)
-
-        # init new train states from old params (or use loaded state when resuming)
-        train_state = TrainState.create(
-            apply_fn=network.apply,
-            params=network_params["params"] if train_state is None else train_state.params,
-            run_stats=network_params["run_stats"] if train_state is None else train_state.run_stats,
-            tx=tx,
-        )
-
-        disc_train_state = TrainState.create(
-            apply_fn=discriminator.apply,
-            params=discrim_params["params"] if disc_train_state is None else disc_train_state.params,
-            run_stats=discrim_params["run_stats"] if disc_train_state is None else disc_train_state.run_stats,
-            tx=disc_tx,
-        )
+            train_state = TrainState.create(
+                apply_fn=network.apply,
+                params=network_params["params"],
+                run_stats=network_params["run_stats"],
+                tx=tx,
+            )
+            disc_train_state = TrainState.create(
+                apply_fn=discriminator.apply,
+                params=discrim_params["params"],
+                run_stats=discrim_params["run_stats"],
+                tx=disc_tx,
+            )
 
         env = cls._wrap_env(env, config)
 

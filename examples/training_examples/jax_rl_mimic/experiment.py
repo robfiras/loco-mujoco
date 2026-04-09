@@ -39,6 +39,12 @@ def experiment(config: DictConfig):
         # get initial agent configuration
         agent_conf = PPOJax.init_agent_conf(env, config)
 
+        # initialize agent state
+        rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]
+        rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
+        agent_state = jax.vmap(lambda r: PPOJax.init_agent_state(env, agent_conf, r))(_rng) \
+            if config.experiment.n_seeds > 1 else PPOJax.init_agent_state(env, agent_conf, _rng)
+
         # setup metric handler (optional)
         mh = MetricsHandler(config, env) if config.experiment.validation.active else None
 
@@ -46,12 +52,9 @@ def experiment(config: DictConfig):
         train_fn = PPOJax.build_train_fn(env, agent_conf, mh=mh)
 
         # jit and vmap training function
-        train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+        train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, 0, None))) if config.experiment.n_seeds > 1 else jax.jit(train_fn)
 
-        # get rng keys and run training
-        rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds+1)]  # create rngs from seed
-        rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
-        out = train_fn(_rng, traj)
+        out = train_fn(_rng, agent_state, traj)
 
         # save agent state
         agent_state = out["agent_state"]
