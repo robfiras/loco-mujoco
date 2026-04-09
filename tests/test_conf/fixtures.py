@@ -489,3 +489,8 @@ def ppo_rl_config():
 @pytest.fixture
 def imitation_config():
     return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/gail_amp.yaml')
+
+
+@pytest.fixture
+def s2pg_ppo_config():
+    return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/s2pg_ppo.yaml')

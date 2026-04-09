@@ -6,6 +6,7 @@ import distrax
 from loco_mujoco.algorithms.common.dataclasses import TrainState
 
 
+
 class PPOPolicy:
     """
     Thin policy wrapper around a Flax actor-critic network.
@@ -78,4 +79,3 @@ class PPOPolicy:
         )
         pi, value = y
         return pi, value, train_state.replace(run_stats=updates["run_stats"])
-

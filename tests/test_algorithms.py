@@ -4,6 +4,7 @@ from omegaconf import open_dict
 
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms import PPOJax, GAILJax, AMPJax
+from loco_mujoco.algorithms.experimental import S2PGPPOJax
 from loco_mujoco.utils import MetricsHandler
 
 from test_conf import *
@@ -175,3 +176,59 @@ def test_Imitation_Jax_build_train_fn(algorithm, imitation_config):
         assert jaxpr is not None
     except Exception as e:
         pytest.fail(f"JAX function compilation failed: {e}")
+
+
+def test_S2PG_PPO_build_train_fn(s2pg_ppo_config):
+
+    config = s2pg_ppo_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = S2PGPPOJax.init_agent_conf(env, config)
+
+    rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds + 1)]
+    rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
+    agent_state = jax.vmap(lambda r: S2PGPPOJax.init_agent_state(env, agent_conf, r))(_rng) \
+        if config.experiment.n_seeds > 1 else S2PGPPOJax.init_agent_state(env, agent_conf, _rng)
+
+    train_fn = S2PGPPOJax.build_train_fn(env, agent_conf)
+    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, 0, None))) \
+        if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+
+    try:
+        jaxpr = make_jaxpr(train_fn)(_rng, agent_state, traj)
+        assert jaxpr is not None
+    except Exception as e:
+        pytest.fail(f"JAX function compilation failed: {e}")
+
+
+def test_S2PG_PPO_save_and_load_agent(s2pg_ppo_config, tmp_path):
+    """Train S2PG for a few steps, save agent, load it, and verify params match."""
+    config = OmegaConf.create(OmegaConf.to_container(s2pg_ppo_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.validation.num = 1
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = S2PGPPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = S2PGPPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(S2PGPPOJax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    agent_state = result["agent_state"]
+
+    save_path = S2PGPPOJax.save_agent(tmp_path, agent_conf, agent_state)
+    assert save_path.exists()
+
+    loaded_conf, loaded_state = S2PGPPOJax.load_agent(save_path)
+    assert loaded_conf is not None
+    assert loaded_state is not None
+
+    assert _params_allclose(agent_state.train_state.params, loaded_state.train_state.params)
+    assert _params_allclose(agent_state.train_state.run_stats, loaded_state.train_state.run_stats)
