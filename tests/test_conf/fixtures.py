@@ -494,3 +494,8 @@ def imitation_config():
 @pytest.fixture
 def s2pg_ppo_config():
     return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/s2pg_ppo.yaml')
+
+
+@pytest.fixture
+def bptt_ppo_config():
+    return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/bptt_ppo.yaml')

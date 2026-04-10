@@ -122,4 +122,4 @@ class RunningMeanStd(nn.Module):
         var.value = new_var
         count.value = updated_count
 
-        return jnp.squeeze(normalized_x)
+        return normalized_x

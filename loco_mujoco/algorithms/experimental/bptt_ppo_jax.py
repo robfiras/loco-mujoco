@@ -33,93 +33,66 @@ def _stored_hidden_dim(hidden_state_dim: int, rnn_type: str) -> int:
     return 2 * hidden_state_dim if rnn_type == "lstm" else hidden_state_dim
 
 
-class IndependentJointDist:
-    """
-    Wraps two independent distributions (action and next hidden state).
-
-    Because the two are independent:
-        log p(a, z') = log p_a(a) + log p_z(z')
-        entropy(a, z') = entropy(a) + entropy(z')
-    """
-
-    def __init__(self, dist_a: distrax.Distribution, dist_z: distrax.Distribution, action_dim: int):
-        self.dist_a = dist_a
-        self.dist_z = dist_z
-        self.action_dim = action_dim
-
-    def log_prob(self, x: jnp.ndarray) -> jnp.ndarray:
-        return self.dist_a.log_prob(x[..., :self.action_dim]) \
-             + self.dist_z.log_prob(x[..., self.action_dim:])
-
-    def sample(self, seed: jnp.ndarray) -> jnp.ndarray:
-        seed_a, seed_z = jax.random.split(seed)
-        return jnp.concatenate([self.dist_a.sample(seed=seed_a),
-                                 self.dist_z.sample(seed=seed_z)], axis=-1)
-
-    def entropy(self) -> jnp.ndarray:
-        return self.dist_a.entropy() + self.dist_z.entropy()
-
-
 # ---------------------------------------------------------------------------
 # Network
 # ---------------------------------------------------------------------------
 
-class ActorCriticS2PG(nn.Module):
+class ActorCriticBPTT(nn.Module):
     """
-    Network for S2PG-PPO.
+    Network for BPTT-PPO.
 
     Actor
     -----
     *rnn_type = "gru" or "lstm"* (default):
       1. Embed obs and prev_action separately.
       2. Feed concat([obs_embed, prev_action_embed]) into a GRU / LSTM cell
-         whose initial carry is the current hidden state ``z``.
-      3. The RNN carry output is the mean of the stochastic next hidden state z'.
+         whose initial carry is the current hidden state ``h``.
+      3. The RNN carry output is the deterministic new hidden state h'.
       4. A post-RNN obs re-embedding + RNN output → action mean.
 
     *rnn_type = "vanilla"*:
-      concat([obs, z, prev_action]) → MLP → (action_mean, next_hidden_mean).
+      Embed obs and prev_action separately via Dense(n_features), concat with
+      hidden_state → MLP → (action_mean, new_hidden).
 
-    The actor returns an IndependentJointDist over (a, z').
+    The actor returns a distrax.MultivariateNormalDiag over actions only.
+    The new hidden state is returned deterministically (no distribution).
 
     Critic
     ------
-    MLP over concat([obs, z, prev_action]) → scalar V(s, z, a_prev).
+    MLP over concat([obs, h, prev_action]) → scalar V(s, h, a_prev).
 
     Inputs
     ------
     obs:          (..., obs_dim)
     hidden_state: (..., stored_hidden_dim)   # for LSTM: concat(h, c)
     prev_action:  (..., action_dim)
+
+    Returns
+    -------
+    (pi, value, new_hidden)
     """
 
     action_dim: int
     hidden_state_dim: int           # actual RNN hidden size (per vector; LSTM stores 2x)
     rnn_type: str = "gru"           # "gru" | "lstm" | "vanilla"
-    n_features: int = 256           # pre / post-RNN embedding width (GRU/LSTM only)
+    n_features: int = 256           # pre / post-RNN embedding width
     activation: str = "tanh"
     init_std_a: float = 1.0
-    init_std_z: float = 0.1
     learnable_std: bool = True
     hidden_layer_dims: Sequence[int] = (512, 256)   # critic MLP + "vanilla" actor MLP
-    ema_coef: float = 1.0           # exponential smoothing for hidden state transition:
-                                    # next_z_mean = (1-ema_coef)*z_t + ema_coef*f_theta(...)
-                                    # 1.0 = no smoothing (default), 0 < ema_coef < 1 adds inertia
+    ema_coef: float = 1.0           # exponential smoothing for hidden state transition
 
     def setup(self):
         self.activation_fn = get_activation_fn(self.activation)
 
     @nn.compact
     def __call__(self, obs, hidden_state, prev_action):
-        # RunningMeanStd applies atleast_2d then squeeze internally, which
-        # strips the batch dim on 1D inputs.  Re-promote all three tensors to
-        # 2D so every downstream layer sees a consistent (batch, feat) shape.
         obs_norm = RunningMeanStd()(obs)
 
         stored_z_dim = _stored_hidden_dim(self.hidden_state_dim, self.rnn_type)
 
         if self.rnn_type == "vanilla":
-            # ---- MLP actor (mirrors the RNN structure) ----
+            # ---- MLP actor ----
             # Embed obs and prev_action separately, then combine with hidden state
             obs_embed = self.activation_fn(nn.Dense(self.n_features)(obs_norm))
             prev_a_embed = self.activation_fn(nn.Dense(self.n_features)(prev_action))
@@ -130,7 +103,7 @@ class ActorCriticS2PG(nn.Module):
                 self.activation, None, False, False
             )(actor_in)
             action_mean = actor_out[..., :self.action_dim]
-            next_hidden_mean = actor_out[..., self.action_dim:]
+            new_hidden = actor_out[..., self.action_dim:]
 
         else:
             # ---- RNN actor ----
@@ -141,13 +114,13 @@ class ActorCriticS2PG(nn.Module):
 
             if self.rnn_type == "gru":
                 new_carry, rnn_out = nn.GRUCell(self.hidden_state_dim)(hidden_state, rnn_input)
-                next_hidden_mean = new_carry   # shape (..., hidden_state_dim)
+                new_hidden = new_carry   # shape (..., hidden_state_dim)
 
             elif self.rnn_type == "lstm":
                 h = hidden_state[..., :self.hidden_state_dim]
                 c = hidden_state[..., self.hidden_state_dim:]
                 (new_h, new_c), rnn_out = nn.LSTMCell(self.hidden_state_dim)((h, c), rnn_input)
-                next_hidden_mean = jnp.concatenate([new_h, new_c], axis=-1)
+                new_hidden = jnp.concatenate([new_h, new_c], axis=-1)
                 rnn_out = new_h   # use h for downstream heads
 
             else:
@@ -161,91 +134,80 @@ class ActorCriticS2PG(nn.Module):
                 bias_init=nn.initializers.constant(0.0),
             )(jnp.concatenate([obs_post, rnn_out], axis=-1))
 
-        # Exponential smoothing on the hidden state transition mean:
-        #   next_z_mean = (1 - ema_coef) * z_t + ema_coef * f_theta(...)
+        # Exponential smoothing on the hidden state transition:
+        #   new_h = (1 - ema_coef) * h_t + ema_coef * f_theta(...)
         # ema_coef=1.0 recovers the unsmoothed transition (default).
         if self.ema_coef < 1.0:
-            next_hidden_mean = (1.0 - self.ema_coef) * hidden_state + self.ema_coef * next_hidden_mean
+            new_hidden = (1.0 - self.ema_coef) * hidden_state + self.ema_coef * new_hidden
 
-        # Distributions (independent Gaussians for action and next hidden state)
+        # Action distribution (independent Gaussian)
         log_std_a = self.param("log_std_a",
                                nn.initializers.constant(jnp.log(self.init_std_a)),
                                (self.action_dim,))
-        log_std_z = self.param("log_std_z",
-                               nn.initializers.constant(jnp.log(self.init_std_z)),
-                               (stored_z_dim,))
         if not self.learnable_std:
             log_std_a = jax.lax.stop_gradient(log_std_a)
-            log_std_z = jax.lax.stop_gradient(log_std_z)
 
-        pi = IndependentJointDist(
-            distrax.MultivariateNormalDiag(action_mean, jnp.exp(log_std_a)),
-            distrax.MultivariateNormalDiag(next_hidden_mean, jnp.exp(log_std_z)),
-            self.action_dim,
-        )
+        pi = distrax.MultivariateNormalDiag(action_mean, jnp.exp(log_std_a))
 
-        # Critic — MLP over (obs, z, prev_action)
+        # Critic — MLP over (obs, h, prev_action)
         critic_in = jnp.concatenate([obs_norm, hidden_state, prev_action], axis=-1)
         critic = FullyConnectedNet(
             self.hidden_layer_dims, 1, self.activation, None, False, False
         )(critic_in)
 
-        return pi, jnp.squeeze(critic, axis=-1)
+        return pi, jnp.squeeze(critic, axis=-1), new_hidden
 
 
 # ---------------------------------------------------------------------------
 # Policy
 # ---------------------------------------------------------------------------
 
-class S2PGPolicy:
+class BPTTPolicy:
     """
-    Policy wrapper for S2PG-PPO.
+    Policy wrapper for BPTT-PPO.
 
     All methods take obs, hidden_state, and prev_action as separate arguments.
+    The hidden state is propagated deterministically (no stochastic transition).
     """
 
     def __init__(self, network: nn.Module, action_dim: int):
         self.network = network
         self.action_dim = action_dim
 
-    def get_env_action_and_next_hidden(
+    def get_action(
         self, obs, hidden_state, prev_action, train_state, rng
     ):
-        """Sample joint (a, z') and split into env action and next hidden state.
+        """Sample action and return new hidden state.
 
         Returns:
-            (env_action, next_hidden, log_prob, value, joint_action, updated_train_state)
+            (action, new_hidden, log_prob, value, updated_train_state)
         """
-        pi, value, train_state = self._forward_pass(obs, hidden_state, prev_action, train_state)
-        joint_action = pi.sample(seed=rng)
-        log_prob = pi.log_prob(joint_action)
-        env_action = joint_action[..., :self.action_dim]
-        next_hidden = joint_action[..., self.action_dim:]
-        return env_action, next_hidden, log_prob, value, joint_action, train_state
+        pi, value, new_hidden, train_state = self._forward_pass(obs, hidden_state, prev_action, train_state)
+        action = pi.sample(seed=rng)
+        log_prob = pi.log_prob(action)
+        return action, new_hidden, log_prob, value, train_state
 
     def get_dist_and_value(self, obs, hidden_state, prev_action, train_state):
         return self._forward_pass(obs, hidden_state, prev_action, train_state)
 
     def _forward_pass(self, obs, hidden_state, prev_action, train_state):
-        y, updates = self.network.apply(
+        (pi, value, new_hidden), updates = self.network.apply(
             {"params": train_state.params, "run_stats": train_state.run_stats},
             obs, hidden_state, prev_action,
             mutable=["run_stats"],
         )
-        pi, value = y
-        return pi, value, train_state.replace(run_stats=updates["run_stats"])
+        return pi, value, new_hidden, train_state.replace(run_stats=updates["run_stats"])
 
 
 # ---------------------------------------------------------------------------
 # Transition
 # ---------------------------------------------------------------------------
 
-class S2PGTransition(NamedTuple):
-    """Transition for S2PG — stores raw obs, hidden state, and prev_action separately."""
+class BPTTTransition(NamedTuple):
+    """Transition for BPTT-PPO — no per-step hidden_state needed in the batch."""
     done: jnp.ndarray
     absorbing: jnp.ndarray
-    action: jnp.ndarray         # joint action concat([a, z'])
-    hidden_state: jnp.ndarray   # z_t (current hidden state at this step)
+    action: jnp.ndarray         # env action a_t
     prev_action: jnp.ndarray    # a_{t-1} (zeros at episode start)
     value: jnp.ndarray
     reward: jnp.ndarray
@@ -261,9 +223,9 @@ class S2PGTransition(NamedTuple):
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class S2PGAgentConf(AgentConfBase):
+class BPTTAgentConf(AgentConfBase):
     config: DictConfig
-    network: ActorCriticS2PG
+    network: ActorCriticBPTT
     tx: Any
 
     def serialize(self):
@@ -274,18 +236,18 @@ class S2PGAgentConf(AgentConfBase):
     @classmethod
     def from_dict(cls, d):
         config = OmegaConf.create(d["config"])
-        tx = S2PGPPOJax._get_optimizer(config)
+        tx = BPTTPPOJax._get_optimizer(config)
         return cls(config=config,
-                   network=flax.serialization.from_state_dict(ActorCriticS2PG, d["network"]),
+                   network=flax.serialization.from_state_dict(ActorCriticBPTT, d["network"]),
                    tx=tx)
 
 
 @struct.dataclass
-class S2PGAgentState(AgentStateBase):
+class BPTTAgentState(AgentStateBase):
     train_state: TrainState
     env_state: Any = None
     last_obs: Any = None
-    hidden_state: Any = None    # z carried across chunks
+    hidden_state: Any = None    # h carried across chunks
     prev_action: Any = None     # a_{t-1} carried across chunks
 
     def serialize(self):
@@ -309,38 +271,35 @@ class S2PGAgentState(AgentStateBase):
 # Algorithm
 # ---------------------------------------------------------------------------
 
-class S2PGPPOJax(PPOJax):
+class BPTTPPOJax(PPOJax):
     """
-    S2PG-PPO: Proximal Policy Optimization with the Stochastic Stateful Policy Gradient.
+    BPTT-PPO: Proximal Policy Optimization with Backpropagation Through Time.
 
     Key properties
     --------------
-    * The policy jointly models (action, next_hidden_state) as two independent
-      Gaussians; their summed log-prob is the IS ratio — no BPTT required.
-    * The hidden state z is propagated as the GRU/LSTM carry; its stochastic
-      transition replaces BPTT with a score-function estimator.
-    * The previous action a_{t-1} is fed to the RNN input and the critic,
-      matching the original S2PG formulation.
-    * Value function: V(s, z, a_prev).
+    * The policy uses a GRU/LSTM/vanilla RNN to maintain a deterministic hidden
+      state; the IS ratio is only over actions (standard PPO).
+    * Gradients flow through time via jax.lax.scan over the sequence during
+      the update step.
+    * Minibatches are over environments (not individual timesteps) so sequences
+      stay intact during the gradient computation.
+    * h_init (hidden state at start of each rollout) is saved and used to seed
+      the BPTT replay scan.
 
     Supported rnn_type values: "gru" (default), "lstm", "vanilla" (MLP fallback).
-
-    Reference
-    ---------
-    "Time-Efficient Reinforcement Learning with Stochastic Stateful Policies"
-    Firas Al-Hafez et al., arXiv 2311.04082
     """
 
-    _agent_conf = S2PGAgentConf
-    _agent_state = S2PGAgentState
+    _agent_conf = BPTTAgentConf
+    _agent_state = BPTTAgentState
 
     @classmethod
     def init_agent_conf(cls, env, config):
         with open_dict(config.experiment):
             config.experiment.num_updates = (
                 config.experiment.total_timesteps // config.experiment.num_steps // config.experiment.num_envs)
+            # For BPTT, minibatch_size is over environments not flattened steps
             config.experiment.minibatch_size = (
-                config.experiment.num_envs * config.experiment.num_steps // config.experiment.num_minibatches)
+                config.experiment.num_envs // config.experiment.num_minibatches)
             config.experiment.validation_interval = config.experiment.num_updates // config.experiment.validation.num
             config.experiment.validation.num = int(
                 config.experiment.num_updates // config.experiment.validation_interval)
@@ -353,17 +312,15 @@ class S2PGPPOJax(PPOJax):
         hidden_state_dim = config.experiment.hidden_state_dim
         rnn_type = getattr(config.experiment, 'rnn_type', 'gru')
         n_features = getattr(config.experiment, 'n_features', 256)
-        init_std_z = getattr(config.experiment, 'init_std_z', 0.1)
         ema_coef = getattr(config.experiment, 'ema_coef', 1.0)
 
-        network = ActorCriticS2PG(
+        network = ActorCriticBPTT(
             action_dim=env.info.action_space.shape[0],
             hidden_state_dim=hidden_state_dim,
             rnn_type=rnn_type,
             n_features=n_features,
             activation=config.experiment.activation,
             init_std_a=config.experiment.init_std,
-            init_std_z=init_std_z,
             learnable_std=config.experiment.learnable_std,
             hidden_layer_dims=hidden_layers,
             ema_coef=ema_coef,
@@ -372,7 +329,7 @@ class S2PGPPOJax(PPOJax):
         return cls._agent_conf(config, network, tx)
 
     @classmethod
-    def init_agent_state(cls, env, agent_conf: S2PGAgentConf, rng) -> S2PGAgentState:
+    def init_agent_state(cls, env, agent_conf: BPTTAgentConf, rng) -> BPTTAgentState:
         config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
         wrapped_env = cls._wrap_env(env, config)
         obs_dim = wrapped_env.info.observation_space.shape[0]
@@ -395,8 +352,8 @@ class S2PGPPOJax(PPOJax):
 
     @classmethod
     def _train_fn(cls, rng, env,
-                  agent_conf: S2PGAgentConf,
-                  agent_state: S2PGAgentState = None,
+                  agent_conf: BPTTAgentConf,
+                  agent_state: BPTTAgentState = None,
                   traj=None,
                   mh: MetricsHandler = None):
 
@@ -406,8 +363,13 @@ class S2PGPPOJax(PPOJax):
         rnn_type = network.rnn_type
         stored_z_dim = _stored_hidden_dim(hidden_state_dim, rnn_type)
 
+        assert config.num_envs % config.num_minibatches == 0, (
+            f"num_envs ({config.num_envs}) must be divisible by num_minibatches ({config.num_minibatches})"
+        )
+        mb_size = config.num_envs // config.num_minibatches
+
         env = cls._wrap_env(env, config)
-        policy = S2PGPolicy(network, action_dim)
+        policy = BPTTPolicy(network, action_dim)
 
         # ---- init train state ----
         if agent_state is not None:
@@ -453,27 +415,29 @@ class S2PGPPOJax(PPOJax):
         # ---- training loop ----
         def _update_step(runner_state, unused):
 
+            # -- save h_init before rollout for BPTT replay --
+            train_state, env_state, last_obs, hidden_state, prev_action, train_state_buffer, rng = runner_state
+            h_init = hidden_state  # (num_envs, stored_z_dim)
+
             # -- trajectory collection --
             def _env_step(runner_state, unused):
                 train_state, env_state, last_obs, hidden_state, prev_action, train_state_buffer, rng = runner_state
 
                 rng, _rng = jax.random.split(rng)
-                env_action, next_hidden, log_prob, value, joint_action, train_state = \
-                    policy.get_env_action_and_next_hidden(
-                        last_obs, hidden_state, prev_action, train_state, _rng
-                    )
+                action, next_hidden, log_prob, value, train_state = \
+                    policy.get_action(last_obs, hidden_state, prev_action, train_state, _rng)
 
-                obsv, reward, absorbing, done, info, env_state = env.step(env_state, env_action, traj)
+                obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
 
                 # reset hidden state and prev_action on episode termination
                 next_hidden = next_hidden * (1 - done)[..., None]
-                next_prev_action = env_action * (1 - done)[..., None]
+                next_prev_action = action * (1 - done)[..., None]
 
                 log_env_state = env_state.find(LogEnvState)
                 logged_metrics = log_env_state.metrics
 
-                transition = S2PGTransition(
-                    done, absorbing, joint_action, hidden_state, prev_action,
+                transition = BPTTTransition(
+                    done, absorbing, action, prev_action,
                     value, reward, log_prob, last_obs, info,
                     env_state.additional_carry.traj_state, logged_metrics
                 )
@@ -487,7 +451,7 @@ class S2PGPPOJax(PPOJax):
 
             # -- advantage estimation --
             train_state, env_state, last_obs, hidden_state, prev_action, train_state_buffer, rng = runner_state
-            _, last_val, _ = policy.get_dist_and_value(last_obs, hidden_state, prev_action, train_state)
+            _, last_val, _, _ = policy.get_dist_and_value(last_obs, hidden_state, prev_action, train_state)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -510,59 +474,117 @@ class S2PGPPOJax(PPOJax):
             # -- policy / value update --
             def _update_epoch(update_state, unused):
                 def _update_minibatch(train_state, batch_info):
-                    traj_batch, advantages, targets = batch_info
+                    traj_mb, adv_mb, tgt_mb, h_init_mb = batch_info
+                    # traj_mb.*: (mb_size, num_steps, ...)
+                    # adv_mb, tgt_mb: (mb_size, num_steps)
+                    # h_init_mb: (mb_size, stored_z_dim)
 
-                    def _loss_fn(params, traj_batch, gae, targets):
-                        pi, value, _ = policy.get_dist_and_value(
-                            traj_batch.obs,
-                            traj_batch.hidden_state,
-                            traj_batch.prev_action,
-                            train_state.replace(params=params),
+                    # Capture run_stats outside the grad (fixed during grad computation)
+                    run_stats = train_state.run_stats
+
+                    def _loss_fn(params):
+                        # Transpose sequences to (num_steps, mb_size, ...) for scan
+                        obs_seq = jnp.transpose(traj_mb.obs, (1, 0) + tuple(range(2, traj_mb.obs.ndim)))
+                        done_seq = jnp.transpose(traj_mb.done, (1, 0) + tuple(range(2, traj_mb.done.ndim)))
+                        action_seq = jnp.transpose(traj_mb.action, (1, 0) + tuple(range(2, traj_mb.action.ndim)))
+                        prev_action_seq = jnp.transpose(traj_mb.prev_action, (1, 0) + tuple(range(2, traj_mb.prev_action.ndim)))
+
+                        def _rnn_step(h, data):
+                            obs_t, done_t, action_t, prev_action_t = data
+                            (pi, value_t, new_h), _ = network.apply(
+                                {"params": params, "run_stats": run_stats},
+                                obs_t, h, prev_action_t,
+                                mutable=["run_stats"],
+                            )
+                            log_prob_t = pi.log_prob(action_t)
+                            entropy_t = pi.entropy()
+                            # Reset hidden state on episode termination (after step)
+                            new_h = new_h * (1 - done_t)[..., None]
+                            return new_h, (log_prob_t, value_t, entropy_t)
+
+                        _, (log_probs, values, entropies) = jax.lax.scan(
+                            _rnn_step, h_init_mb, (obs_seq, done_seq, action_seq, prev_action_seq)
                         )
-                        log_prob = pi.log_prob(traj_batch.action)
+                        # log_probs, values, entropies: (num_steps, mb_size)
 
-                        # value loss
-                        value_pred_clipped = traj_batch.value + (
-                            value - traj_batch.value
+                        # Transpose back to (mb_size, num_steps) then flatten for losses
+                        log_probs = jnp.transpose(log_probs, (1, 0))       # (mb_size, num_steps)
+                        values = jnp.transpose(values, (1, 0))             # (mb_size, num_steps)
+                        entropies = jnp.transpose(entropies, (1, 0))       # (mb_size, num_steps)
+
+                        # old stored quantities are already (mb_size, num_steps)
+                        old_log_probs = traj_mb.log_prob                    # (mb_size, num_steps)
+                        old_values = traj_mb.value                          # (mb_size, num_steps)
+
+                        # Flatten to (mb_size * num_steps,) for loss computation
+                        log_probs_flat = log_probs.reshape(-1)
+                        values_flat = values.reshape(-1)
+                        entropies_flat = entropies.reshape(-1)
+                        old_log_probs_flat = old_log_probs.reshape(-1)
+                        old_values_flat = old_values.reshape(-1)
+                        adv_flat = adv_mb.reshape(-1)
+                        tgt_flat = tgt_mb.reshape(-1)
+
+                        # Value loss (clipped)
+                        value_pred_clipped = old_values_flat + (
+                            values_flat - old_values_flat
                         ).clip(-config.clip_eps, config.clip_eps)
                         value_loss = 0.5 * jnp.maximum(
-                            jnp.square(value - targets),
-                            jnp.square(value_pred_clipped - targets),
+                            jnp.square(values_flat - tgt_flat),
+                            jnp.square(value_pred_clipped - tgt_flat),
                         ).mean()
 
-                        # PPO actor loss with joint IS ratio
-                        ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        # PPO actor loss (IS ratio over actions only)
+                        ratio = jnp.exp(log_probs_flat - old_log_probs_flat)
+                        gae_norm = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
                         loss_actor = -jnp.minimum(
-                            ratio * gae,
-                            jnp.clip(ratio, 1 - config.clip_eps, 1 + config.clip_eps) * gae,
+                            ratio * gae_norm,
+                            jnp.clip(ratio, 1 - config.clip_eps, 1 + config.clip_eps) * gae_norm,
                         ).mean()
 
-                        entropy = pi.entropy().mean()
+                        entropy = entropies_flat.mean()
                         total_loss = loss_actor + config.vf_coef * value_loss - config.ent_coef * entropy
-                        old_approx_kl = (traj_batch.log_prob - log_prob).mean()
+                        old_approx_kl = (old_log_probs_flat - log_probs_flat).mean()
                         clip_fraction = jnp.mean(jnp.abs(ratio - 1.0) > config.clip_eps)
                         return total_loss, (value_loss, loss_actor, entropy, old_approx_kl, clip_fraction)
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-                    total_loss, grads = grad_fn(train_state.params, traj_batch, advantages, targets)
+                    total_loss, grads = grad_fn(train_state.params)
                     train_state = train_state.apply_gradients(grads=grads)
                     return train_state, total_loss
 
-                train_state, traj_batch, advantages, targets, rng = update_state
+                train_state, traj_batch, advantages, targets, h_init, rng = update_state
                 rng, _rng = jax.random.split(rng)
-                batch_size = config.minibatch_size * config.num_minibatches
-                assert (
-                    batch_size == config.num_steps * config.num_envs
-                ), "batch size must be equal to number of steps * number of envs"
-                permutation = jax.random.permutation(_rng, batch_size)
-                batch = (traj_batch, advantages, targets)
-                batch = jax.tree.map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
-                shuffled_batch = jax.tree.map(lambda x: jnp.take(x, permutation, axis=0), batch)
-                minibatches = jax.tree.map(
-                    lambda x: jnp.reshape(x, [config.num_minibatches, -1] + list(x.shape[1:])),
-                    shuffled_batch,
-                )
+
+                # Permute over environments (not individual timesteps)
+                permutation = jax.random.permutation(_rng, config.num_envs)
+
+                # traj_batch.*: (num_steps, num_envs, ...)
+                # Transpose to (num_envs, num_steps, ...), shuffle, reshape to (num_minibatches, mb_size, num_steps, ...)
+                def _prepare_traj(x):
+                    # x: (num_steps, num_envs, ...)
+                    # → (num_envs, num_steps, ...) → shuffle → (num_minibatches, mb_size, num_steps, ...)
+                    x_T = jnp.swapaxes(x, 0, 1)  # (num_envs, num_steps, ...)
+                    x_shuffled = jnp.take(x_T, permutation, axis=0)
+                    return x_shuffled.reshape((config.num_minibatches, mb_size) + x_shuffled.shape[1:])
+
+                def _prepare_flat(x):
+                    # x: (num_steps, num_envs) or (num_envs, num_steps) — advantages/targets are (num_steps, num_envs)
+                    x_T = jnp.swapaxes(x, 0, 1)  # (num_envs, num_steps)
+                    x_shuffled = jnp.take(x_T, permutation, axis=0)
+                    return x_shuffled.reshape((config.num_minibatches, mb_size) + x_shuffled.shape[1:])
+
+                def _prepare_h_init(x):
+                    # x: (num_envs, stored_z_dim)
+                    x_shuffled = jnp.take(x, permutation, axis=0)
+                    return x_shuffled.reshape((config.num_minibatches, mb_size) + x_shuffled.shape[1:])
+
+                minibatch_traj = jax.tree.map(_prepare_traj, traj_batch)
+                minibatch_adv = _prepare_flat(advantages)   # (num_minibatches, mb_size, num_steps)
+                minibatch_tgt = _prepare_flat(targets)      # (num_minibatches, mb_size, num_steps)
+                minibatch_h_init = _prepare_h_init(h_init)  # (num_minibatches, mb_size, stored_z_dim)
+
+                minibatches = (minibatch_traj, minibatch_adv, minibatch_tgt, minibatch_h_init)
                 train_state, total_loss = jax.lax.scan(_update_minibatch, train_state, minibatches)
 
                 # adaptive KL learning rate
@@ -587,10 +609,10 @@ class S2PGPPOJax(PPOJax):
                     )
                     train_state = train_state.replace(opt_state=new_opt_state)
 
-                update_state = (train_state, traj_batch, advantages, targets, rng)
+                update_state = (train_state, traj_batch, advantages, targets, h_init, rng)
                 return update_state, total_loss
 
-            update_state = (train_state, traj_batch, advantages, targets, rng)
+            update_state = (train_state, traj_batch, advantages, targets, h_init, rng)
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config.update_epochs
             )
@@ -643,14 +665,12 @@ class S2PGPPOJax(PPOJax):
                     train_state, env_state, last_obs, eval_hidden, eval_prev_action, rng = eval_runner_state
 
                     rng, _rng = jax.random.split(rng)
-                    env_action, next_hidden, _, _, _, train_state = \
-                        policy.get_env_action_and_next_hidden(
-                            last_obs, eval_hidden, eval_prev_action, train_state, _rng
-                        )
+                    action, next_hidden, _, _, train_state = \
+                        policy.get_action(last_obs, eval_hidden, eval_prev_action, train_state, _rng)
 
-                    obsv, reward, absorbing, done, info, env_state = env.step(env_state, env_action, traj)
+                    obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
                     next_hidden = next_hidden * (1 - done)[..., None]
-                    next_prev_action = env_action * (1 - done)[..., None]
+                    next_prev_action = action * (1 - done)[..., None]
 
                     log_env_state = env_state.find(LogEnvState)
                     transition = MetricHandlerTransition(env_state, log_env_state.metrics)
@@ -715,8 +735,8 @@ class S2PGPPOJax(PPOJax):
 
     @classmethod
     def play_policy(cls, env,
-                    agent_conf: S2PGAgentConf,
-                    agent_state: S2PGAgentState,
+                    agent_conf: BPTTAgentConf,
+                    agent_state: BPTTAgentState,
                     n_envs: int, n_steps=None, render=True,
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
@@ -728,7 +748,7 @@ class S2PGPPOJax(PPOJax):
         config = agent_conf.config.experiment
         action_dim = config.action_dim
         stored_z_dim = _stored_hidden_dim(config.hidden_state_dim, agent_conf.network.rnn_type)
-        _policy = S2PGPolicy(agent_conf.network, action_dim)
+        _policy = BPTTPolicy(agent_conf.network, action_dim)
 
         train_state = agent_state.train_state
         if deterministic:
@@ -756,10 +776,8 @@ class S2PGPPOJax(PPOJax):
         prev_action = jnp.zeros((n_envs, action_dim))
 
         def sample_actions(ts, obs, hidden, prev_a, _rng):
-            env_a, next_h, _, _, _, ts = _policy.get_env_action_and_next_hidden(
-                obs, hidden, prev_a, ts, _rng
-            )
-            return env_a, next_h, ts
+            action, next_h, _, _, ts = _policy.get_action(obs, hidden, prev_a, ts, _rng)
+            return action, next_h, ts
 
         plcy_call = jax.jit(sample_actions)
 
