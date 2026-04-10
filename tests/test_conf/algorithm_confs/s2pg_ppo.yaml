@@ -25,6 +25,8 @@ experiment:
   hidden_layers: [512, 256]
   hidden_state_dim: 8
   init_std_z: 0.1
+  rnn_type: gru
+  n_features: 256
   lr: 1e-4
   num_envs: 2048
   num_steps: 50

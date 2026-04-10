@@ -37,6 +37,8 @@ experiment:
   hidden_layers: [512, 256]
   hidden_state_dim: 64    # dimensionality of the S2PG internal state z
   init_std_z: 0.1         # initial std for the hidden-state distribution
+  rnn_type: gru           # RNN type: "gru" | "lstm" | "none"
+  n_features: 256         # pre/post-RNN embedding width
   lr: 1e-4
   num_envs: 2048
   num_steps: 200
