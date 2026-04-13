@@ -28,6 +28,8 @@ class SACActorNet(nn.Module):
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "tanh"
     init_std: float = 1.0
+    learnable_std: bool = True
+    state_dependent_std: bool = True
     log_std_min: float = -20.0
     log_std_max: float = 2.0
 
@@ -39,8 +41,15 @@ class SACActorNet(nn.Module):
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0))(x)
             x = activation_fn(x)
         mean = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(x)
-        log_std = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
-                           bias_init=constant(jnp.log(self.init_std)))(x)
+        if self.state_dependent_std:
+            log_std = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
+                               bias_init=constant(jnp.log(self.init_std)))(x)
+        else:
+            log_std = self.param("log_std", constant(jnp.log(self.init_std)),
+                                 (self.action_dim,))
+            log_std = jnp.broadcast_to(log_std, mean.shape)
+        if not self.learnable_std:
+            log_std = jax.lax.stop_gradient(log_std)
         log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
         return mean, log_std
 
@@ -155,6 +164,7 @@ class SACSummaryMetrics(SummaryMetrics):
     mean_alpha_loss: float = 0.0
     mean_alpha: float = 0.0
     mean_std: float = 0.0
+    mean_entropy: float = 0.0
     buffer_size: int = 0
 
 
@@ -187,12 +197,13 @@ class SACAgentConf(AgentConfBase):
         actor_net = flax.serialization.from_state_dict(SACActorNet, d["actor_net"])
         critic_net = flax.serialization.from_state_dict(SACCriticNet, d["critic_net"])
 
+        max_grad_norm = float(getattr(exp, 'max_grad_norm', 0.5))
         actor_tx = optax.chain(
-            optax.clip_by_global_norm(float(getattr(exp, 'max_grad_norm', 0.5))),
+            optax.clip_by_global_norm(float(getattr(exp, 'max_actor_grad_norm', max_grad_norm))),
             optax.adam(float(exp.lr_actor)),
         )
         critic_tx = optax.chain(
-            optax.clip_by_global_norm(float(getattr(exp, 'max_grad_norm', 0.5))),
+            optax.clip_by_global_norm(float(getattr(exp, 'max_critic_grad_norm', max_grad_norm))),
             optax.adam(float(exp.lr_critic)),
         )
         alpha_tx = optax.adam(float(exp.lr_alpha))
@@ -364,6 +375,8 @@ class SACJax(JaxRLAlgorithmBase):
             hidden_layer_dims=tuple(hidden_layers),
             activation=str(exp.activation),
             init_std=float(getattr(exp, 'init_std', 1.0)),
+            learnable_std=bool(getattr(exp, 'learnable_std', True)),
+            state_dependent_std=bool(getattr(exp, 'state_dependent_std', True)),
             log_std_min=float(getattr(exp, 'log_std_min', -20.0)),
             log_std_max=float(getattr(exp, 'log_std_max', 2.0)),
         )
@@ -372,12 +385,13 @@ class SACJax(JaxRLAlgorithmBase):
             activation=str(exp.activation),
         )
 
+        max_grad_norm = float(getattr(exp, 'max_grad_norm', 0.5))
         actor_tx = optax.chain(
-            optax.clip_by_global_norm(float(getattr(exp, 'max_grad_norm', 0.5))),
+            optax.clip_by_global_norm(float(getattr(exp, 'max_actor_grad_norm', max_grad_norm))),
             optax.adam(float(exp.lr_actor)),
         )
         critic_tx = optax.chain(
-            optax.clip_by_global_norm(float(getattr(exp, 'max_grad_norm', 0.5))),
+            optax.clip_by_global_norm(float(getattr(exp, 'max_critic_grad_norm', max_grad_norm))),
             optax.adam(float(exp.lr_critic)),
         )
         alpha_tx = optax.adam(float(exp.lr_alpha))
@@ -463,7 +477,7 @@ class SACJax(JaxRLAlgorithmBase):
 
         env = cls._wrap_env(env, exp)
 
-        target_entropy = -float(exp.action_dim)
+        target_entropy = float(getattr(exp, 'target_entropy', -float(exp.action_dim)))
 
         # ------------------------------------------------------------------
         # Restore or initialise agent components
@@ -612,6 +626,7 @@ class SACJax(JaxRLAlgorithmBase):
             (critic_loss, new_critic_rs), critic_grads = jax.value_and_grad(
                 _critic_loss_fn, has_aux=True
             )(critic_st.params)
+
             critic_st = critic_st.apply_gradients(grads=critic_grads)
             critic_st = critic_st.replace(run_stats=new_critic_rs)
 
@@ -714,8 +729,11 @@ class SACJax(JaxRLAlgorithmBase):
             logged_metrics = log_env_state.metrics
 
             alpha_val = jnp.exp(log_alpha_state.params["log_alpha"])
-            _, log_std, _ = _actor_forward(next_obs, actor_state)
+            rng, rng_entropy = jax.random.split(rng)
+            mean_pi, log_std, _ = _actor_forward(next_obs, actor_state)
             mean_std = jnp.mean(jnp.exp(log_std))
+            _, log_pi = _squashed_gaussian_sample_and_log_prob(mean_pi, log_std, rng_entropy)
+            mean_entropy = -jnp.mean(log_pi)
             metric = SACSummaryMetrics(
                 mean_episode_return=jnp.sum(
                     jnp.where(logged_metrics.done, logged_metrics.returned_episode_returns, 0.0)
@@ -729,6 +747,7 @@ class SACJax(JaxRLAlgorithmBase):
                 mean_alpha_loss=alpha_loss,
                 mean_alpha=alpha_val,
                 mean_std=mean_std,
+                mean_entropy=mean_entropy,
                 buffer_size=replay_buffer.size,
             )
 

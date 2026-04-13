@@ -16,6 +16,7 @@ experiment:
     env_name: MjxUnitreeG1
     headless: True
     horizon: 1000
+    use_mjwarp: False
     goal_type: GoalTrajMimic
     goal_params:
       visualize_goal: true
@@ -36,21 +37,26 @@ experiment:
         - right_foot_mimic
   hidden_layers: [256, 256]
   activation: tanh
-  init_std: 0.05
+  init_std: 0.1
+  learnable_std: true
+  state_dependent_std: true
   lr_actor: 3e-4
   lr_critic: 3e-4
   lr_alpha: 3e-4
-  init_alpha: 0.1
+  init_alpha: 0.01
   learnable_alpha: true
+  # target_entropy: set to action_dim * log(init_std) to match desired init_std;
+  # default (-action_dim) assumes std ≈ 1.0 which fights small init_std
+  target_entropy: -200.7  # 19 * log(0.1) ≈ 19 * -2.3 for UnitreeG1 (19 actuators)
   gamma: 0.99
   tau: 0.005
   buffer_size: 1000000
   batch_size: 256
-  learning_starts: 10000
+  learning_starts: 1000000
   gradient_steps: 20
   max_grad_norm: 0.5
   num_envs: 2048
-  total_timesteps: 20e6
+  total_timesteps: 10e6
   normalize_env: true
   log_std_min: -20.0
   log_std_max: 2.0

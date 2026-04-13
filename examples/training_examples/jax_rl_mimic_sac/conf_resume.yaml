@@ -36,12 +36,15 @@ experiment:
         - right_foot_mimic
   hidden_layers: [256, 256]
   activation: tanh
-  init_std: 0.05
+  init_std: 0.1
+  learnable_std: true
+  state_dependent_std: false
   lr_actor: 3e-4
   lr_critic: 3e-4
   lr_alpha: 3e-4
-  init_alpha: 0.1
+  init_alpha: 0.01
   learnable_alpha: true
+  target_entropy: -43.7  # 19 * log(0.1) for UnitreeG1 (19 actuators)
   gamma: 0.99
   tau: 0.005
   buffer_size: 1000000
