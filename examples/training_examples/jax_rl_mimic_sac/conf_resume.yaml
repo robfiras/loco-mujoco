@@ -36,6 +36,7 @@ experiment:
         - right_foot_mimic
   hidden_layers: [256, 256]
   activation: tanh
+  init_std: 0.05
   lr_actor: 3e-4
   lr_critic: 3e-4
   lr_alpha: 3e-4
