@@ -27,6 +27,7 @@ class SACActorNet(nn.Module):
     action_dim: int
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "tanh"
+    init_std: float = 1.0
     log_std_min: float = -20.0
     log_std_max: float = 2.0
 
@@ -38,7 +39,8 @@ class SACActorNet(nn.Module):
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0))(x)
             x = activation_fn(x)
         mean = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(x)
-        log_std = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(x)
+        log_std = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
+                           bias_init=constant(jnp.log(self.init_std)))(x)
         log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
         return mean, log_std
 
@@ -152,6 +154,7 @@ class SACSummaryMetrics(SummaryMetrics):
     mean_actor_loss: float = 0.0
     mean_alpha_loss: float = 0.0
     mean_alpha: float = 0.0
+    mean_std: float = 0.0
     buffer_size: int = 0
 
 
@@ -360,6 +363,7 @@ class SACJax(JaxRLAlgorithmBase):
             action_dim=action_dim,
             hidden_layer_dims=tuple(hidden_layers),
             activation=str(exp.activation),
+            init_std=float(getattr(exp, 'init_std', 1.0)),
             log_std_min=float(getattr(exp, 'log_std_min', -20.0)),
             log_std_max=float(getattr(exp, 'log_std_max', 2.0)),
         )
@@ -710,6 +714,8 @@ class SACJax(JaxRLAlgorithmBase):
             logged_metrics = log_env_state.metrics
 
             alpha_val = jnp.exp(log_alpha_state.params["log_alpha"])
+            _, log_std, _ = _actor_forward(next_obs, actor_state)
+            mean_std = jnp.mean(jnp.exp(log_std))
             metric = SACSummaryMetrics(
                 mean_episode_return=jnp.sum(
                     jnp.where(logged_metrics.done, logged_metrics.returned_episode_returns, 0.0)
@@ -722,6 +728,7 @@ class SACJax(JaxRLAlgorithmBase):
                 mean_actor_loss=actor_loss,
                 mean_alpha_loss=alpha_loss,
                 mean_alpha=alpha_val,
+                mean_std=mean_std,
                 buffer_size=replay_buffer.size,
             )
 
