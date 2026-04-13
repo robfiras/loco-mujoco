@@ -150,13 +150,6 @@ class LocoEnv(Mjx):
                  "Please, either load a trajectory with the same observation container or "
                  "set the observation container of the environment to the one of the trajectory.")
 
-        # init_from_traj must see only valid (non-padded) data; trim the padded zeros before calling
-        traj_for_init = processed_traj.replace(data=processed_traj.data.trim())
-        for obs_entry in self.obs_container.entries():
-            obs_entry.init_from_traj(traj_for_init)
-        self._goal.init_from_traj(traj_for_init)
-        self._terminal_state_handler.init_from_traj(traj_for_init)
-
         return processed_traj
 
     def _is_done(self, obs: np.ndarray,

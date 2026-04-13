@@ -36,7 +36,6 @@ class Goal(StatefulObservation):
     """
 
     def __init__(self, info_props: Dict, visualize_goal: bool = False, n_visual_geoms: int = 0, **kwargs):
-        self._initialized_from_traj = False
         self._info_props = info_props
         if visualize_goal:
             assert self.has_visual, (
@@ -174,8 +173,7 @@ class Goal(StatefulObservation):
     @property
     def initialized(self) -> bool:
         """Check if the goal is initialized."""
-        init_from_traj = True if not self.requires_trajectory else self._initialized_from_traj
-        return self._initialized_from_mj and init_from_traj
+        return self._initialized_from_mj
 
     @property
     def dim(self) -> int:
@@ -501,17 +499,6 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
         self._free_jnt_qposid = np.array(mj_jntname2qposid(self.free_jnt_name, model))
         self._free_jnt_qvelid = np.array(mj_jntname2qvelid(self.free_jnt_name, model))
 
-    def init_from_traj(self, traj: Any):
-        """
-        Initialize from a trajectory.
-
-        Args:
-            traj (Any): The trajectory.
-        """
-        assert traj is not None, (f"Trajectory is None, "
-                                  f"using {__class__.__name__} requires a trajectory.")
-        self._initialized_from_traj = True
-
     def init_state(self,
                    env: Any,
                    key: jax.random.PRNGKey,
@@ -795,17 +782,6 @@ class GoalTrajMimic(Goal):
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
 
         self._initialized_from_mj = True
-
-    def init_from_traj(self, traj: Any):
-        """
-        Initialize from a trajectory.
-
-        Args:
-            traj (Any): The trajectory.
-        """
-        assert traj is not None, (f"Trajectory is None, "
-                                  f"using {__class__.__name__} requires a trajectory.")
-        self._initialized_from_traj = True
 
     def get_obs_and_update_state(self,
                                  env: Any,

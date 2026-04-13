@@ -130,15 +130,6 @@ class TerminalStateHandler(StatefulObject):
         """
         raise NotImplementedError
 
-    def init_from_traj(self, traj) -> None:
-        """
-        Initialize the TerminalStateHandler from a trajectory handler (optional).
-
-        Args:
-            traj: The trajectory containing the trajectory data.
-        """
-        pass
-
     @classmethod
     def register(cls) -> None:
         """

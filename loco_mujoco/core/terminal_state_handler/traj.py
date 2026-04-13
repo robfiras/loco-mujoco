@@ -3,7 +3,6 @@ from types import ModuleType
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.spatial.transform import Rotation as np_R
 from mujoco import MjData, MjModel
 from mujoco.mjx import Data, Model
 
@@ -30,22 +29,12 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             max_root_pos_deviation (float): Maximum deviation of the root position from the reference trajectory.
         """
         super(RootPoseTrajTerminalStateHandler, self).__init__(env)
-        
-        self._initialized = False
 
         self.root_joint_name = self._info_props["root_free_joint_xml_name"]
 
         self.root_height_margin = root_height_margin
         self.root_rot_margin_degrees = root_rot_margin_degrees
         self.max_root_pos_deviation = max_root_pos_deviation
-
-        # to be determined in init_from_traj
-        self.root_xy = None
-        self.root_height_ind = None
-        self.root_quat_ind = None
-        self.root_height_range = None
-        self._centroid_quat = None
-        self._valid_threshold = None
 
     def reset(self, env: Any,
               model: Union[MjModel, Model],
@@ -70,36 +59,6 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         assert_backend_is_supported(backend)
         return data, carry
     
-    def init_from_traj(self, traj) -> None:
-        """
-        Initialize the TerminalStateHandler from a Trajectory.
-
-        Args:
-            traj: The trajectory containing the trajectory data.
-
-        """
-        assert traj is not None, f"{self.__class__.__name__} requires a Trajectory to be initialized."
-
-        root_ind = traj.info.joint_name2ind_qpos[self.root_joint_name]
-        self.root_xy = root_ind[:2]
-        self.root_height_ind = root_ind[2]
-        self.root_quat_ind = root_ind[3:7]
-        assert len(self.root_quat_ind) == 4
-
-        # get the root quaternions
-        root_quats = traj.data.qpos[:, self.root_quat_ind]
-
-        # calculate the centroid of the root quaternions and the maximum angular distance from the centroid
-        self._centroid_quat, self._valid_threshold = self._calc_root_rot_centroid_and_margin(
-            quat_scalarfirst2scalarlast(root_quats))
-
-        # calculate the range of the root height
-        root_height_min = np.min(traj.data.qpos[:, self.root_height_ind])
-        root_height_max = np.max(traj.data.qpos[:, self.root_height_ind])
-        self.root_height_range = (root_height_min - self.root_height_margin, root_height_max + self.root_height_margin)
-
-        self._initialized = True
-
     def is_absorbing(self,
                      env: Any,
                      obs: np.ndarray,
@@ -123,7 +82,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
-        if self.initialized:
+        if traj is not None:
             return self._is_absorbing_compat(env, obs, info, data, carry, backend=np, traj=traj)
         else:
             return False, carry
@@ -150,7 +109,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
-        if self.initialized:
+        if traj is not None:
             return self._is_absorbing_compat(env, obs, info, data, carry, backend=jnp, traj=traj)
         else:
             return False, carry
@@ -179,72 +138,80 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             Boolean indicating whether the current state is terminal or not.
 
         """
+        # get indices from traj.info (static pytree aux data — available at trace time)
+        root_ind = traj.info.joint_name2ind_qpos[self.root_joint_name]
+        root_xy = np.array(root_ind[:2])
+        root_height_ind = int(root_ind[2])
+        root_quat_ind = np.array(root_ind[3:7])
+
         # get position, height and rotation of the root joint
-        pos = data.qpos[self.root_xy]
-        height = data.qpos[self.root_height_ind]
-        root_quat = quat_scalarfirst2scalarlast(data.qpos[self.root_quat_ind])
+        pos = data.qpos[root_xy]
+        height = data.qpos[root_height_ind]
+        root_quat = quat_scalarfirst2scalarlast(data.qpos[root_quat_ind])
 
         # check if the root position is outside the maximum deviation
         traj_data_cur = env.th.get_current_traj_data(traj.data, carry, backend)
         traj_data_init = env.th.get_init_traj_data(traj.data, carry, backend)
-        traj_root_pos = traj_data_cur.qpos[self.root_xy] - traj_data_init.qpos[self.root_xy]
+        traj_root_pos = traj_data_cur.qpos[root_xy] - traj_data_init.qpos[root_xy]
         pos_deviation = backend.linalg.norm(pos - traj_root_pos)
         pos_cond = backend.greater(pos_deviation, self.max_root_pos_deviation)
 
-        # check if the root height is outside the range
-        height_cond = backend.logical_or(backend.less(height, self.root_height_range[0]),
-                                         backend.greater(height, self.root_height_range[1]))
+        # mask out padded zeros using split_points (split_points may have -1 sentinels after padding)
+        n_valid = traj.data.n_samples
+        valid_mask = backend.arange(traj.data.qpos.shape[0]) < n_valid
 
-        # check if the root rotation is outside the valid threshold
-        root_quat = root_quat / backend.linalg.norm(root_quat)
-        angular_distance = 2 * backend.arccos(backend.clip(backend.dot(self._centroid_quat, root_quat), -1, 1))
-        root_rot_cond = backend.greater(angular_distance, self._valid_threshold)
+        # compute height range from trajectory data (valid rows only)
+        traj_heights = traj.data.qpos[:, root_height_ind]
+        h_min = backend.min(backend.where(valid_mask, traj_heights, float('inf'))) - self.root_height_margin
+        h_max = backend.max(backend.where(valid_mask, traj_heights, float('-inf'))) + self.root_height_margin
+        height_cond = backend.logical_or(backend.less(height, h_min), backend.greater(height, h_max))
+
+        # compute centroid quaternion and threshold from trajectory data (valid rows only)
+        root_quat_curr = root_quat / backend.linalg.norm(root_quat)
+        centroid_quat, valid_threshold = self._calc_root_rot_centroid_and_margin(
+            traj.data.qpos[:, root_quat_ind], valid_mask, backend)
+        angular_distance = 2 * backend.arccos(backend.clip(backend.dot(centroid_quat, root_quat_curr), -1, 1))
+        root_rot_cond = backend.greater(angular_distance, valid_threshold)
 
         is_absorbing = backend.logical_or(pos_cond, backend.logical_or(height_cond, root_rot_cond))
 
         return is_absorbing, carry
 
-    def _calc_root_rot_centroid_and_margin(self, root_quats: np.ndarray) -> Tuple[np.ndarray, float]:
+    def _calc_root_rot_centroid_and_margin(self, root_quats_scalarfirst, valid_mask, backend) -> Tuple[Any, Any]:
         """
-        Calculate the centroid of the root quaternions and the maximum angular distance from the centroid.
+        Calculate the centroid quaternion and max angular distance threshold using the eigenvector method.
+        Works with both numpy and jax.numpy backends. Ignores padded (invalid) rows via valid_mask.
 
         Args:
-            root_quats (np.ndarray): shape (n_samples, 4), the root quaternions.
-                (quaternions is expected to be scalar last)
+            root_quats_scalarfirst: shape (n_samples, 4), scalar-first quaternions from traj.data.qpos.
+            valid_mask: shape (n_samples,), boolean mask of valid (non-padded) rows.
+            backend: numpy or jax.numpy.
 
         Returns:
-            centroid_quat (np.ndarray): shape (4,), the centroid of the quaternions,
-                where the quaternions are scalar last.
-            valid_threshold (float): the maximum angular distance from the centroid.
-
+            centroid_quat: shape (4,), scalar-last.
+            valid_threshold: scalar.
         """
+        root_quats = quat_scalarfirst2scalarlast(root_quats_scalarfirst)
+        norms = backend.linalg.norm(root_quats, axis=1, keepdims=True)
+        # avoid division by zero for padded rows
+        safe_norms = backend.where(valid_mask[:, None], norms, 1.0)
+        norm_quats = root_quats / safe_norms
 
-        # normalize them
-        norm_root_quats = root_quats / np.linalg.norm(root_quats, axis=1, keepdims=True)
+        # centroid = eigenvector of Q^T Q with largest eigenvalue (sum over valid rows only)
+        masked_quats = norm_quats * valid_mask[:, None]
+        M = backend.einsum('ni,nj->ij', masked_quats, norm_quats)
+        _, vecs = backend.linalg.eigh(M)
+        centroid_quat = vecs[:, -1]
+        # eigenvectors have arbitrary sign; flip so majority of valid quats have positive dot product
+        mean_dot = backend.mean(backend.where(valid_mask,
+                                              backend.einsum('ij,j->i', norm_quats, centroid_quat),
+                                              0.0))
+        centroid_quat = backend.where(mean_dot < 0, -centroid_quat, centroid_quat)
 
-        # compute centroid of the quaternions
-        r = np_R.from_quat(norm_root_quats)
-        centroid_quat = r.mean().as_quat()
-
-        # Compute maximum deviation in angular distance
-        dot_products = np.clip(np.einsum('ij,j->i', norm_root_quats,
-                                         centroid_quat), -1, 1)
-        angular_distances = 2 * np.arccos(dot_products)
-
-        max_distance = np.max(angular_distances)
-
-        # Add margin
+        # angular distances over valid rows only
+        dot_products = backend.clip(backend.einsum('ij,j->i', norm_quats, centroid_quat), -1, 1)
+        all_distances = 2 * backend.arccos(dot_products)
+        max_distance = backend.max(backend.where(valid_mask, all_distances, 0.0))
         valid_threshold = max_distance + np.radians(self.root_rot_margin_degrees)
 
         return centroid_quat, valid_threshold
-
-    @property
-    def initialized(self) -> bool:
-        """
-        Returns whether the current state is initialized.
-
-        Returns:
-            Boolean indicating whether the current state is initialized.
-
-        """
-        return self._initialized

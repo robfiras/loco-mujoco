@@ -40,15 +40,6 @@ class Reward(StatefulObject):
         """
         return cls.__name__
 
-    def init_from_traj(self, traj=None) -> None:
-        """
-        Initialize the reward class from a trajectory.
-
-        Args:
-            traj (optional): The trajectory. Defaults to None.
-        """
-        pass
-
     def __call__(self,
                  state: Union[np.ndarray, jnp.ndarray],
                  action: Union[np.ndarray, jnp.ndarray],
