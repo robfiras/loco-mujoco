@@ -558,7 +558,6 @@ class SACJax(JaxRLAlgorithmBase):
         gamma = float(exp.gamma)
         learnable_alpha = bool(getattr(exp, 'learnable_alpha', True))
         gradient_steps = int(getattr(exp, 'gradient_steps', 1))
-        fill_buffer = int(getattr(exp, 'fill_buffer', 0))
 
         # ------------------------------------------------------------------
         # Sub-function: collect one transition from each parallel env
@@ -729,23 +728,6 @@ class SACJax(JaxRLAlgorithmBase):
             runner_state = (actor_state, critic_state, tgt_params, tgt_run_stats,
                             log_alpha_state, replay_buffer, env_state, next_obs, rng)
             return runner_state, metric
-
-        # ------------------------------------------------------------------
-        # Warmup: collect-only phase to pre-fill the replay buffer
-        # ------------------------------------------------------------------
-        def _warmup_step(runner_state, unused):
-            actor_state, replay_buffer, env_state, last_obs, rng = runner_state
-            actor_state, replay_buffer, env_state, next_obs, rng = \
-                _collect_transition(actor_state, replay_buffer, env_state, last_obs, rng)
-            return (actor_state, replay_buffer, env_state, next_obs, rng), None
-
-        if fill_buffer > 0:
-            rng, _rng = jax.random.split(rng)
-            warmup_state = (actor_state, replay_buffer, env_state, last_obs, _rng)
-            warmup_state, _ = jax.lax.scan(
-                _warmup_step, warmup_state, None, fill_buffer
-            )
-            actor_state, replay_buffer, env_state, last_obs, _ = warmup_state
 
         # ------------------------------------------------------------------
         # Main scan over environment steps
