@@ -159,23 +159,39 @@ class NStepWrapperState(BaseWrapperState):
 
 class NStepWrapper(BaseWrapper):
 
-    def __init__(self, env, n_steps):
+    def __init__(self, env, n_steps, include_actions=False):
         super().__init__(env)
         self.n_steps = n_steps
+        self.include_actions = include_actions
         self.info = self.update_info(env.info)
 
     def update_info(self, info):
         new_info = deepcopy(info)
-        high = np.tile(info.observation_space.high, self.n_steps)
-        low = np.tile(info.observation_space.low, self.n_steps)
-        observation_space = Box(low, high)
-        new_info.observation_space = observation_space
+        obs_dim = info.observation_space.high.shape[0]
+        if self.include_actions:
+            action_dim = info.action_space.shape[0]
+            entry_dim = obs_dim + action_dim
+            high = np.tile(np.concatenate([info.observation_space.high,
+                                           np.full(action_dim, np.inf)]), self.n_steps)
+            low = np.tile(np.concatenate([info.observation_space.low,
+                                          np.full(action_dim, -np.inf)]), self.n_steps)
+        else:
+            entry_dim = obs_dim
+            high = np.tile(info.observation_space.high, self.n_steps)
+            low = np.tile(info.observation_space.low, self.n_steps)
+        new_info.observation_space = Box(low, high)
+        self._entry_dim = entry_dim
         return new_info
 
     def reset(self, rng_key, traj=None):
         obs, env_state = self.env.reset(rng_key, traj)
-        observation_buffer = jnp.tile(jnp.zeros_like(obs), (self.n_steps, 1))
-        observation_buffer = observation_buffer.at[-1].set(obs)
+        if self.include_actions:
+            action_dim = self.info.action_space.shape[0]
+            entry = jnp.concatenate([obs, jnp.zeros(action_dim)])
+        else:
+            entry = obs
+        observation_buffer = jnp.tile(jnp.zeros_like(entry), (self.n_steps, 1))
+        observation_buffer = observation_buffer.at[-1].set(entry)
         state = NStepWrapperState(env_state, observation_buffer)
         obs = jnp.reshape(observation_buffer, (-1,))
         return obs, state
@@ -185,10 +201,16 @@ class NStepWrapper(BaseWrapper):
         # make a step
         next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
 
-        # add observation to the buffer
+        # build buffer entry: concat(obs, action) if include_actions else obs
+        if self.include_actions:
+            entry = jnp.concatenate([next_observation, action])
+        else:
+            entry = next_observation
+
+        # add entry to the buffer
         observation_buffer = state.observation_buffer
         observation_buffer = jnp.roll(observation_buffer, shift=-1, axis=0)
-        observation_buffer = observation_buffer.at[-1].set(next_observation)
+        observation_buffer = observation_buffer.at[-1].set(entry)
         state = NStepWrapperState(env_state, observation_buffer)
         next_observation = jnp.reshape(observation_buffer, (-1,))
 

@@ -499,3 +499,8 @@ def s2pg_ppo_config():
 @pytest.fixture
 def bptt_ppo_config():
     return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/bptt_ppo.yaml')
+
+
+@pytest.fixture
+def history_ppo_config():
+    return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/history_ppo.yaml')

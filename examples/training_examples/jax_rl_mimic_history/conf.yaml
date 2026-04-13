@@ -1,0 +1,144 @@
+defaults:
+  - override hydra/job_logging: default
+  - override hydra/launcher: basic
+
+wandb:
+  project: "deepmimic_history"
+
+experiment:
+  task_factory:
+    name: ImitationFactory
+    params:
+      lafan1_dataset_conf:
+        dataset_name:
+          - walk1_subject5
+  env_params:
+    env_name: MjxUnitreeG1
+    headless: True
+    horizon: 1000
+    goal_type: GoalTrajMimic
+    goal_params:
+      visualize_goal: true
+    control_type: ${control_config.torque_control.control_type}
+    control_params: ${control_config.torque_control.control_params}
+    reward_type: MimicReward
+    reward_params:
+      qpos_w_sum: 0.4
+      qvel_w_sum: 0.2
+      rpos_w_sum: 0.5
+      rquat_w_sum: 0.3
+      rvel_w_sum: 0.1
+      sites_for_mimic:
+        - upper_body_mimic
+        - left_hand_mimic
+        - left_foot_mimic
+        - right_hand_mimic
+        - right_foot_mimic
+  hidden_layers: [512, 256]
+  history_len: 10             # number of history steps
+  include_actions_in_history: true
+  encoder_type: mlp           # "mlp" | "transformer"
+  n_features: 256             # per-step projection / Transformer d_model
+  d_model: 128                # Transformer model dim (only used if encoder_type=transformer)
+  n_heads: 4                  # Transformer heads
+  n_layers: 2                 # Transformer layers
+  lr: 3e-4
+  num_envs: 2048
+  num_steps: 200
+  total_timesteps: 10e6
+  update_epochs: 4
+  num_minibatches: 32
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  init_std: 0.05
+  learnable_std: false
+  ent_coef: 0.0
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  activation: tanh
+  anneal_lr: false
+  desired_kl: 0.01
+  weight_decay: 0.0
+  normalize_env: true
+  debug: false
+  n_seeds: 1
+  vmap_across_seeds: true
+  validation:
+    active: true
+    num_steps: 100
+    num_envs: 100
+    num: 10
+    quantities:
+      - JointPosition
+      - JointVelocity
+      - RelSitePosition
+      - RelSiteVelocity
+      - RelSiteOrientation
+    measures:
+      - EuclideanDistance
+      - DynamicTimeWarping
+      - DiscreteFrechetDistance
+    rel_site_names:
+      - upper_body_mimic
+      - left_hand_mimic
+      - left_foot_mimic
+      - right_hand_mimic
+      - right_foot_mimic
+    joints_to_ignore:
+      - pelvis_tx
+      - pelvis_tz
+      - pelvis_ty
+      - pelvis_tilt
+      - pelvis_list
+      - pelvis_rotation
+
+# Define control subconfigs
+control_config:
+  position_control:
+    control_type: PDControl
+    control_params:
+      p_gain:
+        - 300  # back_bkz_actuator -> torso
+        - 100  # l_arm_shy_actuator -> shoulder
+        - 100  # l_arm_shx_actuator -> shoulder
+        - 100  # l_arm_shz_actuator -> shoulder
+        - 100  # left_elbow_actuator -> elbow
+        - 100  # r_arm_shy_actuator -> shoulder
+        - 100  # r_arm_shx_actuator -> shoulder
+        - 100  # r_arm_shz_actuator -> shoulder
+        - 100  # right_elbow_actuator -> elbow
+        - 200  # hip_flexion_r_actuator -> hip_pitch
+        - 200  # hip_adduction_r_actuator -> hip_roll
+        - 200  # hip_rotation_r_actuator -> hip_yaw
+        - 300  # knee_angle_r_actuator -> knee
+        - 40   # ankle_angle_r_actuator -> ankle
+        - 200  # hip_flexion_l_actuator -> hip_pitch
+        - 200  # hip_adduction_l_actuator -> hip_roll
+        - 200  # hip_rotation_l_actuator -> hip_yaw
+        - 300  # knee_angle_l_actuator -> knee
+        - 40   # ankle_angle_l_actuator -> ankle
+      d_gain:
+        - 6  # back_bkz_actuator -> torso
+        - 2  # l_arm_shy_actuator -> shoulder
+        - 2  # l_arm_shx_actuator -> shoulder
+        - 2  # l_arm_shz_actuator -> shoulder
+        - 2  # left_elbow_actuator -> elbow
+        - 2  # r_arm_shy_actuator -> shoulder
+        - 2  # r_arm_shx_actuator -> shoulder
+        - 2  # r_arm_shz_actuator -> shoulder
+        - 2  # right_elbow_actuator -> elbow
+        - 5  # hip_flexion_r_actuator -> hip_pitch
+        - 5  # hip_adduction_r_actuator -> hip_roll
+        - 5  # hip_rotation_r_actuator -> hip_yaw
+        - 6  # knee_angle_r_actuator -> knee
+        - 2  # ankle_angle_r_actuator -> ankle
+        - 5  # hip_flexion_l_actuator -> hip_pitch
+        - 5  # hip_adduction_l_actuator -> hip_roll
+        - 5  # hip_rotation_l_actuator -> hip_yaw
+        - 6  # knee_angle_l_actuator -> knee
+        - 2  # ankle_angle_l_actuator -> ankle
+
+  torque_control:
+    control_type: DefaultControl
+    control_params:
