@@ -4,7 +4,7 @@ from omegaconf import open_dict
 
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms import PPOJax, GAILJax, AMPJax
-from loco_mujoco.algorithms.experimental import S2PGPPOJax, BPTTPPOJax, HistoryPPOJax, SACJax
+from loco_mujoco.algorithms.experimental import S2PGPPOJax, BPTTPPOJax, HistoryPPOJax, SACJax, TD3Jax
 from loco_mujoco.utils import MetricsHandler
 
 from test_conf import *
@@ -396,6 +396,53 @@ def test_SAC_save_and_load_agent(sac_config, tmp_path):
     assert save_path.exists()
 
     loaded_conf, loaded_state = SACJax.load_agent(save_path)
+    assert loaded_conf is not None
+    assert loaded_state is not None
+
+    assert _params_allclose(agent_state.actor_state.params, loaded_state.actor_state.params)
+    assert _params_allclose(agent_state.actor_state.run_stats, loaded_state.actor_state.run_stats)
+    assert _params_allclose(agent_state.critic_state.params, loaded_state.critic_state.params)
+    assert _params_allclose(agent_state.critic_state.run_stats, loaded_state.critic_state.run_stats)
+
+
+def test_TD3_build_train_fn(td3_config):
+    config = td3_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = TD3Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = TD3Jax.init_agent_state(env, agent_conf, rng)
+
+    train_fn = TD3Jax.build_train_fn(env, agent_conf)
+    train_fn = jax.jit(train_fn)
+
+    try:
+        jaxpr = make_jaxpr(train_fn)(rng, agent_state, traj)
+        assert jaxpr is not None
+    except Exception as e:
+        pytest.fail(f"JAX function compilation failed: {e}")
+
+
+def test_TD3_save_and_load_agent(td3_config, tmp_path):
+    """Train TD3 for a few steps, save agent, load it, and verify params match."""
+    config = OmegaConf.create(OmegaConf.to_container(td3_config, resolve=True))
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = TD3Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = TD3Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(TD3Jax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    agent_state = result["agent_state"]
+
+    save_path = TD3Jax.save_agent(tmp_path, agent_conf, agent_state)
+    assert save_path.exists()
+
+    loaded_conf, loaded_state = TD3Jax.load_agent(save_path)
     assert loaded_conf is not None
     assert loaded_state is not None
 

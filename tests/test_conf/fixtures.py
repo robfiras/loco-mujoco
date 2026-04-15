@@ -509,3 +509,8 @@ def history_ppo_config():
 @pytest.fixture
 def sac_config():
     return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/sac.yaml')
+
+
+@pytest.fixture
+def td3_config():
+    return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/td3.yaml')

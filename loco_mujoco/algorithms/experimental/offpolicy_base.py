@@ -1,0 +1,531 @@
+"""
+Off-policy actor-critic base class shared by SAC and TD3.
+
+Owns:
+  - ReplayBuffer
+  - Twin Q-network architecture (`OffPolicyCriticNet`)
+  - Target critic with soft (Polyak) updates
+  - Environment collection / replay-buffer add
+  - Outer scan over env steps (one transition per env per step + N gradient updates)
+  - Conditional learning-starts logic
+  - Metric struct skeleton
+
+Subclasses provide algorithm-specific pieces via hook methods:
+  - `_build_actor_net(action_dim, exp)`
+  - `_init_extra_state(rng, exp)`                         # optional (alpha for SAC, none for TD3)
+  - `_select_action(actor_state, obs, rng, exp, ...)`     # for env interaction
+  - `_next_action_and_q_bonus(actor_state, next_obs, rng, exp, extra_state)`
+        returns (next_action, next_bonus)
+        target_q = reward + gamma * (1-done) * (min(Q1, Q2)(next_obs, next_action) + next_bonus)
+        SAC: next_bonus = -alpha * log_pi(next_action)
+        TD3: next_bonus = 0  (action is target-smoothed)
+  - `_actor_loss(actor_params, ..., extra_state)`         # alpha*log_pi-Q for SAC, -Q for TD3
+  - `_update_extra(extra_state, aux, rng, exp)`           # alpha update for SAC
+  - `_should_update_actor(step_count, exp)`               # for TD3 policy delay (default: always)
+  - `_extra_metrics(actor_state, obs, rng, extra_state, exp)`
+  - `_build_summary_metric(base_kwargs, extra)`
+"""
+
+from typing import Any
+from dataclasses import dataclass
+
+import jax
+import jax.numpy as jnp
+import flax.linen as nn
+from flax.linen.initializers import constant, orthogonal
+import flax
+import optax
+from flax import struct
+from omegaconf import DictConfig
+
+from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase,
+                                    AgentStateBase, TrainState)
+from loco_mujoco.algorithms.common.networks import (RunningMeanStd,
+                                                    get_activation_fn)
+from loco_mujoco.core.wrappers import (LogWrapper, LogEnvState, VecEnv,
+                                       NormalizeVecReward)
+from loco_mujoco.utils import MetricsHandler, ValidationSummary
+
+
+# ---------------------------------------------------------------------------
+# Networks (shared)
+# ---------------------------------------------------------------------------
+
+class _QNet(nn.Module):
+    """One Q-network sub-module (s,a) -> q."""
+
+    hidden_layer_dims: tuple = (256, 256)
+    activation: str = "tanh"
+
+    @nn.compact
+    def __call__(self, x):
+        activation_fn = get_activation_fn(self.activation)
+        for dim in self.hidden_layer_dims:
+            x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
+                         bias_init=constant(0.0))(x)
+            x = activation_fn(x)
+        return jnp.squeeze(
+            nn.Dense(1, kernel_init=orthogonal(1.0),
+                     bias_init=constant(0.0))(x),
+            axis=-1,
+        )
+
+
+class OffPolicyCriticNet(nn.Module):
+    """Twin Q-networks, optionally with input observation normalisation."""
+
+    hidden_layer_dims: tuple = (256, 256)
+    activation: str = "tanh"
+    use_obs_norm: bool = True
+
+    @nn.compact
+    def __call__(self, obs, action):
+        if self.use_obs_norm:
+            obs = RunningMeanStd()(obs)
+        x = jnp.concatenate([obs, action], axis=-1)
+        q1 = _QNet(self.hidden_layer_dims, self.activation, name="q1")(x)
+        q2 = _QNet(self.hidden_layer_dims, self.activation, name="q2")(x)
+        return q1, q2
+
+
+# ---------------------------------------------------------------------------
+# Replay buffer
+# ---------------------------------------------------------------------------
+
+@struct.dataclass
+class ReplayBuffer:
+    obs: jnp.ndarray
+    next_obs: jnp.ndarray
+    action: jnp.ndarray
+    reward: jnp.ndarray
+    done: jnp.ndarray
+    ptr: int
+    size: int
+
+    @classmethod
+    def create(cls, obs_dim: int, action_dim: int, capacity: int):
+        return cls(
+            obs=jnp.zeros((capacity, obs_dim)),
+            next_obs=jnp.zeros((capacity, obs_dim)),
+            action=jnp.zeros((capacity, action_dim)),
+            reward=jnp.zeros((capacity,)),
+            done=jnp.zeros((capacity,), dtype=jnp.float32),
+            ptr=0,
+            size=0,
+        )
+
+    def add_batch(self, obs, next_obs, action, reward, done):
+        capacity = self.obs.shape[0]
+        batch_size = obs.shape[0]
+        indices = (self.ptr + jnp.arange(batch_size)) % capacity
+        return self.replace(
+            obs=self.obs.at[indices].set(obs),
+            next_obs=self.next_obs.at[indices].set(next_obs),
+            action=self.action.at[indices].set(action),
+            reward=self.reward.at[indices].set(reward),
+            done=self.done.at[indices].set(done.astype(jnp.float32)),
+            ptr=(self.ptr + batch_size) % capacity,
+            size=jnp.minimum(self.size + batch_size, capacity),
+        )
+
+    def sample(self, rng, batch_size: int):
+        indices = jax.random.randint(rng, (batch_size,), 0, self.size)
+        return (
+            self.obs[indices],
+            self.next_obs[indices],
+            self.action[indices],
+            self.reward[indices],
+            self.done[indices],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Base agent conf / state
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class OffPolicyAgentConf(AgentConfBase):
+    """Common conf fields for off-policy algos. Subclasses can extend."""
+    config: DictConfig
+    actor_net: Any
+    critic_net: Any
+    actor_tx: Any
+    critic_tx: Any
+
+
+@struct.dataclass
+class OffPolicyAgentState(AgentStateBase):
+    actor_state: TrainState
+    critic_state: TrainState
+    target_critic_params: Any
+    target_critic_run_stats: Any
+    extra_state: Any                # algorithm-specific (e.g. log_alpha for SAC)
+    replay_buffer: ReplayBuffer
+    env_state: Any = None
+    last_obs: Any = None
+
+    def serialize(self):
+        return {
+            "actor_state": flax.serialization.to_state_dict(self.actor_state),
+            "critic_state": flax.serialization.to_state_dict(self.critic_state),
+            "target_critic": flax.serialization.to_state_dict(
+                {"params": self.target_critic_params,
+                 "run_stats": self.target_critic_run_stats}
+            ),
+            "extra_state": flax.serialization.to_state_dict(self.extra_state),
+        }
+
+
+# ---------------------------------------------------------------------------
+# OffPolicyBase
+# ---------------------------------------------------------------------------
+
+class OffPolicyBase(JaxRLAlgorithmBase):
+    """Shared off-policy actor-critic engine. Subclasses must override the hooks
+    listed in this module's docstring."""
+
+    # ---------- Hooks (override in subclasses) ---------------------------
+    @classmethod
+    def _build_actor_net(cls, action_dim: int, exp):
+        raise NotImplementedError
+
+    @classmethod
+    def _init_extra_state(cls, rng, exp):
+        """Init extra (algorithm-specific) state. Returns pytree."""
+        return {}
+
+    @classmethod
+    def _select_action(cls, actor_state, obs, rng, exp,
+                       extra_state, deterministic=False):
+        """Returns (action, updated_actor_state). Used at env-collect time."""
+        raise NotImplementedError
+
+    @classmethod
+    def _next_action_and_q_bonus(cls, actor_state, next_obs, rng, exp,
+                                 extra_state):
+        """Returns (next_action, next_q_bonus, aux_dict).
+        Q-target: r + γ(1-d) · ( min(Q1,Q2)(next_obs, next_action) + next_q_bonus ).
+        SAC: next_q_bonus = -alpha · log_pi(next_action)
+        TD3: next_q_bonus = 0  (action is target-policy smoothed)
+        aux_dict can carry log_pi or any signal needed elsewhere."""
+        raise NotImplementedError
+
+    @classmethod
+    def _actor_loss(cls, actor_params, actor_apply_fn, actor_run_stats,
+                    critic_st, critic_apply_fn,
+                    obs_b, rng, exp, extra_state):
+        """Compute actor loss and any aux (e.g. log_pi for SAC)."""
+        raise NotImplementedError
+
+    @classmethod
+    def _update_extra(cls, extra_state, actor_aux, rng, exp):
+        """Update algorithm-specific state (e.g. alpha). Returns
+        (new_extra_state, aux_metrics_dict)."""
+        return extra_state, {}
+
+    @classmethod
+    def _should_update_actor(cls, step_count, exp):
+        """For TD3 policy delay; default = always update."""
+        return jnp.array(True)
+
+    @classmethod
+    def _extra_metrics(cls, actor_state, obs, rng, extra_state, exp):
+        """Compute extra metrics for logging (e.g. mean_alpha, mean_entropy)."""
+        return {}
+
+    @classmethod
+    def _build_summary_metric(cls, base_kwargs, extra):
+        """Combine base metric kwargs and extra into the algo's summary struct."""
+        raise NotImplementedError
+
+    # ---------- Optimisers (override if you need separate optimisers) ----
+    @classmethod
+    def _build_optimisers(cls, exp):
+        max_grad = float(getattr(exp, 'max_grad_norm', 0.5))
+        actor_tx = optax.chain(
+            optax.clip_by_global_norm(float(getattr(exp, 'max_actor_grad_norm', max_grad))),
+            optax.adam(float(exp.lr_actor)),
+        )
+        critic_tx = optax.chain(
+            optax.clip_by_global_norm(float(getattr(exp, 'max_critic_grad_norm', max_grad))),
+            optax.adam(float(exp.lr_critic)),
+        )
+        return actor_tx, critic_tx
+
+    # ---------- Conf helpers (subclasses can override) -------------------
+    @classmethod
+    def _build_critic_net(cls, exp):
+        import ast
+        from omegaconf import ListConfig
+        hidden = (exp.hidden_layers if isinstance(exp.hidden_layers, (list, ListConfig))
+                  else ast.literal_eval(exp.hidden_layers))
+        return OffPolicyCriticNet(
+            hidden_layer_dims=tuple(hidden),
+            activation=str(exp.activation),
+            use_obs_norm=bool(getattr(exp, 'use_obs_norm', False)),
+        )
+
+    # ---------- Training loop (the shared engine) ------------------------
+    @classmethod
+    def _train_fn(cls, rng, env,
+                  agent_conf,
+                  agent_state=None,
+                  traj=None,
+                  mh: MetricsHandler = None):
+
+        exp = agent_conf.config.experiment
+        actor_net = agent_conf.actor_net
+        critic_net = agent_conf.critic_net
+
+        env = cls._wrap_env(env, exp)
+
+        # ----- restore or init -----
+        if agent_state is not None:
+            actor_state = agent_state.actor_state.replace(apply_fn=actor_net.apply)
+            critic_state = agent_state.critic_state.replace(apply_fn=critic_net.apply)
+            target_critic_params = agent_state.target_critic_params
+            target_critic_run_stats = agent_state.target_critic_run_stats
+            extra_state = agent_state.extra_state
+            replay_buffer = agent_state.replay_buffer
+        else:
+            rng, rng_a, rng_c, rng_e = jax.random.split(rng, 4)
+            obs_dim = int(exp.obs_dim)
+            action_dim = int(exp.action_dim)
+
+            actor_params = actor_net.init(rng_a, jnp.zeros((1, obs_dim)))
+            actor_state = TrainState.create(
+                apply_fn=actor_net.apply,
+                params=actor_params["params"],
+                run_stats=actor_params.get("run_stats", {}),
+                tx=agent_conf.actor_tx,
+            )
+            critic_params = critic_net.init(
+                rng_c, jnp.zeros((1, obs_dim)), jnp.zeros((1, action_dim))
+            )
+            critic_state = TrainState.create(
+                apply_fn=critic_net.apply,
+                params=critic_params["params"],
+                run_stats=critic_params.get("run_stats", {}),
+                tx=agent_conf.critic_tx,
+            )
+            target_critic_params = critic_params["params"]
+            target_critic_run_stats = critic_params.get("run_stats", {})
+            extra_state = cls._init_extra_state(rng_e, exp)
+            replay_buffer = ReplayBuffer.create(
+                int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
+            )
+
+        # ----- env init -----
+        if agent_state is not None and agent_state.env_state is not None:
+            env_state = agent_state.env_state
+            last_obs = agent_state.last_obs
+        else:
+            rng, _rng = jax.random.split(rng)
+            reset_rng = jax.random.split(_rng, exp.num_envs)
+            last_obs, env_state = env.reset(reset_rng, traj)
+
+        # ----- helpers / config -----
+        learning_starts = int(getattr(exp, 'learning_starts', exp.batch_size))
+        batch_size = int(exp.batch_size)
+        tau = float(getattr(exp, 'tau', 0.005))
+        gamma = float(exp.gamma)
+        gradient_steps = int(getattr(exp, 'gradient_steps', 1))
+
+        def _critic_forward_target(obs, action, params, run_stats):
+            (q1, q2), updates = critic_net.apply(
+                {"params": params, "run_stats": run_stats},
+                obs, action, mutable=["run_stats"],
+            )
+            return q1, q2, updates["run_stats"]
+
+        # ----- collect transition -----
+        def _collect_transition(actor_state, replay_buffer, env_state,
+                                last_obs, rng, extra_state):
+            rng, rng_act = jax.random.split(rng)
+            action, actor_state = cls._select_action(
+                actor_state, last_obs, rng_act, exp, extra_state, deterministic=False
+            )
+            next_obs, reward, absorbing, done, info, env_state = env.step(
+                env_state, action, traj
+            )
+            replay_buffer = replay_buffer.add_batch(
+                last_obs, next_obs, action, reward, done.astype(jnp.float32)
+            )
+            return actor_state, replay_buffer, env_state, next_obs, rng
+
+        # ----- single gradient update -----
+        def _single_gradient_update(carry, step_idx):
+            (actor_st, critic_st, tgt_p, tgt_rs,
+             ex_st, buf, rng_up) = carry
+
+            rng_up, rng_sample = jax.random.split(rng_up)
+            obs_b, nobs_b, act_b, rew_b, done_b = buf.sample(rng_sample, batch_size)
+
+            # -- critic loss --
+            rng_up, rng_next = jax.random.split(rng_up)
+            next_action, next_q_bonus, _ = cls._next_action_and_q_bonus(
+                actor_st, nobs_b, rng_next, exp, ex_st
+            )
+            q1_next, q2_next, new_tgt_rs = _critic_forward_target(
+                nobs_b, next_action, tgt_p, tgt_rs
+            )
+            q_next = jnp.minimum(q1_next, q2_next) + next_q_bonus
+            q_target = rew_b + gamma * (1.0 - done_b) * q_next
+            q_target = jax.lax.stop_gradient(q_target)
+
+            def _critic_loss_fn(params):
+                (q1, q2), updates = critic_net.apply(
+                    {"params": params, "run_stats": critic_st.run_stats},
+                    obs_b, act_b, mutable=["run_stats"],
+                )
+                loss = jnp.mean((q1 - q_target) ** 2) + jnp.mean((q2 - q_target) ** 2)
+                return loss, updates["run_stats"]
+
+            (critic_loss, new_critic_rs), critic_grads = jax.value_and_grad(
+                _critic_loss_fn, has_aux=True
+            )(critic_st.params)
+            critic_st = critic_st.apply_gradients(grads=critic_grads)
+            critic_st = critic_st.replace(run_stats=new_critic_rs)
+
+            # -- actor loss + extra update (delayed for TD3) --
+            rng_up, rng_actor = jax.random.split(rng_up)
+            do_actor_update = cls._should_update_actor(step_idx, exp)
+
+            def _actor_loss_fn(params):
+                return cls._actor_loss(
+                    params, actor_st.apply_fn, actor_st.run_stats,
+                    critic_st, critic_net.apply,
+                    obs_b, rng_actor, exp, ex_st,
+                )
+
+            (actor_loss, actor_aux), actor_grads = jax.value_and_grad(
+                _actor_loss_fn, has_aux=True
+            )(actor_st.params)
+
+            def _apply_actor(args):
+                a_st, ex_st_in = args
+                a_st = a_st.apply_gradients(grads=actor_grads)
+                # update extra (e.g. alpha) only when we updated actor
+                rng_inner = jax.random.fold_in(rng_actor, step_idx)
+                new_ex_st, _ = cls._update_extra(ex_st_in, actor_aux, rng_inner, exp)
+                return a_st, new_ex_st
+
+            def _skip_actor(args):
+                return args
+
+            actor_st, ex_st = jax.lax.cond(
+                do_actor_update, _apply_actor, _skip_actor, (actor_st, ex_st)
+            )
+            # if actor_run_stats produced inside loss aux, reapply (for SAC RunningMeanStd)
+            new_actor_rs = actor_aux.get("run_stats", None) if isinstance(actor_aux, dict) else None
+            if new_actor_rs is not None:
+                actor_st = actor_st.replace(run_stats=new_actor_rs)
+
+            # -- soft target update --
+            new_tgt_p = jax.tree.map(
+                lambda tp, cp: tau * cp + (1.0 - tau) * tp,
+                tgt_p, critic_st.params,
+            )
+
+            new_carry = (actor_st, critic_st, new_tgt_p, new_tgt_rs,
+                         ex_st, buf, rng_up)
+            losses = (critic_loss, actor_loss)
+            return new_carry, losses
+
+        # ----- N gradient updates -----
+        def _do_updates(actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up):
+            carry = (actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up)
+            carry, losses = jax.lax.scan(
+                _single_gradient_update, carry, jnp.arange(gradient_steps)
+            )
+            actor_st, critic_st, tgt_p, tgt_rs, ex_st, _, _ = carry
+            critic_loss = jnp.mean(losses[0])
+            actor_loss = jnp.mean(losses[1])
+            return (actor_st, critic_st, tgt_p, tgt_rs, ex_st,
+                    critic_loss, actor_loss)
+
+        def _skip_updates(actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up):
+            return (actor_st, critic_st, tgt_p, tgt_rs, ex_st,
+                    jnp.array(0.0), jnp.array(0.0))
+
+        # ----- outer step -----
+        def _update_step(runner_state, unused):
+            (actor_state, critic_state, tgt_params, tgt_run_stats,
+             ex_state, replay_buffer, env_state, last_obs, rng) = runner_state
+
+            actor_state, replay_buffer, env_state, next_obs, rng = \
+                _collect_transition(actor_state, replay_buffer, env_state,
+                                    last_obs, rng, ex_state)
+
+            rng, rng_update = jax.random.split(rng)
+            result = jax.lax.cond(
+                replay_buffer.size >= learning_starts,
+                lambda args: _do_updates(*args),
+                lambda args: _skip_updates(*args),
+                (actor_state, critic_state, tgt_params, tgt_run_stats,
+                 ex_state, replay_buffer, rng_update),
+            )
+            (actor_state, critic_state, tgt_params, tgt_run_stats,
+             ex_state, critic_loss, actor_loss) = result
+
+            log_env_state = env_state.find(LogEnvState)
+            logged_metrics = log_env_state.metrics
+            base_kwargs = dict(
+                mean_episode_return=jnp.sum(
+                    jnp.where(logged_metrics.done,
+                              logged_metrics.returned_episode_returns, 0.0)
+                ) / jnp.maximum(jnp.sum(logged_metrics.done), 1),
+                mean_episode_length=jnp.sum(
+                    jnp.where(logged_metrics.done,
+                              logged_metrics.returned_episode_lengths, 0.0)
+                ) / jnp.maximum(jnp.sum(logged_metrics.done), 1),
+                max_timestep=jnp.max(logged_metrics.timestep * exp.num_envs),
+                mean_critic_loss=critic_loss,
+                mean_actor_loss=actor_loss,
+                buffer_size=replay_buffer.size,
+            )
+            rng, rng_metrics = jax.random.split(rng)
+            extra = cls._extra_metrics(actor_state, next_obs, rng_metrics,
+                                       ex_state, exp)
+            metric = cls._build_summary_metric(base_kwargs, extra)
+
+            runner_state = (actor_state, critic_state, tgt_params, tgt_run_stats,
+                            ex_state, replay_buffer, env_state, next_obs, rng)
+            return runner_state, metric
+
+        # ----- main scan -----
+        rng, _rng = jax.random.split(rng)
+        runner_state = (
+            actor_state, critic_state, target_critic_params, target_critic_run_stats,
+            extra_state, replay_buffer, env_state, last_obs, _rng,
+        )
+        runner_state, training_metrics = jax.lax.scan(
+            _update_step, runner_state, None, exp.num_updates
+        )
+        (actor_state, critic_state, tgt_params, tgt_run_stats,
+         ex_state, replay_buffer, env_state, last_obs, _) = runner_state
+
+        agent_state_out = cls._agent_state(
+            actor_state=actor_state,
+            critic_state=critic_state,
+            target_critic_params=tgt_params,
+            target_critic_run_stats=tgt_run_stats,
+            extra_state=ex_state,
+            replay_buffer=replay_buffer,
+            env_state=env_state,
+            last_obs=last_obs,
+        )
+        return {
+            "agent_state": agent_state_out,
+            "training_metrics": training_metrics,
+            "validation_metrics": ValidationSummary(),
+        }
+
+    # ---------- env wrap (subclasses can override) -----------------------
+    @staticmethod
+    def _wrap_env(env, config):
+        env = LogWrapper(env)
+        env = VecEnv(env)
+        if getattr(config, 'normalize_env', True):
+            env = NormalizeVecReward(env, float(config.gamma))
+        return env
