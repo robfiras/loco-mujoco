@@ -3,7 +3,7 @@ defaults:
   - override hydra/launcher: basic
 
 wandb:
-  project: "deepmimic-SAC"
+  project: "deepmimic-TD3"
 
 experiment:
   task_factory:
@@ -36,18 +36,18 @@ experiment:
         - right_hand_mimic
         - right_foot_mimic
   hidden_layers: [256, 256]
-  activation: tanh
-  init_std: 0.1
-  learnable_std: true
-  state_dependent_std: true
+  activation: relu
   lr_actor: 3e-4
   lr_critic: 3e-4
-  lr_alpha: 3e-4
-  init_alpha: 0.01
-  learnable_alpha: true
-  # target_entropy: set to action_dim * log(init_std) to match desired init_std;
-  # default (-action_dim) assumes std ≈ 1.0 which fights small init_std
-  target_entropy: -200.7  # 19 * log(0.1) ≈ 19 * -2.3 for UnitreeG1 (19 actuators)
+  exploration_noise: 0.1
+  target_noise: 0.1
+  noise_clip: 0.3
+  policy_delay: 1
+  lambda_oob: 0.1  # out-of-bounds penalty scale (actor loss adds lambda*mean(|Q|)*mean(oob^2))
+  # NOTE: off-policy learning is incompatible with running-stat normalization
+  # (stale buffer entries were normalized under old stats while current
+  # critic/target see new stats). Keep obs+reward norm off.
+  use_obs_norm: false  # disables RunningMeanStd inside actor/critic nets
   gamma: 0.99
   tau: 0.005
   buffer_size: 1000000
@@ -57,14 +57,7 @@ experiment:
   max_grad_norm: 0.5
   num_envs: 2048
   total_timesteps: 10e6
-  # NOTE: off-policy learning is incompatible with running-stat normalization
-  # because stale replay-buffer transitions were normalized under old stats,
-  # while the current critic / target critic use newer stats — leading to
-  # silently inconsistent Bellman residuals. Keep both off for SAC/TD3.
-  normalize_env: false    # disables NormalizeVecReward wrapper
-  use_obs_norm: false     # disables RunningMeanStd inside actor/critic nets
-  log_std_min: -20.0
-  log_std_max: 2.0
+  normalize_env: false  # disables NormalizeVecReward wrapper
   n_seeds: 1
   vmap_across_seeds: true
   debug: false

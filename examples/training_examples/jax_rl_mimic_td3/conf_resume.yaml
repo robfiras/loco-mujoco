@@ -16,7 +16,6 @@ experiment:
     env_name: MjxUnitreeG1
     headless: True
     horizon: 1000
-    use_mjwarp: False
     goal_type: GoalTrajMimic
     goal_params:
       visualize_goal: true
@@ -39,30 +38,24 @@ experiment:
   activation: tanh
   init_std: 0.1
   learnable_std: true
-  state_dependent_std: true
+  state_dependent_std: false
   lr_actor: 3e-4
   lr_critic: 3e-4
   lr_alpha: 3e-4
   init_alpha: 0.01
   learnable_alpha: true
-  # target_entropy: set to action_dim * log(init_std) to match desired init_std;
-  # default (-action_dim) assumes std ≈ 1.0 which fights small init_std
-  target_entropy: -200.7  # 19 * log(0.1) ≈ 19 * -2.3 for UnitreeG1 (19 actuators)
+  target_entropy: -43.7  # 19 * log(0.1) for UnitreeG1 (19 actuators)
   gamma: 0.99
   tau: 0.005
   buffer_size: 1000000
   batch_size: 256
-  learning_starts: 1000000
+  learning_starts: 10000
   gradient_steps: 20
   max_grad_norm: 0.5
   num_envs: 2048
-  total_timesteps: 10e6
-  # NOTE: off-policy learning is incompatible with running-stat normalization
-  # because stale replay-buffer transitions were normalized under old stats,
-  # while the current critic / target critic use newer stats — leading to
-  # silently inconsistent Bellman residuals. Keep both off for SAC/TD3.
-  normalize_env: false    # disables NormalizeVecReward wrapper
-  use_obs_norm: false     # disables RunningMeanStd inside actor/critic nets
+  total_timesteps: 20e6
+  timesteps_per_chunk: 1e6
+  normalize_env: true
   log_std_min: -20.0
   log_std_max: 2.0
   n_seeds: 1

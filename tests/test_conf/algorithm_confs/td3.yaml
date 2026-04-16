@@ -23,25 +23,25 @@ experiment:
     terrain_type: RoughTerrain
     init_state_type: TrajInitialStateHandler
   hidden_layers: [64, 64]
-  activation: tanh
-  init_std: 0.05
+  activation: relu
   lr_actor: 3e-4
   lr_critic: 3e-4
-  lr_alpha: 3e-4
-  init_alpha: 0.1
-  learnable_alpha: true
+  exploration_noise: 0.1
+  target_noise: 0.1
+  noise_clip: 0.3
+  policy_delay: 2
+  lambda_oob: 0.1
+  use_obs_norm: false
   gamma: 0.99
   tau: 0.005
   buffer_size: 1000
   batch_size: 32
   learning_starts: 32
+  gradient_steps: 20
   max_grad_norm: 0.5
   num_envs: 4
   total_timesteps: 200
   normalize_env: false
-  use_obs_norm: false
-  log_std_min: -20.0
-  log_std_max: 2.0
   n_seeds: 1
   vmap_across_seeds: true
   validation:
