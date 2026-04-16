@@ -88,19 +88,10 @@ class Goal(StatefulObservation):
                 model: Union[MjModel, Model],
                 data: Union[MjData, Data],
                 carry: Any,
-                backend: ModuleType) -> bool:
+                backend: ModuleType,
+                traj=None) -> bool:
         """
         Check if the goal is completed.
-
-        Args:
-            env (Any): The environment instance.
-            model (Union[MjModel, Any]): The Mujoco model.
-            data (Union[MjData, Any]): The Mujoco data.
-            carry (Any): Carry object.
-            backend (ModuleType): The backend (numpy or jax).
-
-        Returns:
-            bool: Whether the goal is done.
         """
         return False
 
@@ -109,19 +100,10 @@ class Goal(StatefulObservation):
                     model: Union[MjModel, Model],
                     data: Union[MjData, Data],
                     carry: Any,
-                    backend: ModuleType) -> bool:
+                    backend: ModuleType,
+                    traj=None) -> bool:
         """
         Check if the goal is done (jax-compatible version).
-
-        Args:
-            env (Any): The environment instance.
-            model (Union[MjModel, Model]): The Mujoco model.
-            data (Union[MjData, Data]): The Mujoco data.
-            carry (Any): Carry object.
-            backend (ModuleType): The backend (numpy or jax).
-
-        Returns:
-            bool: Whether the goal is done.
         """
         return False
 
@@ -544,8 +526,9 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
         else:
             R = jnp_R
 
-        # Get trajectory data and state
-        traj_data = env._traj.data
+        # Get trajectory data and state (use passed `traj` so JIT-traced swaps
+        # are visible; fall back to self._traj for non-JIT callers).
+        traj_data = (traj if traj is not None else env._traj).data
         traj_state = carry.traj_state
 
         # Get a slice of the trajectory data
@@ -579,24 +562,16 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
                 model: Union[MjModel, Model],
                 data: Union[MjData, Data],
                 carry: Any,
-                backend: ModuleType) -> bool:
+                backend: ModuleType,
+                traj=None) -> bool:
         """
         Check if the goal is completed.
 
         Terminates the episode if the number of steps till the end of the trajectory is
         less than the number of steps to average over.
-
-        Args:
-            env (Any): The environment instance.
-            model (Union[MjModel, Any]): The Mujoco model.
-            data (Union[MjData, Any]): The Mujoco data.
-            carry (Any): Carry object.
-            backend (ModuleType): The backend (numpy or jax).
-
-        Returns:
-            bool: Whether the goal is done.
         """
-        steps_till_end = self._steps_till_end(env._traj.data, carry.traj_state)
+        traj_data = (traj if traj is not None else env._traj).data
+        steps_till_end = self._steps_till_end(traj_data, carry.traj_state)
         return steps_till_end < self._n_steps_average
 
     def mjx_is_done(self,
@@ -604,24 +579,13 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
                     model: Union[MjModel, Model],
                     data: Union[MjData, Data],
                     carry: Any,
-                    backend: ModuleType) -> bool:
+                    backend: ModuleType,
+                    traj=None) -> bool:
         """
         Check if the goal is done (JAX-compatible).
-
-        Terminates the episode if the number of steps till the end of the trajectory is
-        less than the number of steps to average over.
-
-        Args:
-            env (Any): The environment instance.
-            model (Union[MjModel, Any]): The Mujoco model.
-            data (Union[MjData, Any]): The Mujoco data.
-            carry (Any): Carry object.
-            backend (ModuleType): The backend (numpy or jax).
-
-        Returns:
-            bool: Whether the goal is done.
         """
-        steps_till_end = self._steps_till_end(env._traj.data, carry.traj_state)
+        traj_data = (traj if traj is not None else env._traj).data
+        steps_till_end = self._steps_till_end(traj_data, carry.traj_state)
         return jax.lax.cond(steps_till_end < self._n_steps_average, lambda: True, lambda: False)
 
     def _steps_till_end(self,
@@ -802,7 +766,8 @@ class GoalTrajMimic(Goal):
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: Goal observation and updated carry.
         """
-        traj_data = env._traj.data
+        # use passed `traj` so JIT-traced swaps are visible; fall back to self._traj
+        traj_data = (traj if traj is not None else env._traj).data
         traj_state = carry.traj_state
 
         traj_data_single = traj_data.get(traj_state.traj_no, traj_state.subtraj_step_no, backend)
@@ -825,7 +790,7 @@ class GoalTrajMimic(Goal):
         ])
 
         if self.visualize_goal:
-            carry = self.set_visuals(env, model, data, carry, backend)
+            carry = self.set_visuals(env, model, data, carry, backend, traj)
 
         if len(self._rel_site_ids) > 0:
             rel_site_ids = self._rel_site_ids
@@ -859,26 +824,17 @@ class GoalTrajMimic(Goal):
                     model: Union[MjModel, Model],
                     data: Union[MjData, Data],
                     carry: Any,
-                    backend: ModuleType) -> Any:
+                    backend: ModuleType,
+                    traj=None) -> Any:
         """
         Set the visualizations for the goal.
-
-        Args:
-            env (Any): The environment instance.
-            model (Union[MjModel, Model]): The Mujoco model.
-            data (Union[MjData, Data]): The Mujoco data.
-            carry (Any): Carry object.
-            backend (ModuleType): The backend (numpy or jax).
-
-        Returns:
-            Any: Updated carry with visualizations set.
         """
         if backend == np:
             R = np_R
         else:
             R = jnp_R
 
-        traj_data = env._traj.data
+        traj_data = (traj if traj is not None else env._traj).data
         traj_state = carry.traj_state
         user_scene = carry.user_scene
         goal_geoms = user_scene.geoms
@@ -1015,26 +971,17 @@ class GoalTrajMimicv2(GoalTrajMimic):
                     model: Union[MjModel, Model],
                     data: Union[MjData, Data],
                     carry: Any,
-                    backend: ModuleType) -> Any:
+                    backend: ModuleType,
+                    traj=None) -> Any:
         """
         Set the visualizations for the goal.
-
-        Args:
-            env (Any): The environment instance.
-            model (Union[MjModel, Model]): The Mujoco model.
-            data (Union[MjData, Data]): The Mujoco data.
-            carry (Any): Carry object.
-            backend (ModuleType): The backend (numpy or jax).
-
-        Returns:
-            Any: Updated carry with visualizations set.
         """
         if backend == np:
             R = np_R
         else:
             R = jnp_R
 
-        traj_data = env._traj.data
+        traj_data = (traj if traj is not None else env._traj).data
         traj_state = carry.traj_state
         user_scene = carry.user_scene
         goal_geoms = user_scene.geoms

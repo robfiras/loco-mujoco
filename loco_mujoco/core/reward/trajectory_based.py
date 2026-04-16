@@ -123,7 +123,9 @@ class TargetVelocityTrajReward(TrajectoryBasedReward):
         vel_local = calc_local_vel(data)
 
         # calculate the same for the trajectory
-        traj_data = env._traj.data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
+        # use passed `traj` so JIT-traced swaps are visible
+        _traj = traj if traj is not None else env._traj
+        traj_data = _traj.data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
         traj_vel_local = calc_local_vel(traj_data)
 
         # calculate tracking reward
@@ -308,8 +310,8 @@ class MimicReward(TrajectoryBasedReward):
         # get current reward state
         reward_state = carry.reward_state
 
-        # get trajectory data
-        traj_data = env._traj.data
+        # get trajectory data (use passed `traj` so JIT-traced swaps are visible)
+        traj_data = (traj if traj is not None else env._traj).data
 
         # get all quantities from trajectory
         traj_data_single = traj_data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)

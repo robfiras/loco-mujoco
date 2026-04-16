@@ -185,7 +185,7 @@ class LocoEnv(Mjx):
                 done |= False
 
             # goals can terminate an episode
-            done |= self._goal.is_done(self, self._model, data, carry, np)
+            done |= self._goal.is_done(self, self._model, data, carry, np, traj)
 
         return done
 
@@ -220,7 +220,7 @@ class LocoEnv(Mjx):
                                                lambda: True, lambda: False)
             done = jnp.logical_or(done, reached_end_of_traj)
             # goals can terminate an episode
-            done = jnp.logical_or(done, self._goal.mjx_is_done(self, self._model, data, carry, jnp))
+            done = jnp.logical_or(done, self._goal.mjx_is_done(self, self._model, data, carry, jnp, traj))
 
         return done
 
