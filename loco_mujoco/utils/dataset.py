@@ -12,9 +12,9 @@ VARIABLE_TYPES = {
     "LOCOMUJOCO_CONVERTED_AMASS_PATH": "str",
     "LOCOMUJOCO_CONVERTED_DEFAULT_PATH": "str",
     "LOCOMUJOCO_CONVERTED_LAFAN1_PATH": "str",
-    "LOCOMUJOCO_CUSTOM_MODELS_PATH": "str",
+    "LOCOMUJOCO_CUSTOM_MODELS_PATH": "list",
     "LOCOMUJOCO_SMPL_MODEL_PATH": "str",
-    "LOCOMUJOCO_CUSTOM_SMPL_CONF_PATH": "list"
+    "LOCOMUJOCO_CUSTOM_ROBOT_CONF_PATH": "list"
 }
 
 
@@ -94,20 +94,6 @@ def set_converted_lafan1_path():
                            path_to_conf=loco_mujoco.PATH_TO_VARIABLES)
 
 
-def add_custom_smpl_conf_path():
-    """
-    Set the path where custom smpl confs are stored (optional).
-
-    Note that many paths can be added!
-
-    """
-    parser = argparse.ArgumentParser(description="Set the path where custom smpl confs are stored.")
-    parser.add_argument("--path", type=str, help="Path to which custom smpl confs are stored.")
-    args = parser.parse_args()
-    _add_path_to_yaml_list(args.path, "LOCOMUJOCO_CUSTOM_SMPL_CONF_PATH",
-                           path_to_conf=loco_mujoco.PATH_TO_VARIABLES)
-
-
 def add_variable_cli():
     parser = argparse.ArgumentParser(description="Set a variable in LOCOMUJOCO_VARIABLES.")
     parser.add_argument("--name", type=str, help="Name of the variable.")
@@ -125,6 +111,32 @@ def remove_variable_cli():
                         help="Value to be deleted [Only needed for list type Variables].")
     args = parser.parse_args()
     remove_variable(args.name, args.value)
+
+
+def show_variable_cli():
+    parser = argparse.ArgumentParser(description="Show a variable from LOCOMUJOCO_VARIABLES.")
+    parser.add_argument("--name", type=str, required=True, help="Name of the variable.")
+    args = parser.parse_args()
+
+    path_to_conf = loco_mujoco.PATH_TO_VARIABLES
+    if not os.path.exists(path_to_conf):
+        print(f"No variables file found at {path_to_conf}.")
+        return
+
+    with open(path_to_conf, "r") as file:
+        data = yaml.load(file, Loader=yaml.FullLoader) or {}
+
+    if args.name not in data:
+        print(f"{args.name} is not set.")
+        return
+
+    value = data[args.name]
+    if isinstance(value, list):
+        print(f"{args.name}:")
+        for i, v in enumerate(value):
+            print(f"  [{i}] {v}")
+    else:
+        print(f"{args.name}: {value}")
 
 
 def add_variable(
@@ -271,9 +283,11 @@ def _add_path_to_yaml_list(path: str, attr: str, path_to_conf: str, quiet: bool 
     with open(path_to_conf, "r") as file:
         data = yaml.load(file, Loader=yaml.FullLoader) or {}
 
-    # ensure the attribute is a list
+    # ensure the attribute is a list (auto-migrate from str if needed)
     if attr not in data:
         data[attr] = []
+    elif isinstance(data[attr], str):
+        data[attr] = [data[attr]]
     elif not isinstance(data[attr], list):
         raise ValueError(f"The attribute '{attr}' must be a list in the YAML file.")
 
