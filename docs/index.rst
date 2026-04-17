@@ -69,6 +69,7 @@ Key Advantages
    source/tutorials/replay_datasets.rst
    source/tutorials/creating_environments.rst
    source/tutorials/customizing_environments.rst
+   source/tutorials/creating_new_environments.rst
    source/tutorials/trajectory_interface.rst
 
 

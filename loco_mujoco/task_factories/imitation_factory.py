@@ -2,16 +2,25 @@ import os
 from typing import Union, Dict
 from omegaconf import ListConfig, DictConfig
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
 import yaml
 
 import loco_mujoco
 from loco_mujoco.environments.base import LocoEnv
 from loco_mujoco.core.trajectory import Trajectory, TrajectoryHandler
-from loco_mujoco.smpl.retargeting import load_retargeted_amass_trajectory, extend_motion, load_robot_conf_file
+from loco_mujoco.smpl.retargeting import (load_retargeted_amass_trajectory, extend_motion,
+                                          load_robot_conf_file, retarget_traj_from_robot_to_robot)
 from loco_mujoco.smpl.const import AMASS_LOCOMOTION_DATASETS
 from loco_mujoco.datasets.humanoids.LAFAN1 import load_lafan1_trajectory
 from loco_mujoco.datasets.humanoids.LAFAN1 import (LAFAN1_LOCOMOTION_DATASETS,
                                                    LAFAN1_DANCE_DATASETS, LAFAN1_ALL_DATASETS)
+
+
+# Default source envs used when retargeting on-the-fly. Can be overridden per-env
+# via the `default_dataset_source_env` / `lafan1_dataset_source_env` info properties
+# on the env class (see BaseRobotHumanoid).
+_DEFAULT_RETARGET_SOURCE_ENV = "SkeletonTorque"
+_LAFAN1_RETARGET_SOURCE_ENV = "UnitreeH1v2"
 
 from .base import TaskFactory
 from .dataset_confs import DefaultDatasetConf, AMASSDatasetConf, LAFAN1DatasetConf, CustomDatasetConf
@@ -157,13 +166,22 @@ class ImitationFactory(TaskFactory):
 
                 filename = f"DefaultDatasets/{file_path}"
 
-                file_path = hf_hub_download(
-                    repo_id="robfiras/loco-mujoco-datasets",
-                    filename=filename,
-                    repo_type="dataset"
-                )
-
-                traj = Trajectory.load(file_path)
+                try:
+                    hub_file_path = hf_hub_download(
+                        repo_id="robfiras/loco-mujoco-datasets",
+                        filename=filename,
+                        repo_type="dataset"
+                    )
+                    traj = Trajectory.load(hub_file_path)
+                except (EntryNotFoundError, HfHubHTTPError):
+                    # Target env not on HF → retarget on-the-fly from the source env
+                    source_env = getattr(env, "default_dataset_source_env",
+                                         _DEFAULT_RETARGET_SOURCE_ENV)
+                    print(f"[LocoMuJoCo's Default Dataset Pipeline] INFO: "
+                          f"{filename} not on HuggingFace. Retargeting from "
+                          f"{source_env} on-the-fly.")
+                    traj = ImitationFactory._retarget_default_on_the_fly(
+                        env_name, task, default_dataset_conf.dataset_type, source_env)
 
                 # extend the motion to the desired length
                 if not traj.data.is_complete:
@@ -171,6 +189,7 @@ class ImitationFactory(TaskFactory):
 
                 # save  to the cache if the cache path is set
                 if cached_file_path:
+                    os.makedirs(os.path.dirname(cached_file_path), exist_ok=True)
                     traj.save(cached_file_path)
 
             # filter, extend, and interpolate to match the environment
@@ -181,6 +200,26 @@ class ImitationFactory(TaskFactory):
         trajs = Trajectory.concatenate(trajs)
 
         return trajs
+
+    @staticmethod
+    def _retarget_default_on_the_fly(env_name_target: str, task: str, dataset_type: str,
+                                     source_env: str = _DEFAULT_RETARGET_SOURCE_ENV) -> Trajectory:
+        """
+        On-the-fly retargeting for a default dataset.
+
+        Called when the pre-retargeted dataset for `env_name_target` is not
+        available on the HuggingFace hub. Downloads the source-env version
+        of the same task and retargets it to the target env using the custom
+        SMPL robot config registered under LOCOMUJOCO_CUSTOM_ROBOT_CONF_PATH.
+        """
+        source_filename = f"DefaultDatasets/{dataset_type}/{source_env}/{task}.npz"
+        source_path = hf_hub_download(
+            repo_id="robfiras/loco-mujoco-datasets",
+            filename=source_filename,
+            repo_type="dataset",
+        )
+        traj_source = Trajectory.load(source_path)
+        return retarget_traj_from_robot_to_robot(source_env, traj_source, env_name_target)
 
     @staticmethod
     def get_amass_traj(env, amass_dataset_conf: AMASSDatasetConf) -> Trajectory:
@@ -247,7 +286,9 @@ class ImitationFactory(TaskFactory):
                 else [lafan1_dataset_conf.dataset_name]
 
         # Load LAFAN1 Trajectory
-        traj = load_lafan1_trajectory(env.__class__.__name__, dataset_paths)
+        source_env = getattr(env, "lafan1_dataset_source_env", _LAFAN1_RETARGET_SOURCE_ENV)
+        traj = load_lafan1_trajectory(env.__class__.__name__, dataset_paths,
+                                      source_env=source_env)
 
         # filter, extend, and interpolate to match the environment
         return TrajectoryHandler.process(traj, env._model, env.dt)

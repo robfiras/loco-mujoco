@@ -35,6 +35,7 @@ from loco_mujoco.core.trajectory import (
     TrajectoryInfo,
     TrajectoryModel,
     TrajectoryData,
+    TrajectoryHandler,
     interpolate_trajectories,
 )
 from loco_mujoco.datasets.data_generation import ExtendTrajData, optimize_for_collisions
@@ -608,7 +609,7 @@ def motion_transfer_robot_to_robot(
 
     path_to_target_robot_smpl_shape = os.path.join(path_target_robot_smpl_data, OPTIMIZED_SHAPE_FILE_NAME)
 
-    if path_to_fitted_motion_source is not None and not os.path.exists(path_to_fitted_motion_source):
+    if path_to_fitted_motion_source is None or not os.path.exists(path_to_fitted_motion_source):
 
         device = torch.device("cuda")
 
@@ -645,11 +646,13 @@ def motion_transfer_robot_to_robot(
          offset_z_source, height_scale_source) = joblib.load(path_to_source_robot_smpl_shape)
 
         # get the source site positions used as a target for optimization
+        # (env._traj.data is padded to max_n_samples — slice to n_samples so padded
+        #  zero rows don't contaminate the optimization / rotation conversions)
         sites_for_mimic = env.sites_for_mimic
         site_ids = np.array([mujoco.mj_name2id(env._model, mujoco.mjtObj.mjOBJ_SITE, s) for s in sites_for_mimic])
-        target_site_pos = torch.from_numpy(env._traj.data.site_xpos[:, site_ids])
-        target_site_mat = torch.from_numpy(env._traj.data.site_xmat[:, site_ids])
-        len_dataset = env._traj.data.n_samples
+        len_dataset = int(env._traj.data.n_samples)
+        target_site_pos = torch.from_numpy(env._traj.data.site_xpos[:len_dataset, site_ids])
+        target_site_mat = torch.from_numpy(env._traj.data.site_xmat[:len_dataset, site_ids])
 
         # define the optimization variables
         pose = np.zeros([len_dataset, 156]).reshape(-1, 52, 3)

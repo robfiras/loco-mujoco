@@ -41,7 +41,7 @@ LocoMuJoCo provides different datasets for imitation learning. For now, three di
 - **Lafan1Dataset**: Humanoid motion capture dataset.
 - `AMASSDataset <https://amass.is.tue.mpg.de/>`__ : Humanoid motion capture dataset.
 
-All datasets will be automatically downloaded, retagerget for the respective humanoid and optionaly cached.
+All datasets will be automatically downloaded, retargeted for the respective humanoid and optionally cached.
 Due to licensing, the AMASS dataset needs to be downloaded manually. You can find more information on the installation
 page of the documentation. The DefaultDataset and Lafan1Dataset are hosted on
 `LocoMuJoCo's HuggingFace hub <https://huggingface.co/datasets/robfiras/loco-mujoco-datasets/tree/main>`__.

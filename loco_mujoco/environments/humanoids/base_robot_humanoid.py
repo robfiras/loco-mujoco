@@ -40,3 +40,23 @@ class BaseRobotHumanoid(LocoEnv):
 
         """
         return [0, 0, 0.6]
+
+    @info_property
+    def default_dataset_source_env(self) -> str:
+        """
+        Source env used when on-the-fly retargeting a default dataset for this env
+        (i.e. when `DefaultDatasets/.../<this_env>/<task>.npz` is not on the hub).
+        Subclasses can override this to choose a retarget source that matches their
+        skeleton more closely.
+        """
+        return "SkeletonTorque"
+
+    @info_property
+    def lafan1_dataset_source_env(self) -> str:
+        """
+        Source env used when on-the-fly retargeting a LAFAN1 dataset for this env.
+        Defaults to UnitreeH1v2 (the env whose LAFAN1 motions were hand-converted
+        and published on the loco-mujoco HuggingFace repo). Subclasses can override
+        this if a different source env gives better retargeting quality.
+        """
+        return "UnitreeH1v2"

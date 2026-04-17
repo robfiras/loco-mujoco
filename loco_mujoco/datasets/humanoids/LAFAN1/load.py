@@ -10,11 +10,12 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from scipy.spatial.transform import Rotation as sRot
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
 
 import loco_mujoco
 from loco_mujoco.core.utils.math import quat_scalarlast2scalarfirst
 from loco_mujoco.datasets.data_generation import ExtendTrajData, optimize_for_collisions, calculate_qvel_with_finite_difference
-from loco_mujoco.smpl.retargeting import load_robot_conf_file
+from loco_mujoco.smpl.retargeting import load_robot_conf_file, retarget_traj_from_robot_to_robot
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.core.trajectory import (
     Trajectory,
@@ -23,6 +24,11 @@ from loco_mujoco.core.trajectory import (
     TrajectoryData,
     interpolate_trajectories)
 from loco_mujoco.utils import setup_logger
+
+
+# Source env used when retargeting on-the-fly for an env that is not present
+# on the HuggingFace dataset repo.
+_LAFAN1_RETARGET_SOURCE_ENV = "UnitreeH1v2"
 
 
 def extend_motion(
@@ -62,6 +68,9 @@ def extend_motion(
         render=False,
         callback_class=callback
     )
+    # extend_trajectory_data asserts current_length == qpos.shape[0]; process_trajectory
+    # pads qpos to max_n_samples, so trim before passing it in.
+    traj_data = traj_data.trim()
     traj_data, traj_info = callback.extend_trajectory_data(traj_data, traj_info)
     traj = replace(traj, data=traj_data, info=traj_info)
 
@@ -71,7 +80,8 @@ def extend_motion(
 def load_lafan1_trajectory(
         env_name: str,
         dataset_name: Union[str, List[str]],
-        max_steps: int = 100
+        max_steps: int = 100,
+        source_env: str = _LAFAN1_RETARGET_SOURCE_ENV,
 ) -> Trajectory:
     """
     Load a trajectory from the LAFAN1 dataset.
@@ -80,6 +90,8 @@ def load_lafan1_trajectory(
         env_name (str): The name of the environment.
         dataset_name (Union[str, List[str]]): The name of the dataset(s) to load.
         max_steps (int, optional): The maximum number of steps to optimize for collisions. Defaults to 100.
+        source_env (str, optional): Source env used when `env_name`'s LAFAN1 dataset
+            is not on HuggingFace and retargeting on-the-fly is needed.
 
     Returns:
         Trajectory: The loaded trajectory.
@@ -124,13 +136,20 @@ def load_lafan1_trajectory(
         # load the npz file
         d_name = d_name if d_name.endswith(".npz") else f"{d_name}.npz"
 
-        file_path = hf_hub_download(
-            repo_id="robfiras/loco-mujoco-datasets",
-            filename=f"Lafan1/mocap/{env_name}/{d_name}",
-            repo_type="dataset"
-        )
-
-        traj = Trajectory.load(file_path)
+        try:
+            file_path = hf_hub_download(
+                repo_id="robfiras/loco-mujoco-datasets",
+                filename=f"Lafan1/mocap/{env_name}/{d_name}",
+                repo_type="dataset"
+            )
+            traj = Trajectory.load(file_path)
+        except (EntryNotFoundError, HfHubHTTPError):
+            # Target env not on HF → retarget on-the-fly from the source env
+            logger.info(f"Lafan1/mocap/{env_name}/{d_name} not on HuggingFace. "
+                        f"Retargeting from {source_env} on-the-fly.")
+            traj_source = load_lafan1_trajectory(source_env, [d_name],
+                                                 max_steps=max_steps)
+            traj = retarget_traj_from_robot_to_robot(source_env, traj_source, env_name)
 
         # extend the motion to the desired length
         if not traj.data.is_complete:
@@ -138,6 +157,7 @@ def load_lafan1_trajectory(
             traj = extend_motion(env_name, load_robot_conf_file(env_name), traj, replace_qvel_with_finite_diff=False)
 
         if path_to_convert_lafan1_datasets:
+            os.makedirs(os.path.dirname(target_path_dataset), exist_ok=True)
             traj.save(target_path_dataset)
 
         all_trajectories.append(traj)
