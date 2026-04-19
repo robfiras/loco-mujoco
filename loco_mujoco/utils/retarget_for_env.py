@@ -85,6 +85,18 @@ def _resolve_source_envs(env_name_target: str):
     return default_src, lafan1_src
 
 
+def _extend_if_needed(traj, env_name_target):
+    """Fill in xpos/xquat/cvel/site_xpos/... so the cached file is 'complete'
+    and future loads don't re-extend on every run."""
+    from loco_mujoco.smpl.retargeting import load_robot_conf_file
+    from loco_mujoco.datasets.humanoids.LAFAN1.load import extend_motion
+    if traj.data.is_complete:
+        return traj
+    robot_conf = load_robot_conf_file(env_name_target)
+    return extend_motion(env_name_target, robot_conf, traj,
+                         replace_qvel_with_finite_diff=False)
+
+
 def retarget_all_default(env_name_target: str, source_env: str,
                          dataset_type: str = "mocap", skip_existing: bool = True):
     from huggingface_hub import hf_hub_download
@@ -106,6 +118,7 @@ def retarget_all_default(env_name_target: str, source_env: str,
         )
         traj_source = Trajectory.load(source_file)
         traj_target = retarget_traj_from_robot_to_robot(source_env, traj_source, env_name_target)
+        traj_target = _extend_if_needed(traj_target, env_name_target)
         os.makedirs(os.path.dirname(cached), exist_ok=True)
         traj_target.save(cached)
 
@@ -124,6 +137,7 @@ def retarget_all_lafan1(env_name_target: str, source_env: str, skip_existing: bo
         print(f"  retarget: {clip}")
         traj_source = load_lafan1_trajectory(source_env, [clip])
         traj_target = retarget_traj_from_robot_to_robot(source_env, traj_source, env_name_target)
+        traj_target = _extend_if_needed(traj_target, env_name_target)
         os.makedirs(os.path.dirname(cached), exist_ok=True)
         traj_target.save(cached)
 
