@@ -55,8 +55,16 @@ class Mjx(Mujoco):
     Args:
         n_envs (int): Number of environments to run in parallel.
         use_mjwarp (bool): If True, MjWarp will be used as the simulation backend instead of Mjx.
-        nconmax (int): Maximum number of contacts to allocate for warp
-        njmax (int): Maximum number of constraints to allocate for warp
+        nconmax (int): maximum number of contacts to allocate for warp across all worlds.
+            Since the number of worlds is **not** pre-defined in JAX, we use the
+            ``nconmax`` argument to set the upper bound for the number of contacts
+            across all worlds. In MuJoCo Warp, the analogous field is called
+            ``naconmax``.
+        naconmax (int): maximum number of contacts to allocate for warp across all worlds.
+            Since the number of worlds is **not** pre-defined in JAX, we use the
+            ``naconmax`` argument to set the upper bound for the number of contacts
+            across all worlds, rather than the ``nconmax`` argument from MuJoCo Warp.
+        njmax (int): maximum number of constraints to allocate for warp across all worlds.
         **kwargs: Additional arguments to pass to the Mujoco base class.
 
     """
@@ -64,6 +72,7 @@ class Mjx(Mujoco):
     def __init__(self,
                  use_mjwarp=False,
                  nconmax=None,
+                 naconmax=None,
                  njmax=None,
                  **kwargs):
 
@@ -86,7 +95,7 @@ class Mjx(Mujoco):
             )
             time.sleep(3)
             self.sys = mjx.put_model(self._model, impl='warp')
-            self._first_data = mjx.make_data(self._model, impl='warp', nconmax=nconmax, njmax=njmax)
+            self._first_data = mjx.make_data(self._model, impl='warp', nconmax=nconmax, naconmax=naconmax, njmax=njmax)
         else:
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
