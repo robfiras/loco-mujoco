@@ -20,8 +20,9 @@ def extract_z_rotation(global_rotation, backend):
     # Convert to Euler angles
     euler_angles = global_rotation.as_euler('xyz', degrees=False)
 
-    # Isolate yaw (z-axis rotation)
-    yaw_only = [0, 0, euler_angles[2]]  # Set roll and pitch to zero, keep yaw
+    # Isolate yaw (z-axis rotation). Use `backend.array` so we pass an ndarray
+    # (not a Python list) to R.from_euler — newer JAX rejects lists.
+    yaw_only = backend.array([0.0, 0.0, euler_angles[2]])
 
     # Convert back to rotation object
     z_rotation = R.from_euler('xyz', yaw_only, degrees=False)
