@@ -115,8 +115,14 @@ def remove_variable_cli():
 
 def show_variable_cli():
     parser = argparse.ArgumentParser(description="Show a variable from LOCOMUJOCO_VARIABLES.")
-    parser.add_argument("--name", type=str, required=True, help="Name of the variable.")
+    parser.add_argument("--name", type=str, default=None,
+                        help="Name of the variable (omit and pass --all to show all).")
+    parser.add_argument("--all", action="store_true",
+                        help="Show all variables currently set.")
     args = parser.parse_args()
+
+    if not args.all and args.name is None:
+        parser.error("either --name <VAR> or --all must be provided")
 
     path_to_conf = loco_mujoco.PATH_TO_VARIABLES
     if not os.path.exists(path_to_conf):
@@ -126,17 +132,26 @@ def show_variable_cli():
     with open(path_to_conf, "r") as file:
         data = yaml.load(file, Loader=yaml.FullLoader) or {}
 
+    def _print_one(name, value):
+        if isinstance(value, list):
+            print(f"{name}:")
+            for i, v in enumerate(value):
+                print(f"  [{i}] {v}")
+        else:
+            print(f"{name}: {value}")
+
+    if args.all:
+        if not data:
+            print("(no variables set)")
+            return
+        for name in sorted(data):
+            _print_one(name, data[name])
+        return
+
     if args.name not in data:
         print(f"{args.name} is not set.")
         return
-
-    value = data[args.name]
-    if isinstance(value, list):
-        print(f"{args.name}:")
-        for i, v in enumerate(value):
-            print(f"  [{i}] {v}")
-    else:
-        print(f"{args.name}: {value}")
+    _print_one(args.name, data[args.name])
 
 
 def add_variable(
