@@ -522,6 +522,73 @@ class PPOJax(JaxRLAlgorithmBase):
                 "validation_metrics": metrics[1]}
 
     @classmethod
+    def _eval_fn(cls, rng, env,
+                 agent_conf: PPOAgentConf,
+                 agent_state: PPOAgentState,
+                 traj=None,
+                 mh: MetricsHandler = None):
+        """Standalone eval rollout, same signature as _train_fn.
+
+        Resets a fresh set of eval envs (`config.validation.num_envs`) and
+        scans the policy for `config.validation.num_steps` steps. Returns
+        episode-return/length summary plus the `mh` validation summary if a
+        MetricsHandler is provided. Does not touch the agent's training
+        state — run_stats updates during eval live only in the scan carry.
+        """
+        config = agent_conf.config.experiment
+        network = agent_conf.network
+        env = cls._wrap_env(env, config)
+        policy = PPOPolicy(network)
+
+        train_state = agent_state.train_state.replace(apply_fn=network.apply)
+
+        def _eval_step(runner_state, unused):
+            train_state, env_state, last_obs, rng = runner_state
+            rng, _rng = jax.random.split(rng)
+            y, updates = train_state.apply_fn(
+                {"params": train_state.params, "run_stats": train_state.run_stats},
+                last_obs, mutable=["run_stats"],
+            )
+            pi, _ = y
+            train_state = train_state.replace(run_stats=updates["run_stats"])
+            action = pi.sample(seed=_rng)
+
+            obsv, reward, absorbing, done, info, env_state = env.step(
+                env_state, action, traj
+            )
+            logged = env_state.find(LogEnvState).metrics
+            transition = MetricHandlerTransition(env_state, logged)
+            return (train_state, env_state, obsv, rng), transition
+
+        rng, _rng = jax.random.split(rng)
+        reset_rng = jax.random.split(_rng, config.validation.num_envs)
+        obsv, env_state = env.reset(reset_rng, traj)
+
+        runner_state = (train_state, env_state, obsv, rng)
+        _, traj_batch = jax.lax.scan(
+            _eval_step, runner_state, None, config.validation.num_steps
+        )
+
+        logged = traj_batch.logged_metrics
+        done_count = jnp.maximum(jnp.sum(logged.done), 1)
+        summary = SummaryMetrics(
+            mean_episode_return=jnp.sum(
+                jnp.where(logged.done, logged.returned_episode_returns, 0.0)
+            ) / done_count,
+            mean_episode_length=jnp.sum(
+                jnp.where(logged.done, logged.returned_episode_lengths, 0.0)
+            ) / done_count,
+            max_timestep=jnp.max(logged.timestep * config.validation.num_envs),
+        )
+
+        if mh is None:
+            validation_metrics = ValidationSummary()
+        else:
+            validation_metrics = mh(traj_batch.env_state)
+
+        return {"eval_summary": summary, "validation_metrics": validation_metrics}
+
+    @classmethod
     def play_policy(cls, env,
                     agent_conf: PPOAgentConf,
                     agent_state: PPOAgentState,

@@ -508,6 +508,36 @@ def test_VanillaDagger_save_and_load_agent(vanilla_dagger_config, tmp_path):
     assert loaded_state.rollout_state is not None
 
 
+def test_VanillaDagger_eval_fn(vanilla_dagger_config):
+    """Standalone eval_fn should jit, run, and produce finite metrics without
+    touching the agent's training state."""
+    config = vanilla_dagger_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = VanillaDaggerJax.init_agent_state(env, agent_conf, rng)
+
+    eval_fn = VanillaDaggerJax.build_eval_fn(env, agent_conf)
+    eval_fn = jax.jit(eval_fn)
+
+    try:
+        jaxpr = make_jaxpr(eval_fn)(rng, agent_state, traj)
+        assert jaxpr is not None
+    except Exception as e:
+        pytest.fail(f"JAX eval function compilation failed: {e}")
+
+    out = eval_fn(rng, agent_state, traj)
+    assert "eval_summary" in out
+    assert "validation_metrics" in out
+    # finite-ness — training may not have happened yet, but the metric
+    # should at least evaluate without nan/inf.
+    assert jnp.isfinite(out["eval_summary"].mean_episode_return)
+    assert jnp.isfinite(out["eval_summary"].mean_episode_length)
+
+
 def test_VanillaDagger_buffer_survives_chunk_swap(vanilla_dagger_config):
     """The whole point of VanillaDagger: the replay buffer must survive a
     teacher swap + env reset between training chunks."""

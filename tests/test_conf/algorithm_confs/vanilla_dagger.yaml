@@ -38,3 +38,5 @@ experiment:
   sticky_max: 10
   num_envs: 4
   total_timesteps: 200
+  eval_num_envs: 4
+  eval_num_steps: 20

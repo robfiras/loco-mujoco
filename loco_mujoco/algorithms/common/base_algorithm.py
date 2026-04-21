@@ -79,6 +79,26 @@ class JaxRLAlgorithmBase:
         raise NotImplementedError
 
     @classmethod
+    def build_eval_fn(cls, env, agent_conf: AgentConfBase, mh: MetricsHandler = None):
+        """ Returns the eval function. Same signature as build_train_fn:
+        takes (rng, agent_state, traj) and runs an evaluation rollout,
+        returning a dict with metric summaries. Does not mutate the agent's
+        training state (any local run_stats updates during eval are
+        discarded with the eval scan carry). """
+        return lambda rng_key, agent_state, traj: cls._eval_fn(rng_key, env, agent_conf, agent_state, traj=traj, mh=mh)
+
+    @classmethod
+    def _eval_fn(cls, rng, env,
+                 agent_conf: AgentConfBase,
+                 agent_state: AgentStateBase,
+                 traj=None,
+                 mh: MetricsHandler = None):
+        """ Evaluation rollout. Subclasses should implement this to run the
+        agent (greedy/deterministic if applicable) for a fixed number of
+        parallel env steps and return a metrics dict. """
+        raise NotImplementedError
+
+    @classmethod
     def play_policy(cls, train_state, env, config, n_envs, n_steps=None, record=False, key=None):
         raise NotImplementedError
 

@@ -31,7 +31,8 @@ import optax
 from omegaconf import DictConfig, OmegaConf, ListConfig
 
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStateBase,
-                                    ActorCritic, TrainState, ReplayBuffer)
+                                    ActorCritic, TrainState, ReplayBuffer,
+                                    MetricHandlerTransition)
 from loco_mujoco.core.wrappers import LogWrapper, LogEnvState, VecEnv, SummaryMetrics
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
@@ -509,6 +510,77 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             "training_metrics": training_metrics,
             "validation_metrics": ValidationSummary(),
         }
+
+    # ------------------------------------------------------------------
+    # Evaluation (standalone, same signature as train_fn)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _eval_fn(cls, rng, env,
+                 agent_conf: VanillaDaggerAgentConf,
+                 agent_state: VanillaDaggerAgentState,
+                 traj=None,
+                 mh: MetricsHandler = None):
+        """Deterministic student-only rollout for evaluation.
+
+        Resets `config.eval_num_envs` (falls back to `num_envs`) fresh envs
+        and runs the student policy with its mean action for
+        `config.eval_num_steps` steps (default 500). Returns an episode
+        summary plus the `mh` validation summary if provided. Does not
+        touch the teacher, the replay buffer, or the training state.
+        """
+        exp = agent_conf.config.experiment
+        student_net = agent_conf.student_net
+        env = cls._wrap_env(env, exp)
+
+        student_ts = agent_state.student_train_state.replace(apply_fn=student_net.apply)
+
+        eval_num_envs = int(getattr(exp, "eval_num_envs", exp.num_envs))
+        eval_num_steps = int(getattr(exp, "eval_num_steps", 500))
+
+        def _eval_step(carry, unused):
+            s_ts, env_state, last_obs, rng = carry
+            (pi, _), updates = student_net.apply(
+                {"params": s_ts.params, "run_stats": s_ts.run_stats}, last_obs,
+                mutable=["run_stats"],
+            )
+            s_ts = s_ts.replace(run_stats=updates["run_stats"])
+            action = pi.mean()  # deterministic
+
+            obs, reward, absorbing, done, info, env_state = env.step(
+                env_state, action, traj
+            )
+            logged = env_state.find(LogEnvState).metrics
+            transition = MetricHandlerTransition(env_state, logged)
+            return (s_ts, env_state, obs, rng), transition
+
+        rng, _rng = jax.random.split(rng)
+        reset_rng = jax.random.split(_rng, eval_num_envs)
+        last_obs, env_state = env.reset(reset_rng, traj)
+
+        (_, _, _, _), traj_batch = jax.lax.scan(
+            _eval_step, (student_ts, env_state, last_obs, rng),
+            None, eval_num_steps,
+        )
+
+        logged = traj_batch.logged_metrics
+        done_count = jnp.maximum(jnp.sum(logged.done), 1)
+        summary = SummaryMetrics(
+            mean_episode_return=jnp.sum(
+                jnp.where(logged.done, logged.returned_episode_returns, 0.0)
+            ) / done_count,
+            mean_episode_length=jnp.sum(
+                jnp.where(logged.done, logged.returned_episode_lengths, 0.0)
+            ) / done_count,
+            max_timestep=jnp.max(logged.timestep * eval_num_envs),
+        )
+
+        if mh is None:
+            validation_metrics = ValidationSummary()
+        else:
+            validation_metrics = mh(traj_batch.env_state)
+
+        return {"eval_summary": summary, "validation_metrics": validation_metrics}
 
     # ------------------------------------------------------------------
     # Play

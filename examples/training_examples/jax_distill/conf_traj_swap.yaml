@@ -87,6 +87,14 @@ experiment:
   total_timesteps: 60e6
   timesteps_per_chunk: 2e6
 
+  # Periodic evaluation
+  # After every eval_interval_steps environment steps, run the student on
+  # each unique (expert, traj) pair and log per-pair + mean return/length.
+  # Set to 0 to disable.
+  eval_interval_steps: 5e7
+  eval_num_envs: 64
+  eval_num_steps: 500
+
   debug: false
 
 control_config:

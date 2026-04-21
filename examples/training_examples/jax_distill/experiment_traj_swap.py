@@ -123,6 +123,53 @@ def experiment(config: DictConfig):
         # during the call, roughly doubling peak usage.
         train_fn = jax.jit(train_fn, donate_argnums=(1,))
 
+        # Eval function — student-only deterministic rollout. NOT donated:
+        # we need to keep agent_state alive for the next training chunk.
+        eval_fn = VanillaDaggerJax.build_eval_fn(env, agent_conf)
+        eval_fn = jax.jit(eval_fn)
+
+        # Unique (expert, traj) pairs for eval — dedup exact duplicates so we
+        # don't eval the same pair twice per round.
+        unique_pairs = list(dict.fromkeys(pairs))
+        eval_interval_steps = int(getattr(config.experiment, "eval_interval_steps", 0))
+        next_eval_step = eval_interval_steps  # first eval after one full interval
+
+        def run_eval(state, global_step):
+            """Eval the student on every unique (expert, traj) pair and log
+            per-pair + mean metrics. Teacher swap is bookkeeping-only (the
+            student's forward pass does not depend on teacher params)."""
+            returns, lengths = [], []
+            eval_base = jax.random.PRNGKey(42)
+            for i, (eval_ckpt, eval_task) in enumerate(unique_pairs):
+                pair_rng = jax.random.fold_in(eval_base, i)
+                p, rs = expert_cache[eval_ckpt]
+                # eval_fn isn't donated → sharing cached refs is safe.
+                eval_state = state.replace(teacher_params=p, teacher_run_stats=rs)
+                eval_traj = env.process_trajectory(traj_cache[eval_task])
+                eval_out = eval_fn(pair_rng, eval_state, eval_traj)
+                s = eval_out["eval_summary"]
+                ret = float(s.mean_episode_return)
+                ln = float(s.mean_episode_length)
+                returns.append(ret)
+                lengths.append(ln)
+
+                expert_name = os.path.basename(eval_ckpt)
+                run.log({
+                    f"Eval/return__{expert_name}__{eval_task}": ret,
+                    f"Eval/length__{expert_name}__{eval_task}": ln,
+                }, step=global_step)
+                print(f"  [eval] expert={expert_name} traj={eval_task}"
+                      f" → return={ret:.2f} length={ln:.1f}")
+
+            mean_ret = sum(returns) / len(returns)
+            mean_len = sum(lengths) / len(lengths)
+            run.log({
+                "Eval/mean_episode_return": mean_ret,
+                "Eval/mean_episode_length": mean_len,
+            }, step=global_step)
+            print(f"  [eval] mean across {len(unique_pairs)} pairs:"
+                  f" return={mean_ret:.2f} length={mean_len:.1f}")
+
         rng_py = random.Random(int(config.get("swap_seed", 0)))
         global_step_offset = 0
         for chunk in range(n_chunks):
@@ -166,6 +213,21 @@ def experiment(config: DictConfig):
             # memory simultaneously.
             del agent_state, out
             agent_state = new_agent_state
+
+            # Periodic eval: run every eval_interval_steps across all pairs.
+            if eval_interval_steps > 0 and global_step_offset >= next_eval_step:
+                print(f"[eval] running eval at step {global_step_offset}"
+                      f" over {len(unique_pairs)} (expert, traj) pairs")
+                run_eval(agent_state, global_step_offset)
+                # Advance to the NEXT interval boundary past current step
+                # (skip missed intervals if a chunk was larger than the gap).
+                while next_eval_step <= global_step_offset:
+                    next_eval_step += eval_interval_steps
+
+        # Final eval after the last chunk (always, regardless of schedule).
+        if eval_interval_steps > 0:
+            print(f"[eval] final eval at step {global_step_offset}")
+            run_eval(agent_state, global_step_offset)
 
         # Save final student (with the last-used teacher baked in; swap later
         # via `.replace(teacher_params=...)` if you reload for more training).

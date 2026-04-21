@@ -24,8 +24,13 @@ algorithm.
   loaded from disk only once.
 - `conf_traj_swap.yaml` — the pair list. One entry per chunk-sample unit;
   repeat an expert across its N trajs (see "Weighting" below).
-- `eval.py` — load a saved student and play it (or `--use_teacher` to
-  sanity-check the teacher).
+- `eval.py` — load a saved student. Two modes:
+  - **metric mode (default)**: jit'd parallel rollout via
+    `VanillaDaggerJax.build_eval_fn`, prints mean episode return / length.
+    Fast, no rendering.
+  - **play mode (`--play`)**: step-by-step rendering via `play_policy`.
+    One env, records a video. `--use_teacher` swaps in the teacher for a
+    sanity check.
 
 ## Minimal usage
 
