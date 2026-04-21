@@ -1,0 +1,90 @@
+defaults:
+  - override hydra/job_logging: default
+  - override hydra/launcher: basic
+
+wandb:
+  project: "dagger-distill-traj-swap"
+
+# seed that drives which (task, teacher) pair is picked at each chunk
+swap_seed: 0
+
+# Tasks + their pretrained teachers (PPOJax_saved.pkl). Each chunk picks one
+# at random, swaps in its trajectory *and* its teacher, and keeps training.
+# Teachers must share architecture (set under experiment.teacher below).
+traj_swap:
+  dataset_type: mocap
+  tasks:
+    - task: highknee
+      teacher_ckpt: /path/to/teacher_highknee/PPOJax_saved.pkl
+    - task: squat
+      teacher_ckpt: /path/to/teacher_squat/PPOJax_saved.pkl
+    - task: stepinplace1
+      teacher_ckpt: /path/to/teacher_stepinplace1/PPOJax_saved.pkl
+
+experiment:
+  task_factory:
+    name: ImitationFactory
+    params:
+      # Bootstrap env with one of the tasks; swapping handled per chunk.
+      default_dataset_conf:
+        task: highknee
+        dataset_type: mocap
+  env_params:
+    env_name: MjxUnitreeH1
+    headless: True
+    horizon: 1000
+    goal_type: GoalTrajMimic
+    goal_params:
+      visualize_goal: true
+    control_type: ${control_config.torque_control.control_type}
+    control_params: ${control_config.torque_control.control_params}
+    reward_type: MimicReward
+    reward_params:
+      qpos_w_sum: 0.4
+      qvel_w_sum: 0.2
+      rpos_w_sum: 0.5
+      rquat_w_sum: 0.3
+      rvel_w_sum: 0.1
+      sites_for_mimic:
+        - upper_body_mimic
+        - left_hand_mimic
+        - left_foot_mimic
+        - right_hand_mimic
+        - right_foot_mimic
+
+  student:
+    hidden_layers: [256, 256]
+    activation: tanh
+    init_std: 0.1
+    learnable_std: true
+
+  teacher:
+    # Must match the architecture of every PPO checkpoint in traj_swap.tasks.
+    hidden_layers: [512, 256]
+    activation: tanh
+    init_std: 0.05
+    learnable_std: false
+
+  teacher_beta: 0.5
+  sticky_min: 5
+  sticky_max: 50
+
+  buffer_size: 2_000_000
+  batch_size: 512
+  learning_starts: 8192
+  gradient_steps: 1
+
+  lr: 3e-4
+  max_grad_norm: 0.5
+  weight_decay: 0.0
+
+  num_envs: 2048
+  total_timesteps: 60e6
+  timesteps_per_chunk: 2e6
+
+  debug: false
+
+control_config:
+  torque_control:
+    control_type: DefaultControl
+    control_params:

@@ -1,0 +1,40 @@
+experiment:
+  task_factory:
+    name: RLFactory
+    params: {}
+  env_params:
+    env_name: MjxBDSpot
+    horizon: 100
+    terminal_state_type: HeightBasedTerminalStateHandler
+    goal_type: GoalRandomRootVelocity
+    goal_params:
+        visualize_goal: true
+    headless: true
+    reward_type: LocomotionReward
+    reward_params:
+        air_time_coeff: 0.0
+        joint_acc_coeff: 2e-7
+        air_time_max: 0.5
+        joint_torque_coeff: 2e-5
+        joint_position_limit_coeff: 5.0
+        action_rate_coeff: 0.01
+        symmetry_air_coeff: 0.0
+        energy_coeff: 0.0
+    terrain_type: RoughTerrain
+    init_state_type: TrajInitialStateHandler
+  hidden_layers: [64, 64]
+  activation: tanh
+  init_std: 1.0
+  learnable_std: true
+  lr: 3e-4
+  max_grad_norm: 0.5
+  weight_decay: 0.0
+  buffer_size: 512
+  batch_size: 32
+  learning_starts: 32
+  gradient_steps: 1
+  teacher_beta: 0.5
+  sticky_min: 3
+  sticky_max: 10
+  num_envs: 4
+  total_timesteps: 200

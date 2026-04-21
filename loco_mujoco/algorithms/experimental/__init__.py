@@ -4,3 +4,4 @@ from .history_ppo_jax import HistoryPPOJax
 from .offpolicy_base import OffPolicyBase, OffPolicyCriticNet, ReplayBuffer
 from .sac_jax import SACJax
 from .td3_jax import TD3Jax
+from .vanilla_dagger_jax import VanillaDaggerJax

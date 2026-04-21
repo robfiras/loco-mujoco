@@ -39,7 +39,7 @@ from flax import struct
 from omegaconf import DictConfig
 
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase,
-                                    AgentStateBase, TrainState)
+                                    AgentStateBase, TrainState, ReplayBuffer)
 from loco_mujoco.algorithms.common.networks import (RunningMeanStd,
                                                     get_activation_fn)
 from loco_mujoco.core.wrappers import (LogWrapper, LogEnvState, VecEnv)
@@ -87,55 +87,8 @@ class OffPolicyCriticNet(nn.Module):
         return q1, q2
 
 
-# ---------------------------------------------------------------------------
-# Replay buffer
-# ---------------------------------------------------------------------------
-
-@struct.dataclass
-class ReplayBuffer:
-    obs: jnp.ndarray
-    next_obs: jnp.ndarray
-    action: jnp.ndarray
-    reward: jnp.ndarray
-    done: jnp.ndarray
-    ptr: int
-    size: int
-
-    @classmethod
-    def create(cls, obs_dim: int, action_dim: int, capacity: int):
-        return cls(
-            obs=jnp.zeros((capacity, obs_dim)),
-            next_obs=jnp.zeros((capacity, obs_dim)),
-            action=jnp.zeros((capacity, action_dim)),
-            reward=jnp.zeros((capacity,)),
-            done=jnp.zeros((capacity,), dtype=jnp.float32),
-            ptr=0,
-            size=0,
-        )
-
-    def add_batch(self, obs, next_obs, action, reward, done):
-        capacity = self.obs.shape[0]
-        batch_size = obs.shape[0]
-        indices = (self.ptr + jnp.arange(batch_size)) % capacity
-        return self.replace(
-            obs=self.obs.at[indices].set(obs),
-            next_obs=self.next_obs.at[indices].set(next_obs),
-            action=self.action.at[indices].set(action),
-            reward=self.reward.at[indices].set(reward),
-            done=self.done.at[indices].set(done.astype(jnp.float32)),
-            ptr=(self.ptr + batch_size) % capacity,
-            size=jnp.minimum(self.size + batch_size, capacity),
-        )
-
-    def sample(self, rng, batch_size: int):
-        indices = jax.random.randint(rng, (batch_size,), 0, self.size)
-        return (
-            self.obs[indices],
-            self.next_obs[indices],
-            self.action[indices],
-            self.reward[indices],
-            self.done[indices],
-        )
+# ReplayBuffer has moved to loco_mujoco.algorithms.common.dataclasses;
+# re-imported above and re-exported here for back-compat.
 
 
 # ---------------------------------------------------------------------------

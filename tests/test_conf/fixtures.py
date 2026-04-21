@@ -514,3 +514,8 @@ def sac_config():
 @pytest.fixture
 def td3_config():
     return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/td3.yaml')
+
+
+@pytest.fixture
+def vanilla_dagger_config():
+    return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/vanilla_dagger.yaml')
