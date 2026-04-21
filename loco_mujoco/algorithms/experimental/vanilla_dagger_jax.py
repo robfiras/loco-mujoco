@@ -131,10 +131,25 @@ class VanillaDaggerAgentState(AgentStateBase):
             train_state.opt_state, d["student_train_state"]["opt_state"]
         )
         train_state = train_state.replace(opt_state=opt_state)
+        # Rebuild buffer + rollout_state at the configured shape so the
+        # loaded agent has the same pytree structure as one produced by
+        # init_agent_state — avoids a recompile on the first train_fn call.
+        exp = agent_conf.config.experiment
+        replay_buffer = ReplayBuffer.create(
+            int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
+        )
+        rollout_state = DaggerRolloutState.create(
+            int(exp.num_envs), jax.random.PRNGKey(0),
+            beta=float(getattr(exp, "teacher_beta", 0.5)),
+            h_min=int(getattr(exp, "sticky_min", 5)),
+            h_max=int(getattr(exp, "sticky_max", 50)),
+        )
         return cls(
             student_train_state=train_state,
             teacher_params=d["teacher_params"],
             teacher_run_stats=d["teacher_run_stats"],
+            replay_buffer=replay_buffer,
+            rollout_state=rollout_state,
         )
 
 
@@ -245,10 +260,27 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             teacher_params = teacher_init["params"]
             teacher_run_stats = teacher_init["run_stats"]
 
+        # Eagerly build the replay buffer and rollout-mixture state here rather
+        # than lazily inside _train_fn. Keeps the agent_state pytree structure
+        # stable across chunks so the jitted train_fn doesn't recompile when
+        # the user passes a state with a populated buffer on chunk 2+.
+        rng, rng_r = jax.random.split(rng)
+        replay_buffer = ReplayBuffer.create(
+            int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
+        )
+        rollout_state = DaggerRolloutState.create(
+            int(exp.num_envs), rng_r,
+            beta=float(getattr(exp, "teacher_beta", 0.5)),
+            h_min=int(getattr(exp, "sticky_min", 5)),
+            h_max=int(getattr(exp, "sticky_max", 50)),
+        )
+
         return cls._agent_state(
             student_train_state=student_train_state,
             teacher_params=teacher_params,
             teacher_run_stats=teacher_run_stats,
+            replay_buffer=replay_buffer,
+            rollout_state=rollout_state,
         )
 
     # ------------------------------------------------------------------

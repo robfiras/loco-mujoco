@@ -500,9 +500,12 @@ def test_VanillaDagger_save_and_load_agent(vanilla_dagger_config, tmp_path):
                             loaded_state.student_train_state.run_stats)
     assert _params_allclose(agent_state.teacher_params, loaded_state.teacher_params)
     assert _params_allclose(agent_state.teacher_run_stats, loaded_state.teacher_run_stats)
-    # Replay buffer is not persisted across save/load.
-    assert loaded_state.replay_buffer is None
-    assert loaded_state.rollout_state is None
+    # Replay buffer contents are not persisted — loaded buffer is a fresh,
+    # empty buffer at the configured capacity (keeps pytree shape stable
+    # so the first train_fn call doesn't recompile).
+    assert loaded_state.replay_buffer is not None
+    assert int(loaded_state.replay_buffer.size) == 0
+    assert loaded_state.rollout_state is not None
 
 
 def test_VanillaDagger_buffer_survives_chunk_swap(vanilla_dagger_config):

@@ -5,21 +5,26 @@ defaults:
 wandb:
   project: "dagger-distill-traj-swap"
 
-# seed that drives which (task, teacher) pair is picked at each chunk
+# seed that drives which pair is picked at each chunk
 swap_seed: 0
 
-# Tasks + their pretrained teachers (PPOJax_saved.pkl). Each chunk picks one
-# at random, swaps in its trajectory *and* its teacher, and keeps training.
-# Teachers must share architecture (set under experiment.teacher below).
+# Flat list of (expert_ckpt, traj) pairs. One entry = one chunk-sample unit.
+#
+# The same expert may appear in multiple entries — that's how you express
+# "this expert handles N trajs" (one entry per traj). It also gives you free
+# weighting: list an entry more often to sample it more often.
+#
+# All experts must share the architecture declared under experiment.teacher
+# below. Experts are cached by ckpt path, so repetition costs nothing.
 traj_swap:
   dataset_type: mocap
-  tasks:
-    - task: highknee
-      teacher_ckpt: /path/to/teacher_highknee/PPOJax_saved.pkl
-    - task: squat
-      teacher_ckpt: /path/to/teacher_squat/PPOJax_saved.pkl
-    - task: stepinplace1
-      teacher_ckpt: /path/to/teacher_stepinplace1/PPOJax_saved.pkl
+  pairs:
+    # expert_walk: covers three walking styles
+    - expert_ckpt:  /home/moore/PycharmProjects/loco-mujoco/outputs/2026-04-21/16-42-08/PPOJax_saved.pkl
+      traj: squat
+    - expert_ckpt: /home/moore/PycharmProjects/loco-mujoco/outputs/2026-04-21/17-01-20/PPOJax_saved.pkl
+      traj: stepinplace1
+
 
 experiment:
   task_factory:
@@ -27,7 +32,7 @@ experiment:
     params:
       # Bootstrap env with one of the tasks; swapping handled per chunk.
       default_dataset_conf:
-        task: highknee
+        task: squat
         dataset_type: mocap
   env_params:
     env_name: MjxUnitreeH1
@@ -59,7 +64,7 @@ experiment:
     learnable_std: true
 
   teacher:
-    # Must match the architecture of every PPO checkpoint in traj_swap.tasks.
+    # Must match the architecture of every expert checkpoint listed above.
     hidden_layers: [512, 256]
     activation: tanh
     init_std: 0.05

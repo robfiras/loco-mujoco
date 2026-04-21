@@ -15,13 +15,15 @@ algorithm.
 
 - `experiment.py` — single-teacher distillation with Hydra + wandb logging.
 - `conf.yaml` — its config (override `teacher_ckpt=/path/to/PPOJax_saved.pkl`).
-- `experiment_traj_swap.py` — **headline example**: multiple (trajectory,
-  teacher) pairs. At each training chunk the script picks one at random and
-  swaps both into the agent state. The replay buffer and rollout mixture
-  state **persist across swaps**, so data collected under an earlier teacher
-  stays useful.
-- `conf_traj_swap.yaml` — list of tasks + their pretrained teacher
-  checkpoints.
+- `experiment_traj_swap.py` — **headline example**: a flat list of
+  `(expert_ckpt, traj)` pairs. At each training chunk the script picks one
+  pair at random and swaps both the expert's params and the trajectory into
+  the agent state. The replay buffer and rollout mixture state **persist
+  across swaps**, so data collected under an earlier expert stays useful.
+  Expert checkpoints are cached by path — an expert listed K times is
+  loaded from disk only once.
+- `conf_traj_swap.yaml` — the pair list. One entry per chunk-sample unit;
+  repeat an expert across its N trajs (see "Weighting" below).
 - `eval.py` — load a saved student and play it (or `--use_teacher` to
   sanity-check the teacher).
 
@@ -33,12 +35,32 @@ Train a PPO teacher first (e.g. via `../jax_rl_mimic`), then:
 python experiment.py teacher_ckpt=/abs/path/to/PPOJax_saved.pkl
 ```
 
-For the traj-swap setup, edit `conf_traj_swap.yaml` to list your (task,
-teacher_ckpt) pairs, then:
+For the traj-swap setup, edit `conf_traj_swap.yaml` to list your
+`(expert_ckpt, traj)` pairs, then:
 
 ```bash
 python experiment_traj_swap.py
 ```
+
+### Weighting via repetition
+
+If an expert is qualified on N trajs, list one entry per traj:
+
+```yaml
+pairs:
+  - expert_ckpt: /path/to/expert_walk.pkl
+    traj: walk1
+  - expert_ckpt: /path/to/expert_walk.pkl
+    traj: walk2
+  - expert_ckpt: /path/to/expert_walk.pkl
+    traj: walk3
+  - expert_ckpt: /path/to/expert_run.pkl
+    traj: run1
+```
+
+Each chunk picks uniformly from this list. Repetition is free (expert
+params are cached by path) and gives you sampling weights implicitly —
+list `walk` pairs three times and they get 3× the chunks of `run`.
 
 Play the distilled student:
 

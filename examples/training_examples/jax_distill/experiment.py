@@ -74,7 +74,10 @@ def experiment(config: DictConfig):
         )
 
         train_fn = VanillaDaggerJax.build_train_fn(env, agent_conf)
-        train_fn = jax.jit(train_fn)
+        # donate_argnums=(1,) donates `agent_state` to the output so XLA can
+        # alias the replay buffer + env_state in place — halves peak GPU
+        # memory during the call.
+        train_fn = jax.jit(train_fn, donate_argnums=(1,))
 
         global_step_offset = 0
         for chunk in range(n_chunks):
