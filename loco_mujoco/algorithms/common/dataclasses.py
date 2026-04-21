@@ -62,6 +62,58 @@ class TrainStateBuffer:
 
 
 @struct.dataclass
+class RewardNormStats:
+    """
+    Running statistics for PPO-style reward normalization. Lives on the agent
+    state so it survives env resets and is saved with the agent.
+    """
+    mean: jnp.ndarray
+    var: jnp.ndarray
+    count: jnp.ndarray
+    return_val: jnp.ndarray
+
+    @classmethod
+    def create(cls, num_envs: int):
+        return cls(
+            mean=jnp.zeros(()),
+            var=jnp.ones(()),
+            count=jnp.full((), 1e-4),
+            return_val=jnp.zeros((num_envs,)),
+        )
+
+
+def update_reward_norm(stats: "RewardNormStats", reward: jnp.ndarray,
+                       done: jnp.ndarray, gamma: float):
+    """
+    Update running stats with a batch of rewards and return the normalized
+    reward plus the new stats. Mirrors the previous NormalizeVecReward wrapper.
+    """
+    return_val = stats.return_val * gamma * (1.0 - done) + reward
+
+    batch_mean = jnp.mean(return_val, axis=0)
+    batch_var = jnp.var(return_val, axis=0)
+    batch_count = return_val.shape[0]
+
+    delta = batch_mean - stats.mean
+    tot_count = stats.count + batch_count
+
+    new_mean = stats.mean + delta * batch_count / tot_count
+    m_a = stats.var * stats.count
+    m_b = batch_var * batch_count
+    M2 = m_a + m_b + jnp.square(delta) * stats.count * batch_count / tot_count
+    new_var = M2 / tot_count
+
+    new_stats = RewardNormStats(
+        mean=new_mean,
+        var=new_var,
+        count=tot_count,
+        return_val=return_val,
+    )
+    normalized_reward = reward / jnp.sqrt(new_stats.var + 1e-8)
+    return normalized_reward, new_stats
+
+
+@struct.dataclass
 class BestTrainStates:
     train_states: TrainState
     metrics: jnp.array

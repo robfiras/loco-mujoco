@@ -18,7 +18,7 @@ from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStat
                                     TrainState, TrainStateBuffer, MetricHandlerTransition)
 from loco_mujoco.algorithms.common.networks import FullyConnectedNet, RunningMeanStd, get_activation_fn
 from loco_mujoco.algorithms.ppo_jax import PPOJax, PPOSummaryMetrics
-from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, NormalizeVecReward
+from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv
 from loco_mujoco.environments.base import TrajState
 from loco_mujoco.core.wrappers.mjx import Metrics
 from loco_mujoco.utils import MetricsHandler, ValidationSummary

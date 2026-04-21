@@ -42,8 +42,7 @@ from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase,
                                     AgentStateBase, TrainState)
 from loco_mujoco.algorithms.common.networks import (RunningMeanStd,
                                                     get_activation_fn)
-from loco_mujoco.core.wrappers import (LogWrapper, LogEnvState, VecEnv,
-                                       NormalizeVecReward)
+from loco_mujoco.core.wrappers import (LogWrapper, LogEnvState, VecEnv)
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
 
@@ -526,6 +525,6 @@ class OffPolicyBase(JaxRLAlgorithmBase):
     def _wrap_env(env, config):
         env = LogWrapper(env)
         env = VecEnv(env)
-        if getattr(config, 'normalize_env', True):
-            env = NormalizeVecReward(env, float(config.gamma))
+        # Reward normalization no longer lives on the env wrapper; off-policy
+        # algorithms would need to track stats on the agent state if desired.
         return env

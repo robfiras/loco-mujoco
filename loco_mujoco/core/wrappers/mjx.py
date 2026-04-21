@@ -225,59 +225,8 @@ class VecEnv(BaseWrapper):
         self.step = jax.vmap(self.env.step, in_axes=(0, 0, None))
 
 
-@struct.dataclass
-class NormalizeVecRewEnvState(BaseWrapperState):
-    env_state: MjxState
-    mean: jnp.ndarray
-    var: jnp.ndarray
-    count: float
-    return_val: float
-
-
-class NormalizeVecReward(BaseWrapper):
-
-    def __init__(self, env, gamma):
-        super().__init__(env)
-        self.gamma = gamma
-
-    def reset(self, key, traj=None):
-        obs, state = self.env.reset(key, traj)
-        batch_count = obs.shape[0]
-        state = NormalizeVecRewEnvState(
-            mean=0.0,
-            var=1.0,
-            count=1e-4,
-            return_val=jnp.zeros((batch_count,)),
-            env_state=state,
-        )
-        return obs, state
-
-    def step(self, state, action, traj=None):
-        next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
-
-        return_val = (state.return_val * self.gamma * (1 - done) + reward)
-
-        batch_mean = jnp.mean(return_val, axis=0)
-        batch_var = jnp.var(return_val, axis=0)
-        batch_count = next_observation.shape[0]
-
-        delta = batch_mean - state.mean
-        tot_count = state.count + batch_count
-
-        new_mean = state.mean + delta * batch_count / tot_count
-        m_a = state.var * state.count
-        m_b = batch_var * batch_count
-        M2 = m_a + m_b + jnp.square(delta) * state.count * batch_count / tot_count
-        new_var = M2 / tot_count
-        new_count = tot_count
-
-        state = NormalizeVecRewEnvState(
-            mean=new_mean,
-            var=new_var,
-            count=new_count,
-            return_val=return_val,
-            env_state=env_state,
-        )
-
-        return next_observation, reward / jnp.sqrt(state.var + 1e-8), absorbing, done, info, state
+# NormalizeVecReward has been removed. Reward normalization now lives on the
+# agent state (see loco_mujoco.algorithms.common.dataclasses.RewardNormStats)
+# and is applied inside the algorithm _train_fn, so stats survive env resets
+# and persist across save/load.
 

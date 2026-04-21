@@ -15,9 +15,10 @@ import optax
 
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStateBase,
                                     ActorCritic, FullyConnectedNet, Transition, TrainState,
-                                    TrainStateBuffer, MetricHandlerTransition)
+                                    TrainStateBuffer, MetricHandlerTransition,
+                                    RewardNormStats, update_reward_norm)
 from loco_mujoco.algorithms.common.policies import PPOPolicy
-from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, NormalizeVecReward, SummaryMetrics
+from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, SummaryMetrics
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
 from loco_mujoco.core.trajectory import TrajectoryTransitions
 
@@ -73,12 +74,16 @@ class GAILAgentConf(AgentConfBase):
 class GAILAgentState(AgentStateBase):
     train_state: TrainState
     disc_train_state: TrainState
+    reward_norm_stats: Any = None      # RewardNormStats; normalizes combined (env+disc) reward
 
     def serialize(self):
         serialized_train_state = flax.serialization.to_state_dict(self.train_state)
         serialized_discriminator = flax.serialization.to_state_dict(self.disc_train_state)
-        return {"train_state": serialized_train_state,
-                "discriminator": serialized_discriminator}
+        out = {"train_state": serialized_train_state,
+               "discriminator": serialized_discriminator}
+        if self.reward_norm_stats is not None:
+            out["reward_norm_stats"] = flax.serialization.to_state_dict(self.reward_norm_stats)
+        return out
 
     @classmethod
     def from_dict(cls, d, agent_conf):
@@ -104,7 +109,14 @@ class GAILAgentState(AgentStateBase):
         )
         disc_train_state = disc_train_state.replace(opt_state=disc_opt_state)
 
-        return cls(train_state, disc_train_state)
+        reward_norm_stats = None
+        if "reward_norm_stats" in d and d["reward_norm_stats"] is not None:
+            reward_norm_stats = flax.serialization.from_state_dict(
+                RewardNormStats.create(1), d["reward_norm_stats"]
+            )
+
+        return cls(train_state=train_state, disc_train_state=disc_train_state,
+                   reward_norm_stats=reward_norm_stats)
 
 
 class GAILJax(JaxRLAlgorithmBase):
@@ -252,13 +264,22 @@ class GAILJax(JaxRLAlgorithmBase):
         reset_rng = jax.random.split(_rng, config.num_envs)
         obsv, env_state = env.reset(reset_rng, traj)
 
+        # INIT REWARD NORM STATS — reuse across chunks when resuming
+        if config.normalize_env:
+            if agent_state is not None and agent_state.reward_norm_stats is not None:
+                rew_stats = agent_state.reward_norm_stats
+            else:
+                rew_stats = RewardNormStats.create(config.num_envs)
+        else:
+            rew_stats = None
+
         train_state_buffer = TrainStateBuffer.create(train_state, config.validation.num)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused):
-                train_state, disc_train_state, env_state, last_obs, train_state_buffer, rng = runner_state
+                train_state, disc_train_state, env_state, last_obs, rew_stats, train_state_buffer, rng = runner_state
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
@@ -266,6 +287,10 @@ class GAILJax(JaxRLAlgorithmBase):
 
                 # STEP ENV
                 obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
+
+                # NORMALIZE ENV REWARD (disc reward mixed in later, at GAE time)
+                if rew_stats is not None:
+                    reward, rew_stats = update_reward_norm(rew_stats, reward, done, config.gamma)
 
                 # GET METRICS
                 log_env_state = env_state.find(LogEnvState)
@@ -275,7 +300,7 @@ class GAILJax(JaxRLAlgorithmBase):
                     done, absorbing, action, value, reward, log_prob, last_obs, info, env_state.additional_carry.traj_state,
                     logged_metrics
                 )
-                runner_state = (train_state, disc_train_state, env_state, obsv, train_state_buffer, rng)
+                runner_state = (train_state, disc_train_state, env_state, obsv, rew_stats, train_state_buffer, rng)
                 return runner_state, transition
 
             runner_state, traj_batch = jax.lax.scan(
@@ -283,7 +308,7 @@ class GAILJax(JaxRLAlgorithmBase):
             )
 
             # CALCULATE ADVANTAGE
-            train_state, disc_train_state, env_state, last_obs, train_state_buffer, rng = runner_state
+            train_state, disc_train_state, env_state, last_obs, rew_stats, train_state_buffer, rng = runner_state
             _, last_val, _ = policy.get_dist_and_value(last_obs, train_state)
 
             def _calculate_gae(traj_batch, last_val, disc_train_state):
@@ -545,16 +570,18 @@ class GAILJax(JaxRLAlgorithmBase):
                                               lambda x, y: TrainStateBuffer.add(x, y),
                                               lambda x, y: x, train_state_buffer, train_state)
 
-            runner_state = (train_state, disc_train_state, env_state, last_obs, train_state_buffer, rng)
+            runner_state = (train_state, disc_train_state, env_state, last_obs, rew_stats, train_state_buffer, rng)
             return runner_state, (metric, validation_metrics)
 
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, disc_train_state, env_state, obsv, train_state_buffer, _rng)
+        runner_state = (train_state, disc_train_state, env_state, obsv, rew_stats, train_state_buffer, _rng)
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config.num_updates
         )
 
-        agent_state = cls._agent_state(train_state=runner_state[0], disc_train_state=runner_state[1])
+        agent_state = cls._agent_state(train_state=runner_state[0],
+                                       disc_train_state=runner_state[1],
+                                       reward_norm_stats=runner_state[4])
 
         return {"agent_state": agent_state,
                 "training_metrics": metrics[0],
@@ -697,6 +724,5 @@ class GAILJax(JaxRLAlgorithmBase):
             env = NStepWrapper(env, config.len_obs_history)
         env = LogWrapper(env)
         env = VecEnv(env)
-        if config.normalize_env:
-            env = NormalizeVecReward(env, config.gamma)
+        # reward normalization moved into _train_fn; stats live on the agent state
         return env

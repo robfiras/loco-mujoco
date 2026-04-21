@@ -13,9 +13,10 @@ import flax
 import optax
 
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStateBase, ActorCritic,
-                                    Transition, TrainState, TrainStateBuffer, MetricHandlerTransition)
+                                    Transition, TrainState, TrainStateBuffer, MetricHandlerTransition,
+                                    RewardNormStats, update_reward_norm)
 from loco_mujoco.algorithms.common.policies import PPOPolicy
-from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, NormalizeVecReward, SummaryMetrics
+from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, VecEnv, SummaryMetrics
 
 @struct.dataclass
 class PPOSummaryMetrics(SummaryMetrics):
@@ -58,12 +59,16 @@ class PPOAgentConf(AgentConfBase):
 @struct.dataclass
 class PPOAgentState(AgentStateBase):
     train_state: TrainState
-    env_state: Any = None   # carried across chunks to preserve normalization stats
-    last_obs: Any = None    # last observation from previous chunk
+    env_state: Any = None              # carried across chunks so chunk boundary is seamless
+    last_obs: Any = None               # last observation from previous chunk
+    reward_norm_stats: Any = None      # RewardNormStats; survives env_state reset and is serialized
 
     def serialize(self):
         serialized_train_state = flax.serialization.to_state_dict(self.train_state)
-        return {"train_state": serialized_train_state}  # env_state/last_obs not saved to disk
+        out = {"train_state": serialized_train_state}  # env_state/last_obs not saved to disk
+        if self.reward_norm_stats is not None:
+            out["reward_norm_stats"] = flax.serialization.to_state_dict(self.reward_norm_stats)
+        return out
 
     @classmethod
     def from_dict(cls, d, agent_conf):
@@ -77,7 +82,12 @@ class PPOAgentState(AgentStateBase):
             train_state.opt_state, d["train_state"]["opt_state"]
         )
         train_state = train_state.replace(opt_state=opt_state)
-        return cls(train_state)
+        reward_norm_stats = None
+        if "reward_norm_stats" in d and d["reward_norm_stats"] is not None:
+            reward_norm_stats = flax.serialization.from_state_dict(
+                RewardNormStats.create(1), d["reward_norm_stats"]
+            )
+        return cls(train_state=train_state, reward_norm_stats=reward_norm_stats)
 
 
 class PPOJax(JaxRLAlgorithmBase):
@@ -202,7 +212,7 @@ class PPOJax(JaxRLAlgorithmBase):
                 tx=tx,
             )
 
-        # INIT ENV — reuse carried state if available to preserve normalization stats across chunks
+        # INIT ENV — reuse carried env state if available for a seamless chunk boundary
         if agent_state is not None and agent_state.env_state is not None:
             env_state = agent_state.env_state
             obsv = agent_state.last_obs
@@ -211,13 +221,22 @@ class PPOJax(JaxRLAlgorithmBase):
             reset_rng = jax.random.split(_rng, config.num_envs)
             obsv, env_state = env.reset(reset_rng, traj)
 
+        # INIT REWARD NORM STATS — reuse across chunks so they survive env_state resets
+        if config.normalize_env:
+            if agent_state is not None and agent_state.reward_norm_stats is not None:
+                rew_stats = agent_state.reward_norm_stats
+            else:
+                rew_stats = RewardNormStats.create(config.num_envs)
+        else:
+            rew_stats = None
+
         train_state_buffer = TrainStateBuffer.create(train_state, config.validation.num)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused):
-                train_state, env_state, last_obs, train_state_buffer, rng = runner_state
+                train_state, env_state, last_obs, rew_stats, train_state_buffer, rng = runner_state
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
@@ -225,6 +244,10 @@ class PPOJax(JaxRLAlgorithmBase):
 
                 # STEP ENV
                 obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
+
+                # NORMALIZE REWARD (stats live on agent state, threaded through runner_state)
+                if rew_stats is not None:
+                    reward, rew_stats = update_reward_norm(rew_stats, reward, done, config.gamma)
 
                 # GET METRICS
                 log_env_state = env_state.find(LogEnvState)
@@ -234,7 +257,7 @@ class PPOJax(JaxRLAlgorithmBase):
                     done, absorbing, action, value, reward, log_prob, last_obs, info, env_state.additional_carry.traj_state,
                     logged_metrics
                 )
-                runner_state = (train_state, env_state, obsv, train_state_buffer, rng)
+                runner_state = (train_state, env_state, obsv, rew_stats, train_state_buffer, rng)
                 return runner_state, transition
 
             runner_state, traj_batch = jax.lax.scan(
@@ -242,7 +265,7 @@ class PPOJax(JaxRLAlgorithmBase):
             )
 
             # CALCULATE ADVANTAGE
-            train_state, env_state, last_obs, train_state_buffer, rng = runner_state
+            train_state, env_state, last_obs, rew_stats, train_state_buffer, rng = runner_state
             _, last_val, _ = policy.get_dist_and_value(last_obs, train_state)
 
             def _calculate_gae(traj_batch, last_val):
@@ -431,7 +454,7 @@ class PPOJax(JaxRLAlgorithmBase):
                     train_state = train_state.replace(run_stats=updates['run_stats'])  # update stats
                     action = pi.sample(seed=_rng)
 
-                    # STEP ENV
+                    # STEP ENV (eval uses raw reward — normalization is training-only)
                     obsv, reward, absorbing, done, info, env_state = env.step(env_state, action, traj)
 
                     # GET METRICS
@@ -480,18 +503,19 @@ class PPOJax(JaxRLAlgorithmBase):
                                               lambda x, y: TrainStateBuffer.add(x, y),
                                               lambda x, y: x, train_state_buffer, train_state)
 
-            runner_state = (train_state, env_state, last_obs, train_state_buffer, rng)
+            runner_state = (train_state, env_state, last_obs, rew_stats, train_state_buffer, rng)
             return runner_state, (metric, validation_metrics)
 
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, env_state, obsv, train_state_buffer, _rng)
+        runner_state = (train_state, env_state, obsv, rew_stats, train_state_buffer, _rng)
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config.num_updates
         )
 
         agent_state = cls._agent_state(train_state=runner_state[0],
                                        env_state=runner_state[1],
-                                       last_obs=runner_state[2])
+                                       last_obs=runner_state[2],
+                                       reward_norm_stats=runner_state[3])
 
         return {"agent_state": agent_state,
                 "training_metrics": metrics[0],
@@ -600,6 +624,5 @@ class PPOJax(JaxRLAlgorithmBase):
             env = NStepWrapper(env, config.len_obs_history)
         env = LogWrapper(env)
         env = VecEnv(env)
-        if config.normalize_env:
-            env = NormalizeVecReward(env, config.gamma)
+        # reward normalization moved into _train_fn; stats live on the agent state
         return env

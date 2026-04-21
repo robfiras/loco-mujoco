@@ -10,11 +10,12 @@ from flax.linen.initializers import constant, orthogonal
 import flax
 import distrax
 
-from loco_mujoco.algorithms import (Transition, TrainState, TrainStateBuffer, MetricHandlerTransition)
+from loco_mujoco.algorithms import (Transition, TrainState, TrainStateBuffer, MetricHandlerTransition,
+                                    RewardNormStats, update_reward_norm)
 from loco_mujoco.algorithms.common.networks import RunningMeanStd, get_activation_fn
 from loco_mujoco.algorithms.common.policies import PPOPolicy
 from loco_mujoco.algorithms.ppo_jax import PPOJax, PPOAgentConf, PPOAgentState, PPOSummaryMetrics
-from loco_mujoco.core.wrappers import LogWrapper, LogEnvState, VecEnv, NormalizeVecReward
+from loco_mujoco.core.wrappers import LogWrapper, LogEnvState, VecEnv
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
 
@@ -248,8 +249,7 @@ class HistoryPPOJax(PPOJax):
     def _wrap_env(env, config):
         env = LogWrapper(env)
         env = VecEnv(env)
-        if config.normalize_env:
-            env = NormalizeVecReward(env, config.gamma)
+        # reward normalization moved into _train_fn; stats live on the agent state
         return env
 
     # ------------------------------------------------------------------
@@ -389,6 +389,15 @@ class HistoryPPOJax(PPOJax):
             rng, _rng = jax.random.split(rng)
             raw_obsv, env_state = env.reset(jax.random.split(_rng, config.num_envs), traj)
 
+        # ---- reward normalization stats (survive across chunks) ----
+        if config.normalize_env:
+            if agent_state is not None and agent_state.reward_norm_stats is not None:
+                rew_stats = agent_state.reward_norm_stats
+            else:
+                rew_stats = RewardNormStats.create(config.num_envs)
+        else:
+            rew_stats = None
+
         ts_buf = TrainStateBuffer.create(train_state, config.validation.num)
 
         # ---- initial history carries (zeros = no prior context) ----
@@ -436,14 +445,15 @@ class HistoryPPOJax(PPOJax):
 
         # ---- main training loop ----
         def _update_step(runner_state, unused):
-            train_state, env_state, last_raw_obs, obs_carry, act_carry, ts_buf, rng = runner_state
+            (train_state, env_state, last_raw_obs, obs_carry, act_carry,
+             rew_stats, ts_buf, rng) = runner_state
 
             obs_carry_start = obs_carry   # snapshot before rollout for history reconstruction
             act_carry_start = act_carry
 
             # -- collect rollout; store raw obs_dim per step (not N*obs_dim) --
             def _env_step(carry, unused):
-                ts, es, raw_obs, obs_c, act_c, ts_b, rng = carry
+                ts, es, raw_obs, obs_c, act_c, rns, ts_b, rng = carry
 
                 hist_obs = _assemble_hist(raw_obs, obs_c, act_c)
 
@@ -451,6 +461,10 @@ class HistoryPPOJax(PPOJax):
                 action, log_prob, value, ts = policy.get_action_and_value(hist_obs, ts, _rng)
 
                 new_raw_obs, reward, absorbing, done, info, es = env.step(es, action, traj)
+
+                # NORMALIZE REWARD (stats threaded through runner_state)
+                if rns is not None:
+                    reward, rns = update_reward_norm(rns, reward, done, config.gamma)
 
                 new_obs_c = jnp.concatenate([obs_c[1:], raw_obs[None]], axis=0)
                 new_act_c = jnp.concatenate(
@@ -465,12 +479,13 @@ class HistoryPPOJax(PPOJax):
                     raw_obs,   # ← raw obs (obs_dim), not history-augmented
                     info, es.additional_carry.traj_state, log_es.metrics
                 )
-                return (ts, es, new_raw_obs, new_obs_c, new_act_c, ts_b, rng), transition
+                return (ts, es, new_raw_obs, new_obs_c, new_act_c, rns, ts_b, rng), transition
 
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config.num_steps
             )
-            train_state, env_state, last_raw_obs, obs_carry, act_carry, ts_buf, rng = runner_state
+            (train_state, env_state, last_raw_obs, obs_carry, act_carry,
+             rew_stats, ts_buf, rng) = runner_state
 
             # -- value estimate for last step --
             last_hist_obs = _assemble_hist(last_raw_obs, obs_carry, act_carry)
@@ -694,12 +709,12 @@ class HistoryPPOJax(PPOJax):
             )
 
             runner_state = (train_state, env_state, last_raw_obs,
-                            obs_carry, act_carry, ts_buf, rng)
+                            obs_carry, act_carry, rew_stats, ts_buf, rng)
             return runner_state, (metric, validation_metrics)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (train_state, env_state, raw_obsv,
-                        obs_carry_0, act_carry_0, ts_buf, _rng)
+                        obs_carry_0, act_carry_0, rew_stats, ts_buf, _rng)
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config.num_updates
         )
@@ -708,6 +723,7 @@ class HistoryPPOJax(PPOJax):
             train_state=runner_state[0],
             env_state=runner_state[1],
             last_obs=runner_state[2],
+            reward_norm_stats=runner_state[5],
         )
         return {
             "agent_state": agent_state,
