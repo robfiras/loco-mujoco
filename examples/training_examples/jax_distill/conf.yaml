@@ -45,18 +45,32 @@ experiment:
     activation: tanh
     init_std: 0.1
     learnable_std: true
+    # Optional: filter observations into different groups for actor vs critic.
+    # Leave unset (or null) to feed the full obs to both heads.
+    # actor_obs_group: policy
+    # critic_obs_group: prioritized
 
-  # Teacher network — must match the architecture of the loaded checkpoint.
+  # Teacher network — must match the architecture *and* obs filters of the
+  # loaded checkpoint. If the teacher was trained with actor_obs_group=...,
+  # set it here too (otherwise the kernel shapes will mismatch at apply time).
   teacher:
     hidden_layers: [512, 256]
     activation: tanh
     init_std: 0.05
     learnable_std: false
+    # actor_obs_group: policy
+    # critic_obs_group: prioritized
 
   # DAgger hyperparameters
   teacher_beta: 0.5       # P(act with teacher) at each fresh sample
   sticky_min: 5           # uniform [min, max] horizon for sticky mixture
   sticky_max: 50
+
+  # Critic learning — useful to warm-start PPO/GAIL from the distilled
+  # student. TD(0) self-bootstrap; set use_critic_learning=false to disable.
+  use_critic_learning: true
+  critic_loss_coef: 0.5
+  gamma: 0.99
 
   # Replay buffer
   buffer_size: 1_000_000

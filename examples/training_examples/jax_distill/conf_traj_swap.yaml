@@ -62,17 +62,32 @@ experiment:
     activation: tanh
     init_std: 0.1
     learnable_std: true
+    # Optional: filter observations into different groups for actor vs critic.
+    # Leave unset (or null) to feed the full obs to both heads.
+    # actor_obs_group: policy
+    # critic_obs_group: prioritized
 
   teacher:
-    # Must match the architecture of every expert checkpoint listed above.
+    # Must match the architecture (and obs filters) of every expert checkpoint
+    # listed above. If the teacher was trained with actor_obs_group='policy',
+    # set it here too — otherwise the first dense layer's kernel shape will
+    # mismatch the checkpoint and teacher_net.apply raises at runtime.
     hidden_layers: [512, 256]
     activation: tanh
     init_std: 0.05
     learnable_std: false
+    # actor_obs_group: policy
+    # critic_obs_group: prioritized
 
   teacher_beta: 0.5
   sticky_min: 5
   sticky_max: 50
+
+  # Critic learning — useful to warm-start PPO/GAIL from the distilled
+  # student. TD(0) self-bootstrap; set use_critic_learning=false to disable.
+  use_critic_learning: true
+  critic_loss_coef: 0.5
+  gamma: 0.99
 
   buffer_size: 2_000_000
   batch_size: 512

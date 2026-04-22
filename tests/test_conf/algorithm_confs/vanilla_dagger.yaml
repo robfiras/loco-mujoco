@@ -36,6 +36,12 @@ experiment:
   teacher_beta: 0.5
   sticky_min: 3
   sticky_max: 10
+
+  # Critic learning (TD(0) bootstrap). Useful when you plan to warm-start
+  # PPO/GAIL from the distilled student.
+  use_critic_learning: true
+  critic_loss_coef: 0.5
+  gamma: 0.99
   num_envs: 4
   total_timesteps: 200
   eval_num_envs: 4

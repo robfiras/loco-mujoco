@@ -43,7 +43,9 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
 @struct.dataclass
 class DaggerSummaryMetrics(SummaryMetrics):
-    mean_bc_loss: float = 0.0
+    mean_bc_loss: float = 0.0       # actor NLL (what gets minimised)
+    mean_mse_action: float = 0.0    # diagnostic: ||pi.mean - a_teacher||^2
+    mean_critic_loss: float = 0.0   # TD(0) MSE, 0 when critic learning is off
     buffer_size: int = 0
     frac_teacher_steps: float = 0.0
 
@@ -180,6 +182,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         Reads `config.experiment.<role>.*` if present, else falls back to
         `config.experiment.*` — so a minimal config with only shared fields
         works out of the box.
+
+        `actor_obs_ind` / `critic_obs_ind` (lists of ints) are set by
+        `init_agent_conf` after resolving `actor_obs_group` / `critic_obs_group`
+        against `env.obs_container`. They survive save/load because they
+        live on the config, so `from_dict` doesn't need env.
         """
         exp = config.experiment
         sub = getattr(exp, role, None)
@@ -193,13 +200,20 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         if not isinstance(hidden_layers, (list, ListConfig)):
             hidden_layers = ast.literal_eval(hidden_layers)
 
-        return ActorCritic(
+        kwargs = dict(
             action_dim=int(exp.action_dim),
             activation=str(field("activation", "tanh")),
             init_std=float(field("init_std", 1.0)),
             learnable_std=bool(field("learnable_std", True)),
             hidden_layer_dims=tuple(hidden_layers),
         )
+        actor_ind = field("actor_obs_ind", None)
+        critic_ind = field("critic_obs_ind", None)
+        if actor_ind is not None:
+            kwargs["actor_obs_ind"] = jnp.asarray(list(actor_ind), dtype=jnp.int32)
+        if critic_ind is not None:
+            kwargs["critic_obs_ind"] = jnp.asarray(list(critic_ind), dtype=jnp.int32)
+        return ActorCritic(**kwargs)
 
     @classmethod
     def _get_optimizer(cls, config: DictConfig):
@@ -218,11 +232,39 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
 
     @classmethod
     def init_agent_conf(cls, env, config: DictConfig):
-        from omegaconf import open_dict
+        from omegaconf import open_dict, OmegaConf
+        obs_dim = int(env.info.observation_space.shape[0])
+
+        def _resolve_group(group):
+            """Group name → list[int] observation indices, or None if no filter."""
+            if group is None:
+                return None
+            return [int(i) for i in env.obs_container.get_obs_ind_by_group(group)]
+
         with open_dict(config.experiment):
             config.experiment.num_updates = int(config.experiment.total_timesteps) // int(config.experiment.num_envs)
-            config.experiment.obs_dim = int(env.info.observation_space.shape[0])
+            config.experiment.obs_dim = obs_dim
             config.experiment.action_dim = int(env.info.action_space.shape[0])
+
+            # Optional top-level filters (fallback if a role doesn't specify its own).
+            top_actor_group = config.experiment.get("actor_obs_group", None)
+            top_critic_group = config.experiment.get("critic_obs_group", None)
+
+            # Resolve per-role obs filters against the env and bake the
+            # resulting index lists into the config. This keeps from_dict
+            # env-independent — the loaded conf rebuilds the same network.
+            for role in ("student", "teacher"):
+                if config.experiment.get(role, None) is None:
+                    config.experiment[role] = OmegaConf.create({})
+                sub = config.experiment[role]
+                actor_group = sub.get("actor_obs_group", top_actor_group)
+                critic_group = sub.get("critic_obs_group", top_critic_group)
+                actor_ind = _resolve_group(actor_group)
+                critic_ind = _resolve_group(critic_group)
+                if actor_ind is not None:
+                    sub.actor_obs_ind = actor_ind
+                if critic_ind is not None:
+                    sub.critic_obs_ind = critic_ind
 
         student_net = cls._build_net(config, role="student")
         teacher_net = cls._build_net(config, role="teacher")
@@ -330,6 +372,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         teacher_beta = float(getattr(exp, "teacher_beta", 0.5))
         sticky_min = int(getattr(exp, "sticky_min", 5))
         sticky_max = int(getattr(exp, "sticky_max", 50))
+        # Critic learning (for downstream RL warm-start). TD(0) self-bootstrap
+        # with stop_gradient on the target — no target network.
+        use_critic_learning = bool(getattr(exp, "use_critic_learning", True))
+        critic_loss_coef = float(getattr(exp, "critic_loss_coef", 0.5))
+        gamma = float(getattr(exp, "gamma", 0.99))
 
         # ENV (reuse carry if present)
         if agent_state.env_state is not None:
@@ -420,36 +467,58 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             return s_ts, buf, rollout_st, env_state, next_obs, rng
 
         # --------------------------------------------------------------
-        # BC update
+        # Update (actor BC + optional critic TD(0))
         # --------------------------------------------------------------
 
-        def _bc_loss(params, s_ts, obs_b, act_b):
-            (pi, _), updates = student_net.apply(
+        def _update_loss(params, s_ts, obs_b, next_obs_b, act_b, reward_b, done_b):
+            # Forward on obs (for actor NLL and V(s))
+            (pi, v_s), u1 = student_net.apply(
                 {"params": params, "run_stats": s_ts.run_stats}, obs_b,
                 mutable=["run_stats"],
             )
-            loss = -jnp.mean(pi.log_prob(act_b))
-            return loss, updates["run_stats"]
+            actor_loss = -jnp.mean(pi.log_prob(act_b))
+            mse_action = jnp.mean((pi.mean() - act_b) ** 2)
+
+            if use_critic_learning:
+                # Chain run_stats through to keep RunningMeanStd updating on
+                # both obs and next_obs (both are observations the student sees).
+                (_, v_s_next), u2 = student_net.apply(
+                    {"params": params, "run_stats": u1["run_stats"]}, next_obs_b,
+                    mutable=["run_stats"],
+                )
+                # TD(0) target, stop_gradient so we only backprop through v_s
+                target = reward_b + gamma * v_s_next * (1.0 - done_b)
+                target = jax.lax.stop_gradient(target)
+                critic_loss = jnp.mean((v_s - target) ** 2)
+                total_loss = actor_loss + critic_loss_coef * critic_loss
+                new_run_stats = u2["run_stats"]
+            else:
+                critic_loss = jnp.array(0.0)
+                total_loss = actor_loss
+                new_run_stats = u1["run_stats"]
+
+            return total_loss, (new_run_stats, actor_loss, critic_loss, mse_action)
 
         def _single_update(carry, _):
             s_ts, buf, rng = carry
             rng, rng_sample = jax.random.split(rng)
-            obs_b, _, act_b, _, _ = buf.sample(rng_sample, batch_size)
-            (loss, new_rs), grads = jax.value_and_grad(_bc_loss, has_aux=True)(
-                s_ts.params, s_ts, obs_b, act_b
+            obs_b, next_obs_b, act_b, reward_b, done_b = buf.sample(rng_sample, batch_size)
+            (_, aux), grads = jax.value_and_grad(_update_loss, has_aux=True)(
+                s_ts.params, s_ts, obs_b, next_obs_b, act_b, reward_b, done_b
             )
+            new_rs, actor_loss, critic_loss, mse_action = aux
             s_ts = s_ts.apply_gradients(grads=grads)
             s_ts = s_ts.replace(run_stats=new_rs)
-            return (s_ts, buf, rng), loss
+            return (s_ts, buf, rng), (actor_loss, critic_loss, mse_action)
 
         def _do_updates(s_ts, buf, rng):
-            (s_ts, _, _), losses = jax.lax.scan(
+            (s_ts, _, _), aux = jax.lax.scan(
                 _single_update, (s_ts, buf, rng), jnp.arange(gradient_steps)
             )
-            return s_ts, jnp.mean(losses)
+            return s_ts, jnp.mean(aux[0]), jnp.mean(aux[1]), jnp.mean(aux[2])
 
         def _skip_updates(s_ts, buf, rng):
-            return s_ts, jnp.array(0.0)
+            return s_ts, jnp.array(0.0), jnp.array(0.0), jnp.array(0.0)
 
         # --------------------------------------------------------------
         # Outer step
@@ -463,7 +532,7 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             )
 
             rng, rng_upd = jax.random.split(rng)
-            s_ts, bc_loss = jax.lax.cond(
+            s_ts, bc_loss, critic_loss, mse_action = jax.lax.cond(
                 buf.size >= learning_starts,
                 lambda args: _do_updates(*args),
                 lambda args: _skip_updates(*args),
@@ -482,6 +551,8 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                 ) / done_count,
                 max_timestep=jnp.max(logged.timestep * num_envs),
                 mean_bc_loss=bc_loss,
+                mean_mse_action=mse_action,
+                mean_critic_loss=critic_loss,
                 buffer_size=buf.size,
                 frac_teacher_steps=jnp.mean(rollout_st.using_teacher.astype(jnp.float32)),
             )
