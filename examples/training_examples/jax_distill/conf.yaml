@@ -83,6 +83,10 @@ experiment:
   # Long-term reservoir memory — uniform sample of all transitions ever
   # seen. Training batches split 50/50 between short and long. 0 disables.
   long_term_buffer_size: 1_000_000
+  # Floor on reservoir inclusion probability. 0.0 = pure reservoir over
+  # all history. A positive value caps effective history horizon at
+  # capacity / p_min — useful when the rollout distribution drifts.
+  long_term_min_include_prob: 0.0
   batch_size: 512
   learning_starts: 4096
   gradient_steps: 1

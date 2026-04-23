@@ -598,6 +598,32 @@ def test_VanillaDagger_long_term_reservoir_fills(vanilla_dagger_config):
     assert jnp.any(long_buf.obs != 0.0)
 
 
+def test_VanillaDagger_long_term_min_include_prob(vanilla_dagger_config):
+    """A positive min_include_prob floors the reservoir's inclusion rate.
+    Verify it's propagated as static metadata and training runs cleanly."""
+    config = OmegaConf.create(OmegaConf.to_container(vanilla_dagger_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.long_term_min_include_prob = 0.5
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = VanillaDaggerJax.init_agent_state(env, agent_conf, rng)
+    # Flag survives as static metadata on the reservoir
+    assert agent_state.long_term_buffer.min_include_prob == 0.5
+
+    train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
+    out = train_fn(rng, agent_state, traj)
+    long_buf = out["agent_state"].long_term_buffer
+    # Same flag on the output (static didn't get dropped)
+    assert long_buf.min_include_prob == 0.5
+    # Training collected transitions into the reservoir (fill phase OK).
+    assert int(long_buf.total_seen) > 0
+    assert jnp.any(long_buf.obs != 0.0)
+
+
 def test_VanillaDagger_long_term_disabled(vanilla_dagger_config):
     """`long_term_buffer_size: 0` disables the reservoir — no long sampling
     branch at trace, long buffer stays zero-sized."""

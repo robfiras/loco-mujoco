@@ -104,6 +104,16 @@ experiment:
   # ever collected. Mitigates forgetting across expert/traj swaps.
   # Training batches are split 50/50 between the two. Set to 0 to disable.
   long_term_buffer_size: 1_000_000
+  # Optional floor on the reservoir's inclusion probability. Pure reservoir
+  # (0.0) samples uniformly over ALL history — correct for stationary
+  # streams. In DAgger the rollout state distribution drifts as the
+  # student learns, so older data is less informative. Setting a floor
+  # caps the effective history horizon at capacity / p_min transitions.
+  # Examples (capacity = 1M):
+  #   0.0   : pure reservoir, all history
+  #   0.01  : ~100M-step window
+  #   0.02  : ~50M-step window (more aggressive recency)
+  long_term_min_include_prob: 0.0
   batch_size: 512
   learning_starts: 8192
   gradient_steps: 1

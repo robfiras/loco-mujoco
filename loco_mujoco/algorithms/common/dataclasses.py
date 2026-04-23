@@ -208,6 +208,14 @@ class ReservoirBuffer:
     Columns mirror `ReplayBuffer` (obs / action / value_target). No
     `next_obs` or `reward` / `done` — this is intended as a
     long-term BC + value-distillation store, not a TD buffer.
+
+    `min_include_prob` optionally floors the per-item inclusion rate. The
+    pure reservoir's rate decays as k/n indefinitely, which is correct
+    for stationary streams but wastes signal when the data distribution
+    drifts (e.g. DAgger rollouts shift as the student learns). Setting
+    `min_include_prob > 0` caps the effective n at `ceil(k / p_min)`, so
+    the buffer behaves like a uniform sample over the last `k / p_min`
+    transitions once that window has filled. Default 0.0 = pure reservoir.
     """
     obs: jnp.ndarray
     action: jnp.ndarray
@@ -215,10 +223,12 @@ class ReservoirBuffer:
     total_seen: jnp.ndarray       # scalar int32, counts all transitions ever added
     size: jnp.ndarray             # scalar int32, min(total_seen, capacity)
     store_value_target: bool = struct.field(pytree_node=False, default=False)
+    min_include_prob: float = struct.field(pytree_node=False, default=0.0)
 
     @classmethod
     def create(cls, obs_dim: int, action_dim: int, capacity: int,
-               store_value_target: bool = False):
+               store_value_target: bool = False,
+               min_include_prob: float = 0.0):
         value_shape = (capacity,) if store_value_target else (0,)
         return cls(
             obs=jnp.zeros((capacity, obs_dim)),
@@ -227,24 +237,34 @@ class ReservoirBuffer:
             total_seen=jnp.zeros((), dtype=jnp.int32),
             size=jnp.zeros((), dtype=jnp.int32),
             store_value_target=store_value_target,
+            min_include_prob=float(min_include_prob),
         )
 
     def add_batch(self, obs, action, value_target, rng):
         """Reservoir-insert a batch. Vectorised: for each element i with
-        global index g_i = total_seen + i, draw j_i ~ uniform_int[0, g_i+1].
+        global index g_i = total_seen + i, draw j_i ~ uniform_int[0, n_eff_i)
+        where `n_eff_i = min(g_i+1, ceil(capacity / min_include_prob))`.
         Write at slot g_i if we're still in the fill phase, else write at
         j_i when j_i < capacity. Collisions between two include=True
         elements writing to the same slot are resolved by whichever wins
-        the scatter — that's a tiny bias but costs nothing.
+        the scatter — a tiny bias but costs nothing.
         """
+        import math
         capacity = self.obs.shape[0]
         B = obs.shape[0]
         batch_idx = self.total_seen + jnp.arange(B, dtype=jnp.int32)
 
-        # j_i ∈ [0, batch_idx[i] + 1). Use float scaling so we don't need
-        # per-element randint (which can't take a vector maxval).
+        # Effective denominator for the reservoir decision. A positive
+        # min_include_prob caps it at ceil(k/p_min), flooring the
+        # inclusion probability at p_min. Python-level branch — static.
+        if self.min_include_prob > 0.0:
+            cap_n = int(math.ceil(capacity / self.min_include_prob))
+            n_eff = jnp.minimum(batch_idx + 1, jnp.int32(cap_n))
+        else:
+            n_eff = batch_idx + 1
+
         u = jax.random.uniform(rng, (B,))
-        j = jnp.floor(u * (batch_idx + 1).astype(jnp.float32)).astype(jnp.int32)
+        j = jnp.floor(u * n_eff.astype(jnp.float32)).astype(jnp.int32)
 
         fill = batch_idx < capacity
         include = fill | (j < capacity)

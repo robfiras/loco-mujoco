@@ -75,6 +75,19 @@ def _resolve_long_term_buffer_size(exp) -> int:
     return 1_000_000
 
 
+def _resolve_long_term_min_include_prob(exp) -> float:
+    """Floor on the reservoir's per-item inclusion probability. 0 keeps
+    pure reservoir semantics (uniform over all history). A positive value
+    caps the effective denominator so the buffer approximates a uniform
+    sample over the last `capacity / p_min` transitions — useful in
+    non-stationary settings like DAgger where the rollout state
+    distribution drifts as the student learns. Default 0.0.
+    """
+    if hasattr(exp, "long_term_min_include_prob") and exp.get("long_term_min_include_prob") is not None:
+        return float(exp.long_term_min_include_prob)
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Metrics + rollout state
 # ---------------------------------------------------------------------------
@@ -193,6 +206,7 @@ class VanillaDaggerAgentState(AgentStateBase):
             int(exp.obs_dim), int(exp.action_dim),
             _resolve_long_term_buffer_size(exp),
             store_value_target=_resolve_store_value_target(exp),
+            min_include_prob=_resolve_long_term_min_include_prob(exp),
         )
         rollout_state = DaggerRolloutState.create(
             int(exp.num_envs), jax.random.PRNGKey(0),
@@ -371,6 +385,7 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             int(exp.obs_dim), int(exp.action_dim),
             _resolve_long_term_buffer_size(exp),
             store_value_target=_resolve_store_value_target(exp),
+            min_include_prob=_resolve_long_term_min_include_prob(exp),
         )
         rollout_state = DaggerRolloutState.create(
             int(exp.num_envs), rng_r,
@@ -467,6 +482,7 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             long_buf = ReservoirBuffer.create(
                 int(exp.obs_dim), int(exp.action_dim), long_capacity,
                 store_value_target=_resolve_store_value_target(exp),
+                min_include_prob=_resolve_long_term_min_include_prob(exp),
             )
 
         if use_critic_learning and not buf.store_value_target:
