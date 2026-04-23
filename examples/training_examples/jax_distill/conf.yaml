@@ -78,8 +78,11 @@ experiment:
   # store_next_obs: false
   # store_value_target: true
 
-  # Replay buffer
+  # Short-term rolling buffer (FIFO).
   buffer_size: 1_000_000
+  # Long-term reservoir memory — uniform sample of all transitions ever
+  # seen. Training batches split 50/50 between short and long. 0 disables.
+  long_term_buffer_size: 1_000_000
   batch_size: 512
   learning_starts: 4096
   gradient_steps: 1

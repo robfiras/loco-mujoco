@@ -98,7 +98,12 @@ experiment:
   # store_next_obs: false
   # store_value_target: true
 
-  buffer_size: 2_000_000
+  # Short-term rolling buffer (FIFO). Recent transitions dominate.
+  buffer_size: 1_000_000
+  # Long-term reservoir buffer — approx. uniform sample of all transitions
+  # ever collected. Mitigates forgetting across expert/traj swaps.
+  # Training batches are split 50/50 between the two. Set to 0 to disable.
+  long_term_buffer_size: 1_000_000
   batch_size: 512
   learning_starts: 8192
   gradient_steps: 1

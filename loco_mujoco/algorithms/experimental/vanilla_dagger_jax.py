@@ -33,6 +33,7 @@ from omegaconf import DictConfig, OmegaConf, ListConfig
 from loco_mujoco.algorithms import (JaxRLAlgorithmBase, AgentConfBase, AgentStateBase,
                                     ActorCritic, TrainState, ReplayBuffer,
                                     MetricHandlerTransition)
+from loco_mujoco.algorithms.common.dataclasses import ReservoirBuffer
 from loco_mujoco.core.wrappers import LogWrapper, LogEnvState, VecEnv, SummaryMetrics
 from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
@@ -64,6 +65,14 @@ def _resolve_store_value_target(exp) -> bool:
     if hasattr(exp, "store_value_target") and exp.get("store_value_target") is not None:
         return bool(exp.store_value_target)
     return bool(getattr(exp, "use_critic_learning", True))
+
+
+def _resolve_long_term_buffer_size(exp) -> int:
+    """Capacity of the reservoir-sampled long-term memory. 0 disables it.
+    Defaults to 1_000_000."""
+    if hasattr(exp, "long_term_buffer_size") and exp.get("long_term_buffer_size") is not None:
+        return int(exp.long_term_buffer_size)
+    return 1_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +143,20 @@ class VanillaDaggerAgentConf(AgentConfBase):
 class VanillaDaggerAgentState(AgentStateBase):
     """Dynamic agent state. All three swappable entities live here:
     `student_train_state`, `teacher_params`/`teacher_run_stats`, and the
-    trajectory (passed separately to `_train_fn`)."""
+    trajectory (passed separately to `_train_fn`).
+
+    The buffer is actually two: `replay_buffer` is a short-term rolling
+    window (most recent transitions), `long_term_buffer` is a
+    reservoir-sampled long-term memory (approx. uniform over all
+    transitions ever collected). At training time we sample 50/50 from
+    each to mitigate forgetting across expert/trajectory swaps.
+    """
     student_train_state: TrainState
     teacher_params: Any
     teacher_run_stats: Any
-    replay_buffer: Any = None      # ReplayBuffer; lazily initialised in _train_fn
-    rollout_state: Any = None      # DaggerRolloutState; lazily initialised
+    replay_buffer: Any = None          # ReplayBuffer; lazily initialised in _train_fn
+    long_term_buffer: Any = None       # ReservoirBuffer; lazily initialised
+    rollout_state: Any = None          # DaggerRolloutState; lazily initialised
     env_state: Any = None
     last_obs: Any = None
 
@@ -163,13 +180,18 @@ class VanillaDaggerAgentState(AgentStateBase):
             train_state.opt_state, d["student_train_state"]["opt_state"]
         )
         train_state = train_state.replace(opt_state=opt_state)
-        # Rebuild buffer + rollout_state at the configured shape so the
+        # Rebuild buffers + rollout_state at the configured shape so the
         # loaded agent has the same pytree structure as one produced by
         # init_agent_state — avoids a recompile on the first train_fn call.
         exp = agent_conf.config.experiment
         replay_buffer = ReplayBuffer.create(
             int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size),
             store_next_obs=_resolve_store_next_obs(exp),
+            store_value_target=_resolve_store_value_target(exp),
+        )
+        long_term_buffer = ReservoirBuffer.create(
+            int(exp.obs_dim), int(exp.action_dim),
+            _resolve_long_term_buffer_size(exp),
             store_value_target=_resolve_store_value_target(exp),
         )
         rollout_state = DaggerRolloutState.create(
@@ -183,6 +205,7 @@ class VanillaDaggerAgentState(AgentStateBase):
             teacher_params=d["teacher_params"],
             teacher_run_stats=d["teacher_run_stats"],
             replay_buffer=replay_buffer,
+            long_term_buffer=long_term_buffer,
             rollout_state=rollout_state,
         )
 
@@ -344,6 +367,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             store_next_obs=_resolve_store_next_obs(exp),
             store_value_target=_resolve_store_value_target(exp),
         )
+        long_term_buffer = ReservoirBuffer.create(
+            int(exp.obs_dim), int(exp.action_dim),
+            _resolve_long_term_buffer_size(exp),
+            store_value_target=_resolve_store_value_target(exp),
+        )
         rollout_state = DaggerRolloutState.create(
             int(exp.num_envs), rng_r,
             beta=float(getattr(exp, "teacher_beta", 0.5)),
@@ -356,6 +384,7 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             teacher_params=teacher_params,
             teacher_run_stats=teacher_run_stats,
             replay_buffer=replay_buffer,
+            long_term_buffer=long_term_buffer,
             rollout_state=rollout_state,
         )
 
@@ -419,14 +448,26 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             rng, _rng = jax.random.split(rng)
             last_obs, env_state = env.reset(jax.random.split(_rng, num_envs), traj)
 
-        # REPLAY BUFFER (preserve across chunks by default — this is the whole
-        # point: data gathered under old teacher/traj stays useful after swap).
+        # SHORT-TERM REPLAY BUFFER (rolling FIFO, preserve across chunks —
+        # data from old (expert, traj) stays fresh after each swap).
         if agent_state.replay_buffer is not None:
             buf = agent_state.replay_buffer
         else:
             buf = ReplayBuffer.create(int(exp.obs_dim), int(exp.action_dim),
                                       int(exp.buffer_size),
-                                      store_next_obs=_resolve_store_next_obs(exp))
+                                      store_next_obs=_resolve_store_next_obs(exp),
+                                      store_value_target=_resolve_store_value_target(exp))
+
+        # LONG-TERM MEMORY (reservoir-sampled). Size 0 disables it.
+        long_capacity = _resolve_long_term_buffer_size(exp)
+        has_long_term = long_capacity > 0
+        if agent_state.long_term_buffer is not None:
+            long_buf = agent_state.long_term_buffer
+        else:
+            long_buf = ReservoirBuffer.create(
+                int(exp.obs_dim), int(exp.action_dim), long_capacity,
+                store_value_target=_resolve_store_value_target(exp),
+            )
 
         if use_critic_learning and not buf.store_value_target:
             raise ValueError(
@@ -434,6 +475,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                 "store_value_target=True (V_teacher is the critic target). "
                 "Either leave store_value_target unset (auto-ties to "
                 "use_critic_learning) or set use_critic_learning=false."
+            )
+        if has_long_term and use_critic_learning and not long_buf.store_value_target:
+            raise ValueError(
+                "use_critic_learning=True also requires the long-term "
+                "reservoir to store value_target."
             )
 
         # ROLLOUT MIXTURE STATE
@@ -481,7 +527,8 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                 steps_remaining=jnp.where(expired, new_remaining, rollout_st.steps_remaining),
             )
 
-        def _collect_transition(s_ts, buf, rollout_st, env_state, last_obs, rng):
+        def _collect_transition(s_ts, buf, long_buf, rollout_st,
+                                env_state, last_obs, rng):
             # Compute student + teacher actions in parallel (and teacher value
             # to use as the critic-distillation target).
             rng, rng_s = jax.random.split(rng)
@@ -503,6 +550,10 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             buf = buf.add_batch(last_obs, next_obs, a_teacher, reward,
                                 done.astype(jnp.float32),
                                 value_target=value_target)
+            if has_long_term:
+                rng, rng_long = jax.random.split(rng)
+                long_value = v_teacher if long_buf.store_value_target else None
+                long_buf = long_buf.add_batch(last_obs, a_teacher, long_value, rng_long)
 
             # Sticky countdown + resample expired slots
             rollout_st = rollout_st.replace(
@@ -511,7 +562,7 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             rng, rng_r = jax.random.split(rng)
             rollout_st = _resample_expired(rollout_st, rng_r)
 
-            return s_ts, buf, rollout_st, env_state, next_obs, rng
+            return s_ts, buf, long_buf, rollout_st, env_state, next_obs, rng
 
         # --------------------------------------------------------------
         # Update (actor BC + optional critic distillation)
@@ -535,18 +586,45 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
 
             return total_loss, (updates["run_stats"], actor_loss, critic_loss, mse_action)
 
+        # Half-split batch between short-term and long-term memory (when the
+        # long-term reservoir is active). If not active, we sample the full
+        # batch from short-term. `half` is static at trace time.
+        if has_long_term:
+            half = batch_size // 2
+            short_half = batch_size - half
+        else:
+            half = 0
+            short_half = batch_size
+
         def _single_update(carry, _):
-            s_ts, buf, rng = carry
-            rng, rng_sample = jax.random.split(rng)
-            # Sample indices manually so we can pull `value_target` using the
-            # same indices — buf.sample doesn't know about value_target.
-            indices = jax.random.randint(rng_sample, (batch_size,), 0, buf.size)
-            obs_b = buf.obs[indices]
-            act_b = buf.action[indices]
+            s_ts, buf, long_buf, rng = carry
+            rng, rng_short, rng_long = jax.random.split(rng, 3)
+
+            # Short-term sample
+            short_idx = jax.random.randint(rng_short, (short_half,), 0, buf.size)
+            obs_short = buf.obs[short_idx]
+            act_short = buf.action[short_idx]
             if use_critic_learning:
-                value_target_b = buf.value_target[indices]
+                vt_short = buf.value_target[short_idx]
             else:
-                value_target_b = jnp.zeros((batch_size,), dtype=buf.obs.dtype)
+                vt_short = jnp.zeros((short_half,), dtype=buf.obs.dtype)
+
+            # Long-term sample (only if the reservoir is active and has data)
+            if has_long_term:
+                long_idx = jax.random.randint(rng_long, (half,), 0,
+                                              jnp.maximum(1, long_buf.size))
+                obs_long = long_buf.obs[long_idx]
+                act_long = long_buf.action[long_idx]
+                if use_critic_learning:
+                    vt_long = long_buf.value_target[long_idx]
+                else:
+                    vt_long = jnp.zeros((half,), dtype=long_buf.obs.dtype)
+
+                obs_b = jnp.concatenate([obs_short, obs_long], axis=0)
+                act_b = jnp.concatenate([act_short, act_long], axis=0)
+                value_target_b = jnp.concatenate([vt_short, vt_long], axis=0)
+            else:
+                obs_b, act_b, value_target_b = obs_short, act_short, vt_short
 
             (_, aux), grads = jax.value_and_grad(_update_loss, has_aux=True)(
                 s_ts.params, s_ts, obs_b, act_b, value_target_b
@@ -554,15 +632,16 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             new_rs, actor_loss, critic_loss, mse_action = aux
             s_ts = s_ts.apply_gradients(grads=grads)
             s_ts = s_ts.replace(run_stats=new_rs)
-            return (s_ts, buf, rng), (actor_loss, critic_loss, mse_action)
+            return (s_ts, buf, long_buf, rng), (actor_loss, critic_loss, mse_action)
 
-        def _do_updates(s_ts, buf, rng):
-            (s_ts, _, _), aux = jax.lax.scan(
-                _single_update, (s_ts, buf, rng), jnp.arange(gradient_steps)
+        def _do_updates(s_ts, buf, long_buf, rng):
+            (s_ts, _, _, _), aux = jax.lax.scan(
+                _single_update, (s_ts, buf, long_buf, rng),
+                jnp.arange(gradient_steps)
             )
             return s_ts, jnp.mean(aux[0]), jnp.mean(aux[1]), jnp.mean(aux[2])
 
-        def _skip_updates(s_ts, buf, rng):
+        def _skip_updates(s_ts, buf, long_buf, rng):
             return s_ts, jnp.array(0.0), jnp.array(0.0), jnp.array(0.0)
 
         # --------------------------------------------------------------
@@ -570,18 +649,26 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         # --------------------------------------------------------------
 
         def _update_step(runner_state, unused):
-            s_ts, buf, rollout_st, env_state, last_obs, rng = runner_state
+            s_ts, buf, long_buf, rollout_st, env_state, last_obs, rng = runner_state
 
-            s_ts, buf, rollout_st, env_state, next_obs, rng = _collect_transition(
-                s_ts, buf, rollout_st, env_state, last_obs, rng
+            s_ts, buf, long_buf, rollout_st, env_state, next_obs, rng = _collect_transition(
+                s_ts, buf, long_buf, rollout_st, env_state, last_obs, rng
             )
 
             rng, rng_upd = jax.random.split(rng)
+            # Start updates once both buffers have enough data (long_buf.size
+            # ramps up from 0 via reservoir fill). When long-term is off,
+            # long_buf.size stays 0 but has_long_term=False short-circuits the
+            # condition below.
+            if has_long_term:
+                ready = (buf.size >= learning_starts) & (long_buf.size >= learning_starts)
+            else:
+                ready = buf.size >= learning_starts
             s_ts, bc_loss, critic_loss, mse_action = jax.lax.cond(
-                buf.size >= learning_starts,
+                ready,
                 lambda args: _do_updates(*args),
                 lambda args: _skip_updates(*args),
-                (s_ts, buf, rng_upd),
+                (s_ts, buf, long_buf, rng_upd),
             )
 
             # Metrics
@@ -602,21 +689,22 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                 frac_teacher_steps=jnp.mean(rollout_st.using_teacher.astype(jnp.float32)),
             )
 
-            runner_state = (s_ts, buf, rollout_st, env_state, next_obs, rng)
+            runner_state = (s_ts, buf, long_buf, rollout_st, env_state, next_obs, rng)
             return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
-        runner_state = (student_ts, buf, rollout_st, env_state, last_obs, _rng)
+        runner_state = (student_ts, buf, long_buf, rollout_st, env_state, last_obs, _rng)
         runner_state, training_metrics = jax.lax.scan(
             _update_step, runner_state, None, int(exp.num_updates)
         )
-        student_ts, buf, rollout_st, env_state, last_obs, _ = runner_state
+        student_ts, buf, long_buf, rollout_st, env_state, last_obs, _ = runner_state
 
         agent_state_out = cls._agent_state(
             student_train_state=student_ts,
             teacher_params=teacher_params,
             teacher_run_stats=teacher_run_stats,
             replay_buffer=buf,
+            long_term_buffer=long_buf,
             rollout_state=rollout_st,
             env_state=env_state,
             last_obs=last_obs,

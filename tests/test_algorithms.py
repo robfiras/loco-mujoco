@@ -510,7 +510,7 @@ def test_VanillaDagger_save_and_load_agent(vanilla_dagger_config, tmp_path):
 
 def test_VanillaDagger_bc_only_minimal_buffer(vanilla_dagger_config):
     """With critic learning disabled, both `next_obs` and `value_target`
-    should be zero-sized in the buffer (minimal memory footprint)."""
+    should be zero-sized in the short-term and long-term buffers."""
     config = OmegaConf.create(OmegaConf.to_container(vanilla_dagger_config, resolve=True))
     with open_dict(config.experiment):
         config.experiment.use_critic_learning = False
@@ -528,6 +528,10 @@ def test_VanillaDagger_bc_only_minimal_buffer(vanilla_dagger_config):
     assert buf.store_value_target is False
     assert buf.value_target.shape == (0,)
 
+    long_buf = agent_state.long_term_buffer
+    assert long_buf.store_value_target is False
+    assert long_buf.value_target.shape == (0,)
+
     train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
     out = train_fn(rng, agent_state, traj)
     new_buf = out["agent_state"].replay_buffer
@@ -538,8 +542,8 @@ def test_VanillaDagger_bc_only_minimal_buffer(vanilla_dagger_config):
 
 
 def test_VanillaDagger_critic_distill_allocates_value_target(vanilla_dagger_config):
-    """With critic learning enabled (default), the buffer allocates a
-    value_target column and drops next_obs (distillation doesn't need it)."""
+    """With critic learning enabled (default), the short-term and long-term
+    buffers both allocate a value_target column and drop next_obs."""
     config = vanilla_dagger_config
 
     factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
@@ -552,17 +556,67 @@ def test_VanillaDagger_critic_distill_allocates_value_target(vanilla_dagger_conf
     buf = agent_state.replay_buffer
     assert buf.store_value_target is True
     assert buf.value_target.shape == (int(config.experiment.buffer_size),)
-    # DAgger with distillation doesn't need next_obs
     assert buf.store_next_obs is False
     assert buf.next_obs.shape == (0, 0)
+
+    long_buf = agent_state.long_term_buffer
+    assert long_buf.store_value_target is True
+    assert long_buf.value_target.shape == (int(config.experiment.long_term_buffer_size),)
 
     train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
     out = train_fn(rng, agent_state, traj)
     new_buf = out["agent_state"].replay_buffer
     assert int(new_buf.size) > 0
-    # At least some value_target entries should be nonzero after collection
-    # (teacher's critic output is generally non-zero for random init teacher).
     assert jnp.any(new_buf.value_target != 0.0)
+
+
+def test_VanillaDagger_long_term_reservoir_fills(vanilla_dagger_config):
+    """The long-term reservoir should accumulate transitions across training
+    and its `total_seen` counter should match the number of env steps."""
+    config = vanilla_dagger_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = VanillaDaggerJax.init_agent_state(env, agent_conf, rng)
+
+    # Baseline: empty reservoir
+    assert int(agent_state.long_term_buffer.total_seen) == 0
+    assert int(agent_state.long_term_buffer.size) == 0
+
+    train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
+    out = train_fn(rng, agent_state, traj)
+
+    exp = config.experiment
+    expected_transitions = int(exp.num_updates) * int(exp.num_envs)
+    long_buf = out["agent_state"].long_term_buffer
+    assert int(long_buf.total_seen) == expected_transitions
+    # Size caps at capacity
+    assert int(long_buf.size) == min(expected_transitions, int(exp.long_term_buffer_size))
+    assert jnp.any(long_buf.obs != 0.0)
+
+
+def test_VanillaDagger_long_term_disabled(vanilla_dagger_config):
+    """`long_term_buffer_size: 0` disables the reservoir — no long sampling
+    branch at trace, long buffer stays zero-sized."""
+    config = OmegaConf.create(OmegaConf.to_container(vanilla_dagger_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.long_term_buffer_size = 0
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = VanillaDaggerJax.init_agent_state(env, agent_conf, rng)
+    assert agent_state.long_term_buffer.obs.shape == (0, int(agent_conf.config.experiment.obs_dim))
+
+    train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
+    out = train_fn(rng, agent_state, traj)
+    assert int(out["agent_state"].replay_buffer.size) > 0
+    assert int(out["agent_state"].long_term_buffer.size) == 0
 
 
 def test_VanillaDagger_eval_fn(vanilla_dagger_config):

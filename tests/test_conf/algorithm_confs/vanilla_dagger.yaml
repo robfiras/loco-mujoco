@@ -40,6 +40,9 @@ experiment:
   # Critic learning via teacher-value distillation.
   use_critic_learning: true
   critic_loss_coef: 0.5
+
+  # Long-term reservoir memory (capacity 0 disables).
+  long_term_buffer_size: 512
   num_envs: 4
   total_timesteps: 200
   eval_num_envs: 4

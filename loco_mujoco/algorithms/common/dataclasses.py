@@ -196,6 +196,100 @@ class ReplayBuffer:
 
 
 @struct.dataclass
+class ReservoirBuffer:
+    """Reservoir-sampled long-term memory.
+
+    Approximates a uniform sample of all transitions ever passed through
+    `add_batch`. Capacity stays fixed; early additions fill sequentially,
+    later additions probabilistically replace random slots. At steady
+    state each global transition has probability `capacity / total_seen`
+    of being in the buffer.
+
+    Columns mirror `ReplayBuffer` (obs / action / value_target). No
+    `next_obs` or `reward` / `done` — this is intended as a
+    long-term BC + value-distillation store, not a TD buffer.
+    """
+    obs: jnp.ndarray
+    action: jnp.ndarray
+    value_target: jnp.ndarray
+    total_seen: jnp.ndarray       # scalar int32, counts all transitions ever added
+    size: jnp.ndarray             # scalar int32, min(total_seen, capacity)
+    store_value_target: bool = struct.field(pytree_node=False, default=False)
+
+    @classmethod
+    def create(cls, obs_dim: int, action_dim: int, capacity: int,
+               store_value_target: bool = False):
+        value_shape = (capacity,) if store_value_target else (0,)
+        return cls(
+            obs=jnp.zeros((capacity, obs_dim)),
+            action=jnp.zeros((capacity, action_dim)),
+            value_target=jnp.zeros(value_shape),
+            total_seen=jnp.zeros((), dtype=jnp.int32),
+            size=jnp.zeros((), dtype=jnp.int32),
+            store_value_target=store_value_target,
+        )
+
+    def add_batch(self, obs, action, value_target, rng):
+        """Reservoir-insert a batch. Vectorised: for each element i with
+        global index g_i = total_seen + i, draw j_i ~ uniform_int[0, g_i+1].
+        Write at slot g_i if we're still in the fill phase, else write at
+        j_i when j_i < capacity. Collisions between two include=True
+        elements writing to the same slot are resolved by whichever wins
+        the scatter — that's a tiny bias but costs nothing.
+        """
+        capacity = self.obs.shape[0]
+        B = obs.shape[0]
+        batch_idx = self.total_seen + jnp.arange(B, dtype=jnp.int32)
+
+        # j_i ∈ [0, batch_idx[i] + 1). Use float scaling so we don't need
+        # per-element randint (which can't take a vector maxval).
+        u = jax.random.uniform(rng, (B,))
+        j = jnp.floor(u * (batch_idx + 1).astype(jnp.float32)).astype(jnp.int32)
+
+        fill = batch_idx < capacity
+        include = fill | (j < capacity)
+        slot = jnp.where(fill, batch_idx, j)
+        slot = jnp.clip(slot, 0, capacity - 1)
+
+        # Masked scatter: for non-include entries, write back the current
+        # slot contents (no-op). Collisions between include=True entries
+        # are rare for capacity >> batch_size.
+        fresh_obs = jnp.where(include[:, None], obs, self.obs[slot])
+        fresh_action = jnp.where(include[:, None], action, self.action[slot])
+        new_obs = self.obs.at[slot].set(fresh_obs)
+        new_action = self.action.at[slot].set(fresh_action)
+
+        if self.store_value_target:
+            assert value_target is not None, (
+                "reservoir was created with store_value_target=True but "
+                "add_batch received value_target=None"
+            )
+            fresh_vt = jnp.where(include, value_target, self.value_target[slot])
+            new_vt = self.value_target.at[slot].set(fresh_vt)
+        else:
+            new_vt = self.value_target
+
+        new_total = self.total_seen + B
+        new_size = jnp.minimum(jnp.int32(capacity), new_total)
+        return self.replace(
+            obs=new_obs,
+            action=new_action,
+            value_target=new_vt,
+            total_seen=new_total,
+            size=new_size,
+        )
+
+    def sample(self, rng, batch_size: int):
+        indices = jax.random.randint(rng, (batch_size,), 0, jnp.maximum(1, self.size))
+        return (
+            self.obs[indices],
+            self.action[indices],
+            (self.value_target[indices] if self.store_value_target
+             else jnp.zeros((batch_size,), dtype=self.obs.dtype)),
+        )
+
+
+@struct.dataclass
 class BestTrainStates:
     train_states: TrainState
     metrics: jnp.array
