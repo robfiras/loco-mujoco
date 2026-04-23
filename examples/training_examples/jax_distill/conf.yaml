@@ -66,11 +66,17 @@ experiment:
   sticky_min: 5           # uniform [min, max] horizon for sticky mixture
   sticky_max: 50
 
-  # Critic learning — useful to warm-start PPO/GAIL from the distilled
-  # student. TD(0) self-bootstrap; set use_critic_learning=false to disable.
+  # Critic learning via teacher-value distillation. The buffer stores
+  # V_teacher(s) at collect time; the student's critic is trained to
+  # match it. No TD bootstrap, no next_obs needed.
   use_critic_learning: true
   critic_loss_coef: 0.5
-  gamma: 0.99
+
+  # Buffer columns — defaults: store_next_obs=false, store_value_target
+  # follows use_critic_learning. Override only if you're extending this
+  # with an algorithm that needs a different column set.
+  # store_next_obs: false
+  # store_value_target: true
 
   # Replay buffer
   buffer_size: 1_000_000

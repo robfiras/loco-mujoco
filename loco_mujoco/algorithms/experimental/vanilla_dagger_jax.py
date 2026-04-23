@@ -38,6 +38,35 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_store_next_obs(exp) -> bool:
+    """Whether the replay buffer should materialise `next_obs`.
+
+    VanillaDagger does not use `next_obs` itself — the critic is trained
+    by distilling `V_teacher(s)`, not by TD bootstrapping. The option
+    exists so the buffer machinery stays reusable for algorithms that do
+    need it. Default is False; set `store_next_obs: true` in config to
+    opt in.
+    """
+    if hasattr(exp, "store_next_obs") and exp.get("store_next_obs") is not None:
+        return bool(exp.store_next_obs)
+    return False
+
+
+def _resolve_store_value_target(exp) -> bool:
+    """Whether the buffer stores `V_teacher(s)` per transition.
+
+    Required for critic learning (value distillation). Auto-ties to
+    `use_critic_learning` unless overridden.
+    """
+    if hasattr(exp, "store_value_target") and exp.get("store_value_target") is not None:
+        return bool(exp.store_value_target)
+    return bool(getattr(exp, "use_critic_learning", True))
+
+
+# ---------------------------------------------------------------------------
 # Metrics + rollout state
 # ---------------------------------------------------------------------------
 
@@ -139,7 +168,9 @@ class VanillaDaggerAgentState(AgentStateBase):
         # init_agent_state — avoids a recompile on the first train_fn call.
         exp = agent_conf.config.experiment
         replay_buffer = ReplayBuffer.create(
-            int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
+            int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size),
+            store_next_obs=_resolve_store_next_obs(exp),
+            store_value_target=_resolve_store_value_target(exp),
         )
         rollout_state = DaggerRolloutState.create(
             int(exp.num_envs), jax.random.PRNGKey(0),
@@ -309,7 +340,9 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         # the user passes a state with a populated buffer on chunk 2+.
         rng, rng_r = jax.random.split(rng)
         replay_buffer = ReplayBuffer.create(
-            int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
+            int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size),
+            store_next_obs=_resolve_store_next_obs(exp),
+            store_value_target=_resolve_store_value_target(exp),
         )
         rollout_state = DaggerRolloutState.create(
             int(exp.num_envs), rng_r,
@@ -372,11 +405,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         teacher_beta = float(getattr(exp, "teacher_beta", 0.5))
         sticky_min = int(getattr(exp, "sticky_min", 5))
         sticky_max = int(getattr(exp, "sticky_max", 50))
-        # Critic learning (for downstream RL warm-start). TD(0) self-bootstrap
-        # with stop_gradient on the target — no target network.
+        # Critic learning via teacher-value distillation: store V_teacher(s)
+        # at collect time and minimise MSE(V_student(s), V_teacher(s)).
+        # No bootstrap, no next_obs required.
         use_critic_learning = bool(getattr(exp, "use_critic_learning", True))
         critic_loss_coef = float(getattr(exp, "critic_loss_coef", 0.5))
-        gamma = float(getattr(exp, "gamma", 0.99))
 
         # ENV (reuse carry if present)
         if agent_state.env_state is not None:
@@ -392,7 +425,16 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             buf = agent_state.replay_buffer
         else:
             buf = ReplayBuffer.create(int(exp.obs_dim), int(exp.action_dim),
-                                      int(exp.buffer_size))
+                                      int(exp.buffer_size),
+                                      store_next_obs=_resolve_store_next_obs(exp))
+
+        if use_critic_learning and not buf.store_value_target:
+            raise ValueError(
+                "use_critic_learning=True requires a replay buffer with "
+                "store_value_target=True (V_teacher is the critic target). "
+                "Either leave store_value_target unset (auto-ties to "
+                "use_critic_learning) or set use_critic_learning=false."
+            )
 
         # ROLLOUT MIXTURE STATE
         if agent_state.rollout_state is not None:
@@ -407,16 +449,17 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
         # Helpers
         # --------------------------------------------------------------
 
-        def _teacher_mean(obs):
+        def _teacher_mean_and_value(obs):
             # Frozen teacher. RunningMeanStd always writes, so we pass
             # mutable=["run_stats"] to keep Flax happy but drop the updates —
             # teacher_run_stats stays put. (The ephemeral per-batch Welford
             # update is negligible against the teacher's converged stats.)
-            (pi, _), _ = teacher_net.apply(
+            # Returns (mean_action, value_estimate).
+            (pi, v), _ = teacher_net.apply(
                 {"params": teacher_params, "run_stats": teacher_run_stats}, obs,
                 mutable=["run_stats"],
             )
-            return pi.mean()
+            return pi.mean(), v
 
         def _student_sample(s_ts, obs, rng_s):
             (pi, _), updates = student_net.apply(
@@ -439,10 +482,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             )
 
         def _collect_transition(s_ts, buf, rollout_st, env_state, last_obs, rng):
-            # Compute student + teacher actions in parallel
+            # Compute student + teacher actions in parallel (and teacher value
+            # to use as the critic-distillation target).
             rng, rng_s = jax.random.split(rng)
             a_student, s_ts = _student_sample(s_ts, last_obs, rng_s)
-            a_teacher = _teacher_mean(last_obs)
+            a_teacher, v_teacher = _teacher_mean_and_value(last_obs)
 
             # Per-env sticky pick
             mask = rollout_st.using_teacher[:, None]
@@ -453,9 +497,12 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                 env_state, acting, traj
             )
 
-            # Label with teacher action regardless of who acted
+            # Label with teacher action + teacher value regardless of who acted.
+            # If store_value_target is False, the buffer ignores v_teacher.
+            value_target = v_teacher if buf.store_value_target else None
             buf = buf.add_batch(last_obs, next_obs, a_teacher, reward,
-                                done.astype(jnp.float32))
+                                done.astype(jnp.float32),
+                                value_target=value_target)
 
             # Sticky countdown + resample expired slots
             rollout_st = rollout_st.replace(
@@ -467,12 +514,11 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             return s_ts, buf, rollout_st, env_state, next_obs, rng
 
         # --------------------------------------------------------------
-        # Update (actor BC + optional critic TD(0))
+        # Update (actor BC + optional critic distillation)
         # --------------------------------------------------------------
 
-        def _update_loss(params, s_ts, obs_b, next_obs_b, act_b, reward_b, done_b):
-            # Forward on obs (for actor NLL and V(s))
-            (pi, v_s), u1 = student_net.apply(
+        def _update_loss(params, s_ts, obs_b, act_b, value_target_b):
+            (pi, v_s), updates = student_net.apply(
                 {"params": params, "run_stats": s_ts.run_stats}, obs_b,
                 mutable=["run_stats"],
             )
@@ -480,31 +526,30 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
             mse_action = jnp.mean((pi.mean() - act_b) ** 2)
 
             if use_critic_learning:
-                # Chain run_stats through to keep RunningMeanStd updating on
-                # both obs and next_obs (both are observations the student sees).
-                (_, v_s_next), u2 = student_net.apply(
-                    {"params": params, "run_stats": u1["run_stats"]}, next_obs_b,
-                    mutable=["run_stats"],
-                )
-                # TD(0) target, stop_gradient so we only backprop through v_s
-                target = reward_b + gamma * v_s_next * (1.0 - done_b)
-                target = jax.lax.stop_gradient(target)
-                critic_loss = jnp.mean((v_s - target) ** 2)
+                # Teacher-value distillation: match V_teacher(s).
+                critic_loss = jnp.mean((v_s - value_target_b) ** 2)
                 total_loss = actor_loss + critic_loss_coef * critic_loss
-                new_run_stats = u2["run_stats"]
             else:
                 critic_loss = jnp.array(0.0)
                 total_loss = actor_loss
-                new_run_stats = u1["run_stats"]
 
-            return total_loss, (new_run_stats, actor_loss, critic_loss, mse_action)
+            return total_loss, (updates["run_stats"], actor_loss, critic_loss, mse_action)
 
         def _single_update(carry, _):
             s_ts, buf, rng = carry
             rng, rng_sample = jax.random.split(rng)
-            obs_b, next_obs_b, act_b, reward_b, done_b = buf.sample(rng_sample, batch_size)
+            # Sample indices manually so we can pull `value_target` using the
+            # same indices — buf.sample doesn't know about value_target.
+            indices = jax.random.randint(rng_sample, (batch_size,), 0, buf.size)
+            obs_b = buf.obs[indices]
+            act_b = buf.action[indices]
+            if use_critic_learning:
+                value_target_b = buf.value_target[indices]
+            else:
+                value_target_b = jnp.zeros((batch_size,), dtype=buf.obs.dtype)
+
             (_, aux), grads = jax.value_and_grad(_update_loss, has_aux=True)(
-                s_ts.params, s_ts, obs_b, next_obs_b, act_b, reward_b, done_b
+                s_ts.params, s_ts, obs_b, act_b, value_target_b
             )
             new_rs, actor_loss, critic_loss, mse_action = aux
             s_ts = s_ts.apply_gradients(grads=grads)

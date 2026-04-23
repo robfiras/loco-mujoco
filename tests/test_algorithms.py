@@ -508,6 +508,63 @@ def test_VanillaDagger_save_and_load_agent(vanilla_dagger_config, tmp_path):
     assert loaded_state.rollout_state is not None
 
 
+def test_VanillaDagger_bc_only_minimal_buffer(vanilla_dagger_config):
+    """With critic learning disabled, both `next_obs` and `value_target`
+    should be zero-sized in the buffer (minimal memory footprint)."""
+    config = OmegaConf.create(OmegaConf.to_container(vanilla_dagger_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.use_critic_learning = False
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = VanillaDaggerJax.init_agent_state(env, agent_conf, rng)
+
+    buf = agent_state.replay_buffer
+    assert buf.store_next_obs is False
+    assert buf.next_obs.shape == (0, 0)
+    assert buf.store_value_target is False
+    assert buf.value_target.shape == (0,)
+
+    train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
+    out = train_fn(rng, agent_state, traj)
+    new_buf = out["agent_state"].replay_buffer
+    assert int(new_buf.size) > 0
+    assert new_buf.next_obs.shape == (0, 0)
+    assert new_buf.value_target.shape == (0,)
+    assert float(jnp.max(out["training_metrics"].mean_critic_loss)) == 0.0
+
+
+def test_VanillaDagger_critic_distill_allocates_value_target(vanilla_dagger_config):
+    """With critic learning enabled (default), the buffer allocates a
+    value_target column and drops next_obs (distillation doesn't need it)."""
+    config = vanilla_dagger_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = VanillaDaggerJax.init_agent_state(env, agent_conf, rng)
+
+    buf = agent_state.replay_buffer
+    assert buf.store_value_target is True
+    assert buf.value_target.shape == (int(config.experiment.buffer_size),)
+    # DAgger with distillation doesn't need next_obs
+    assert buf.store_next_obs is False
+    assert buf.next_obs.shape == (0, 0)
+
+    train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
+    out = train_fn(rng, agent_state, traj)
+    new_buf = out["agent_state"].replay_buffer
+    assert int(new_buf.size) > 0
+    # At least some value_target entries should be nonzero after collection
+    # (teacher's critic output is generally non-zero for random init teacher).
+    assert jnp.any(new_buf.value_target != 0.0)
+
+
 def test_VanillaDagger_eval_fn(vanilla_dagger_config):
     """Standalone eval_fn should jit, run, and produce finite metrics without
     touching the agent's training state."""
