@@ -422,15 +422,14 @@ class OffPolicyBase(JaxRLAlgorithmBase):
 
             log_env_state = env_state.find(LogEnvState)
             logged_metrics = log_env_state.metrics
+            # `returned_episode_returns` / `returned_episode_lengths` carry the
+            # last-completed episode return/length for each env, held constant
+            # until that env finishes another one. Averaging across envs gives
+            # a smooth running estimate. (Slots are 0 until each env has
+            # completed its first episode — biases the very early curve only.)
             base_kwargs = dict(
-                mean_episode_return=jnp.sum(
-                    jnp.where(logged_metrics.done,
-                              logged_metrics.returned_episode_returns, 0.0)
-                ) / jnp.maximum(jnp.sum(logged_metrics.done), 1),
-                mean_episode_length=jnp.sum(
-                    jnp.where(logged_metrics.done,
-                              logged_metrics.returned_episode_lengths, 0.0)
-                ) / jnp.maximum(jnp.sum(logged_metrics.done), 1),
+                mean_episode_return=jnp.mean(logged_metrics.returned_episode_returns),
+                mean_episode_length=jnp.mean(logged_metrics.returned_episode_lengths),
                 max_timestep=jnp.max(logged_metrics.timestep * exp.num_envs),
                 mean_critic_loss=critic_loss,
                 mean_actor_loss=actor_loss,
@@ -445,6 +444,23 @@ class OffPolicyBase(JaxRLAlgorithmBase):
                             ex_state, replay_buffer, env_state, next_obs, rng)
             return runner_state, metric
 
+        # ----- log-interval wrapper: run `log_every` inner steps and emit one
+        # aggregated metric row. Reduces wandb log volume and smooths noise.
+        log_every = max(1, int(getattr(exp, 'log_every', 100)))
+        num_outer = max(1, int(exp.num_updates) // log_every)
+
+        def _logged_step(runner_state, unused):
+            runner_state, inner_metrics = jax.lax.scan(
+                _update_step, runner_state, None, log_every
+            )
+            aggregated = jax.tree.map(lambda x: jnp.mean(x, axis=0), inner_metrics)
+            # monotone counters: take the value at the end of the window
+            aggregated = aggregated.replace(
+                max_timestep=jnp.max(inner_metrics.max_timestep),
+                buffer_size=inner_metrics.buffer_size[-1],
+            )
+            return runner_state, aggregated
+
         # ----- main scan -----
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -452,7 +468,7 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             extra_state, replay_buffer, env_state, last_obs, _rng,
         )
         runner_state, training_metrics = jax.lax.scan(
-            _update_step, runner_state, None, exp.num_updates
+            _logged_step, runner_state, None, num_outer
         )
         (actor_state, critic_state, tgt_params, tgt_run_stats,
          ex_state, replay_buffer, env_state, last_obs, _) = runner_state

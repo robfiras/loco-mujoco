@@ -57,6 +57,11 @@ experiment:
   max_grad_norm: 0.5
   num_envs: 2048
   total_timesteps: 10e6
+  # Aggregate metrics over `log_every` outer-loop iterations before emitting
+  # one wandb row. Each iteration = one vmapped env step (`num_envs` frames
+  # collected in parallel) + `gradient_steps` updates. So with num_envs=2048
+  # and log_every=100, a row is emitted every 100 * 2048 = 204_800 env frames.
+  log_every: 100
   normalize_env: false  # disables NormalizeVecReward wrapper
   n_seeds: 1
   vmap_across_seeds: true

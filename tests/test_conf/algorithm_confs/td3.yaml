@@ -41,6 +41,7 @@ experiment:
   max_grad_norm: 0.5
   num_envs: 4
   total_timesteps: 200
+  log_every: 1
   normalize_env: false
   n_seeds: 1
   vmap_across_seeds: true
