@@ -687,16 +687,16 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                 (s_ts, buf, long_buf, rng_upd),
             )
 
-            # Metrics
+            # Metrics. `returned_episode_returns` / `returned_episode_lengths`
+            # carry the last-completed episode return/length for each env,
+            # held constant until that env finishes another one. Averaging
+            # across envs gives a smooth running estimate. (Slots are 0 until
+            # each env has completed its first episode — biases the very
+            # early curve only.) See dev commit 42c6413 (sac/td3 fix).
             logged = env_state.find(LogEnvState).metrics
-            done_count = jnp.maximum(jnp.sum(logged.done), 1)
             metric = DaggerSummaryMetrics(
-                mean_episode_return=jnp.sum(
-                    jnp.where(logged.done, logged.returned_episode_returns, 0.0)
-                ) / done_count,
-                mean_episode_length=jnp.sum(
-                    jnp.where(logged.done, logged.returned_episode_lengths, 0.0)
-                ) / done_count,
+                mean_episode_return=jnp.mean(logged.returned_episode_returns),
+                mean_episode_length=jnp.mean(logged.returned_episode_lengths),
                 max_timestep=jnp.max(logged.timestep * num_envs),
                 mean_bc_loss=bc_loss,
                 mean_mse_action=mse_action,
