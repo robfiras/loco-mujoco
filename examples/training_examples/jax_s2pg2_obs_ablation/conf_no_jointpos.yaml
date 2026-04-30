@@ -1,0 +1,124 @@
+defaults:
+  - _self_
+  - override hydra/job_logging: default
+  - override hydra/launcher: basic
+
+wandb:
+  project: "s2pg_test"
+
+experiment:
+  task_factory:
+    name: ImitationFactory
+    params:
+      default_dataset_conf:
+        task: walk
+  env_params:
+    env_name: MjxUnitreeH1
+    headless: True
+    horizon: 1000
+    goal_type: NoGoal
+    goal_params: {}
+    terminal_state_type: RootPoseTrajTerminalStateHandler
+    terminal_state_params:
+      max_root_pos_deviation: 1e6
+    reward_type: MimicReward
+    reward_params:
+      action_out_of_bounds_coeff: 0.01
+      action_rate_coeff: 0.0
+      joint_acc_coeff: 0.0
+      joint_torque_coeff: 0.0
+      qpos_w_sum: 0.4
+      qvel_w_sum: 0.3
+      rpos_w_sum: 0.5
+      rquat_w_sum: 0.3
+      rvel_w_sum: 0.3
+      sites_for_mimic:
+        - upper_body_mimic
+        - left_hand_mimic
+        - left_foot_mimic
+        - right_hand_mimic
+        - right_foot_mimic
+    observation_spec:
+      - {type: FreeJointVel, obs_name: dq_root,            xml_name: root}
+      - {type: JointVel,     obs_name: dq_back_bkz,        xml_name: back_bkz}
+      - {type: JointVel,     obs_name: dq_l_arm_shy,       xml_name: l_arm_shy}
+      - {type: JointVel,     obs_name: dq_l_arm_shx,       xml_name: l_arm_shx}
+      - {type: JointVel,     obs_name: dq_l_arm_shz,       xml_name: l_arm_shz}
+      - {type: JointVel,     obs_name: dq_left_elbow,      xml_name: left_elbow}
+      - {type: JointVel,     obs_name: dq_r_arm_shy,       xml_name: r_arm_shy}
+      - {type: JointVel,     obs_name: dq_r_arm_shx,       xml_name: r_arm_shx}
+      - {type: JointVel,     obs_name: dq_r_arm_shz,       xml_name: r_arm_shz}
+      - {type: JointVel,     obs_name: dq_right_elbow,     xml_name: right_elbow}
+      - {type: JointVel,     obs_name: dq_hip_flexion_r,   xml_name: hip_flexion_r}
+      - {type: JointVel,     obs_name: dq_hip_adduction_r, xml_name: hip_adduction_r}
+      - {type: JointVel,     obs_name: dq_hip_rotation_r,  xml_name: hip_rotation_r}
+      - {type: JointVel,     obs_name: dq_knee_angle_r,    xml_name: knee_angle_r}
+      - {type: JointVel,     obs_name: dq_ankle_angle_r,   xml_name: ankle_angle_r}
+      - {type: JointVel,     obs_name: dq_hip_flexion_l,   xml_name: hip_flexion_l}
+      - {type: JointVel,     obs_name: dq_hip_adduction_l, xml_name: hip_adduction_l}
+      - {type: JointVel,     obs_name: dq_hip_rotation_l,  xml_name: hip_rotation_l}
+      - {type: JointVel,     obs_name: dq_knee_angle_l,    xml_name: knee_angle_l}
+      - {type: JointVel,     obs_name: dq_ankle_angle_l,   xml_name: ankle_angle_l}
+  # --- S2PG2-specific (replaced rnn_type, n_features, hidden_state_dim) ---
+  z_dim: 64
+  init_std_z: 0.05
+  # Z-policy PPO knobs (separate clipped surrogate on z' baselined with V_z;
+  # reward r_z_t = exp(-|V(o,z,prev_a) - G_t|) baselined with V_z and GAE'd).
+  z_coef: 1.0          # weight on the z-policy clipped surrogate
+  vf_z_coef: 0.5       # weight on the V_z value loss
+  ent_z_coef: 0.0      # entropy bonus on z-policy
+  # gamma_z, gae_lambda_z default to gamma, gae_lambda when unset.
+  hidden_layers: [1024, 512]
+  lr: 1e-4
+  num_envs: 2048
+  num_steps: 250
+  total_timesteps: 2e9
+  update_epochs: 4
+  proportion_env_reward: 0.0
+  num_minibatches: 32
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  init_std: 0.2
+  learnable_std: false
+  ent_coef: 0.0
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  activation: tanh
+  anneal_lr: false
+  desired_kl: 0.01
+  weight_decay: 0.0
+  normalize_env: true
+  debug: false
+  seed: 0
+  n_seeds: 1
+  vmap_across_seeds: true
+  validation_interval: 10
+  validation:
+    active: true
+    num_steps: 100
+    num_envs: 100
+    num: 10
+    quantities:
+      - JointPosition
+      - JointVelocity
+      - RelSitePosition
+      - RelSiteVelocity
+      - RelSiteOrientation
+    measures:
+      - EuclideanDistance
+      - DynamicTimeWarping
+      - DiscreteFrechetDistance
+    rel_site_names:
+      - upper_body_mimic
+      - left_hand_mimic
+      - left_foot_mimic
+      - right_hand_mimic
+      - right_foot_mimic
+    joints_to_ignore:
+      - pelvis_tx
+      - pelvis_tz
+      - pelvis_ty
+      - pelvis_tilt
+      - pelvis_list
+      - pelvis_rotation

@@ -4,7 +4,7 @@ from omegaconf import open_dict
 
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms import PPOJax, GAILJax, AMPJax
-from loco_mujoco.algorithms.experimental import S2PGPPOJax, BPTTPPOJax, HistoryPPOJax, SACJax, TD3Jax, VanillaDaggerJax
+from loco_mujoco.algorithms.experimental import S2PGPPOJax, S2PG2Jax, BPTTPPOJax, HistoryPPOJax, SACJax, TD3Jax, VanillaDaggerJax
 from loco_mujoco.utils import MetricsHandler
 
 from test_conf import *
@@ -707,3 +707,70 @@ def test_VanillaDagger_buffer_survives_chunk_swap(vanilla_dagger_config):
     state2 = out2["agent_state"]
     assert int(state2.replay_buffer.size) >= size_after_chunk1, \
         "buffer size must not drop across a traj/teacher swap"
+
+
+# ---------------------------------------------------------------------------
+# S2PG2 (decoupled action / z-policy + V_z head)
+# ---------------------------------------------------------------------------
+
+def test_S2PG2_build_train_fn(s2pg2_config):
+    config = s2pg2_config
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = S2PG2Jax.init_agent_conf(env, config)
+    rngs = [jax.random.PRNGKey(i) for i in range(config.experiment.n_seeds + 1)]
+    rng, _rng = rngs[0], jnp.squeeze(jnp.vstack(rngs[1:]))
+    agent_state = jax.vmap(lambda r: S2PG2Jax.init_agent_state(env, agent_conf, r))(_rng) \
+        if config.experiment.n_seeds > 1 else S2PG2Jax.init_agent_state(env, agent_conf, _rng)
+    train_fn = S2PG2Jax.build_train_fn(env, agent_conf)
+    train_fn = jax.jit(jax.vmap(train_fn, in_axes=(0, 0, None))) \
+        if config.experiment.n_seeds > 1 else jax.jit(train_fn)
+    try:
+        jaxpr = make_jaxpr(train_fn)(_rng, agent_state, traj)
+        assert jaxpr is not None
+    except Exception as e:
+        pytest.fail(f"JAX function compilation failed: {e}")
+
+
+def test_S2PG2_save_and_load_agent(s2pg2_config, tmp_path):
+    config = OmegaConf.create(OmegaConf.to_container(s2pg2_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 4
+        config.experiment.validation.num = 1
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = S2PG2Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = S2PG2Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(S2PG2Jax.build_train_fn(env, agent_conf))
+    result = train_fn(rng, agent_state, traj)
+    agent_state = result["agent_state"]
+    save_path = S2PG2Jax.save_agent(tmp_path, agent_conf, agent_state)
+    assert save_path.exists()
+    loaded_conf, loaded_state = S2PG2Jax.load_agent(save_path)
+    assert loaded_conf is not None
+    assert loaded_state is not None
+    assert _params_allclose(agent_state.train_state.params, loaded_state.train_state.params)
+    assert _params_allclose(agent_state.train_state.run_stats, loaded_state.train_state.run_stats)
+
+
+def test_S2PG2_metrics_have_z_fields(s2pg2_config):
+    """Confirm S2PG2-specific metric fields are populated and finite."""
+    config = s2pg2_config
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = S2PG2Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = S2PG2Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(S2PG2Jax.build_train_fn(env, agent_conf))
+    out = train_fn(rng, agent_state, traj)
+    m = out["training_metrics"]
+    # z-specific fields exist and are finite scalars per chunk-step.
+    assert jnp.all(jnp.isfinite(m.mean_z_actor_loss))
+    assert jnp.all(jnp.isfinite(m.mean_z_value_loss))
+    assert jnp.all(jnp.isfinite(m.mean_r_z))
+    # r_z = exp(-|V−G|) is bounded in (0, 1].
+    assert jnp.all(m.mean_r_z >= 0.0) and jnp.all(m.mean_r_z <= 1.0 + 1e-6)

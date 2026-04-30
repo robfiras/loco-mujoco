@@ -519,3 +519,8 @@ def td3_config():
 @pytest.fixture
 def vanilla_dagger_config():
     return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/vanilla_dagger.yaml')
+
+
+@pytest.fixture
+def s2pg2_config():
+    return OmegaConf.load(Path(__file__).resolve().parent / 'algorithm_confs/s2pg2.yaml')

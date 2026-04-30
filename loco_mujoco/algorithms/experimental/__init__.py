@@ -1,4 +1,5 @@
 from .s2pg_ppo_jax import S2PGPPOJax
+from .s2pg2_jax import S2PG2Jax
 from .bptt_ppo_jax import BPTTPPOJax
 from .history_ppo_jax import HistoryPPOJax
 from .offpolicy_base import OffPolicyBase, OffPolicyCriticNet, ReplayBuffer
