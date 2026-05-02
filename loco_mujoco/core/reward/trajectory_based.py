@@ -159,6 +159,7 @@ class MimicReward(TrajectoryBasedReward):
     def __init__(self, env: Any,
                  sites_for_mimic=None,
                  joints_for_mimic=None,
+                 main_site_name=None,
                  **kwargs):
         """
         Initialize the DeepMimic reward function.
@@ -167,6 +168,9 @@ class MimicReward(TrajectoryBasedReward):
             env (Any): Environment instance.
             sites_for_mimic (List[str], optional): List of site names to mimic. Defaults to None, taking all.
             joints_for_mimic (List[str], optional): List of joint names to mimic. Defaults to None, taking all.
+            main_site_name (str, optional): Name of the site (within the resolved
+                site list) used as the reference frame for relative quantities.
+                Defaults to None → first site (index 0).
             **kwargs (Any): Additional keyword arguments.
 
         """
@@ -197,6 +201,17 @@ class MimicReward(TrajectoryBasedReward):
         self._rel_site_ids = np.array([mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)
                                        for name in rel_site_names])
         self._rel_body_ids = np.array([model.site_bodyid[site_id] for site_id in self._rel_site_ids])
+
+        # Resolve the index of the reference site within rel_site_names. Default 0.
+        if main_site_name is not None:
+            if main_site_name not in rel_site_names:
+                raise ValueError(
+                    f"main_site_name={main_site_name!r} not found in "
+                    f"sites_for_mimic={list(rel_site_names)!r}"
+                )
+            self._main_site_id = list(rel_site_names).index(main_site_name)
+        else:
+            self._main_site_id = 0
 
         # determine qpos and qvel indices
         quat_in_qpos = []
@@ -320,7 +335,8 @@ class MimicReward(TrajectoryBasedReward):
         if len(self._rel_site_ids) > 1:
             site_rpos_traj, site_rangles_traj, site_rvel_traj =\
                 calculate_relative_site_quatities(traj_data_single, self._rel_site_ids,
-                                                self._rel_body_ids, model.body_rootid, backend)
+                                                self._rel_body_ids, model.body_rootid, backend,
+                                                main_site_id=self._main_site_id)
 
         # get all quantities from the current data
         qpos, qvel = data.qpos[self._qpos_ind], data.qvel[self._qvel_ind]
@@ -328,7 +344,8 @@ class MimicReward(TrajectoryBasedReward):
         if len(self._rel_site_ids) > 1:
             site_rpos, site_rangles, site_rvel = (
                 calculate_relative_site_quatities(data, self._rel_site_ids, self._rel_body_ids,
-                                                model.body_rootid, backend))
+                                                model.body_rootid, backend,
+                                                main_site_id=self._main_site_id))
 
         # calculate distances
         qpos_dist = backend.mean(backend.square(qpos[~self._quat_in_qpos] - qpos_traj[~self._quat_in_qpos]))
