@@ -676,10 +676,20 @@ class GoalTrajMimic(Goal):
 
     def __init__(self, info_props: Dict,
                  rel_body_names: List[str] = None,
+                 sites_for_mimic: List[str] = None,
+                 main_site_name: str = None,
                  **kwargs):
 
         self.n_step_lookahead = 1   # todo: implement n_step_lookahead
-        n_visual_geoms = len(info_props["sites_for_mimic"]) if \
+        # Allow caller to override the env's default sites_for_mimic — passing
+        # an empty list disables all site quantities in the goal observation.
+        # Mirrors the MimicReward kwarg of the same name.
+        self._sites_for_mimic_override = sites_for_mimic
+        # Name of the site (within the resolved site list) used as the reference
+        # frame for relative quantities. None → use the first site (index 0).
+        self._main_site_name = main_site_name
+        sites = sites_for_mimic if sites_for_mimic is not None else info_props["sites_for_mimic"]
+        n_visual_geoms = len(sites) if \
             ("visualize_goal" in kwargs.keys() and kwargs["visualize_goal"]) else 0
         super().__init__(info_props, n_visual_geoms=n_visual_geoms, **kwargs)
 
@@ -687,6 +697,7 @@ class GoalTrajMimic(Goal):
         self._qpos_ind = None
         self._qvel_ind = None
         self._size_additional_observation = None
+        self._main_site_id = 0   # index into self._rel_site_ids; resolved in _init_from_mj
 
         # To be initialized
         self._relevant_body_names = [] if rel_body_names is None else rel_body_names
@@ -695,6 +706,11 @@ class GoalTrajMimic(Goal):
         self._body_rootid = None
         self._site_bodyid = None
         self._dim = None
+
+    def _resolve_sites_for_mimic(self):
+        return (self._sites_for_mimic_override
+                if self._sites_for_mimic_override is not None
+                else self._info_props["sites_for_mimic"])
 
     def _init_from_mj(self,
                       env: Any,
@@ -716,12 +732,26 @@ class GoalTrajMimic(Goal):
             if body_name in self._relevant_body_names and body_name != self.main_body_name and body_name != "world":
                 self._relevant_body_ids.append(i)
 
-        for name in self._info_props["sites_for_mimic"]:
+        sites = self._resolve_sites_for_mimic()
+        for name in sites:
             site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)
             self._rel_site_ids.append(site_id)
 
+        # Resolve the index of the reference site within the list. Defaults to 0.
+        if self._main_site_name is not None:
+            if self._main_site_name not in sites:
+                raise ValueError(
+                    f"main_site_name={self._main_site_name!r} not found in "
+                    f"sites_for_mimic={sites!r}"
+                )
+            self._main_site_id = sites.index(self._main_site_name)
+        else:
+            self._main_site_id = 0
+
         n_joints = model.njnt
-        n_sites = len(self._info_props["sites_for_mimic"]) - 1
+        # Empty list = no reference site, no relative quantities. With ≥1 site,
+        # one is the reference and (len−1) others are relative to it.
+        n_sites = max(0, len(sites) - 1)
         size_for_joint_pos = (5 + (n_joints - 1)) * self.n_step_lookahead
         size_for_joint_vel = (6 + (n_joints - 1)) * self.n_step_lookahead
         size_for_sites = (3 + 3 + 6) * n_sites * self.n_step_lookahead
@@ -775,19 +805,24 @@ class GoalTrajMimic(Goal):
         qpos_traj = traj_data_single.qpos
         qvel_traj = traj_data_single.qvel
 
-        rel_site_ids = self._rel_site_ids
-        rel_body_ids = self._site_bodyid[rel_site_ids]
-        site_rpos, site_rangles, site_rvel = calculate_relative_site_quatities(traj_data_single, rel_site_ids,
-                                                                               rel_body_ids,
-                                                                               self._body_rootid, backend)
-
-        traj_goal_obs = backend.concatenate([
-            qpos_traj[self._qpos_ind],
-            qvel_traj[self._qvel_ind],
-            backend.ravel(site_rpos),
-            backend.ravel(site_rangles),
-            backend.ravel(site_rvel)
-        ])
+        if len(self._rel_site_ids) > 0:
+            rel_site_ids = self._rel_site_ids
+            rel_body_ids = self._site_bodyid[rel_site_ids]
+            site_rpos, site_rangles, site_rvel = calculate_relative_site_quatities(
+                traj_data_single, rel_site_ids, rel_body_ids, self._body_rootid, backend,
+                main_site_id=self._main_site_id)
+            traj_goal_obs = backend.concatenate([
+                qpos_traj[self._qpos_ind],
+                qvel_traj[self._qvel_ind],
+                backend.ravel(site_rpos),
+                backend.ravel(site_rangles),
+                backend.ravel(site_rvel)
+            ])
+        else:
+            traj_goal_obs = backend.concatenate([
+                qpos_traj[self._qpos_ind],
+                qvel_traj[self._qvel_ind],
+            ])
 
         if self.visualize_goal:
             carry = self.set_visuals(env, model, data, carry, backend, traj)
@@ -795,8 +830,9 @@ class GoalTrajMimic(Goal):
         if len(self._rel_site_ids) > 0:
             rel_site_ids = self._rel_site_ids
             rel_body_ids = self._site_bodyid[rel_site_ids]
-            site_rpos, site_rangles, site_rvel = calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids,
-                                                                                   self._body_rootid, backend)
+            site_rpos, site_rangles, site_rvel = calculate_relative_site_quatities(
+                data, rel_site_ids, rel_body_ids, self._body_rootid, backend,
+                main_site_id=self._main_site_id)
 
             goal = backend.concatenate([
                 backend.ravel(site_rpos),

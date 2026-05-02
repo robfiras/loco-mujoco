@@ -355,7 +355,14 @@ def transform_motion(vel, new_pos, old_pos, rot_mat_new2old, backend, flg_local=
     return xvel
 
 
-def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_rootid, backend):
+def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_rootid, backend,
+                                      main_site_id=0):
+    """
+    Args:
+        main_site_id: index INTO `rel_site_ids` of the reference site. The other
+            sites' positions/rotations/velocities are computed relative to it.
+            Defaults to 0 (first site in the list).
+    """
 
     if backend == np:
         R = np_R
@@ -369,7 +376,6 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
     site_xmat_traj = site_xmat_traj[rel_site_ids]
 
     # get relevant properties and calculate site velocities
-    main_site_id = 0  # --> zeroth index in rel_site_ids
     site_root_body_id = body_rootid[rel_body_ids]
     site_xvel = calc_site_velocities(rel_site_ids, data, rel_body_ids, site_root_body_id, backend)
     main_site_xvel = site_xvel[main_site_id]
