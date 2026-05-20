@@ -23,11 +23,11 @@ experiment:
   task_factory:
     name: ImitationFactory
     params:
-      lafan1_dataset_conf:
-        dataset_name:
-          - walk1_subject5
+      default_dataset_conf:
+        task:
+          - walk
   env_params:
-    env_name: MjxUnitreeH1
+    env_name: MjxUnitreeG1Inspire
     use_mjwarp: True
     nconmax: 7000
     headless: True
@@ -90,11 +90,11 @@ experiment:
       - DynamicTimeWarping
       - DiscreteFrechetDistance
     rel_site_names:
-      - upper_body_mimic
-      - left_hand_mimic
-      - left_foot_mimic
-      - right_hand_mimic
-      - right_foot_mimic
+      # - upper_body_mimic
+      # - left_hand_mimic
+      # - left_foot_mimic
+      # - right_hand_mimic
+      # - right_foot_mimic
     joints_to_ignore:
       - pelvis_tx
       - pelvis_tz
