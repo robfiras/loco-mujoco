@@ -251,9 +251,13 @@ class ImitationFactory(TaskFactory):
             dataset_paths = lafan1_dataset_conf.dataset_name \
                 if isinstance(lafan1_dataset_conf.dataset_name, (ListConfig, list)) \
                 else [lafan1_dataset_conf.dataset_name]
+            
+        env_name = env.__class__.__name__
+        if "Inspire" in env_name:
+            env_name = env_name.replace("Inspire", "")
 
         # Load LAFAN1 Trajectory
-        traj = load_lafan1_trajectory(env.__class__.__name__, dataset_paths)
+        traj = load_lafan1_trajectory(env_name, dataset_paths)
 
         # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
         # and to filter out or add necessary entities is needed
