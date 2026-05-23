@@ -294,7 +294,7 @@ class UnitreeG1Inspire(BaseRobotHumanoid):
         """
 
         observation_spec = [# ------------- JOINT POS -------------
-                            ObservationType.FreeJointPosNoXY("q_root", xml_name="root"),
+                            ObservationType.FreeJointPos("q_root", xml_name="root"),
                             ObservationType.JointPos("q_left_hip_pitch_joint", xml_name="left_hip_pitch_joint"),
                             ObservationType.JointPos("q_left_hip_roll_joint", xml_name="left_hip_roll_joint"),
                             ObservationType.JointPos("q_left_hip_yaw_joint", xml_name="left_hip_yaw_joint"),
@@ -353,7 +353,7 @@ class UnitreeG1Inspire(BaseRobotHumanoid):
                             ObservationType.JointPos("q_right_little_2_joint", xml_name="right_little_2_joint"),
 
                             # # ------------- JOINT VEL -------------
-                            ObservationType.FreeJointVel("dq_root", xml_name="root"),
+                            # ObservationType.FreeJointVel("dq_root", xml_name="root"),
                             # ObservationType.JointVel("dq_left_hip_pitch_joint", xml_name="left_hip_pitch_joint"),
                             # ObservationType.JointVel("dq_left_hip_roll_joint", xml_name="left_hip_roll_joint"),
                             # ObservationType.JointVel("dq_left_hip_yaw_joint", xml_name="left_hip_yaw_joint"),
