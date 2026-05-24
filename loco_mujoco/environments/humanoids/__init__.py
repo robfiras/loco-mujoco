@@ -7,6 +7,8 @@ from .unitreeH1_mjx import MjxUnitreeH1
 from .unitreeH1v2 import UnitreeH1v2
 from .unitreeH1v2_mjx import MjxUnitreeH1v2
 from .unitreeG1 import UnitreeG1
+from .unitreeG1_inspire import UnitreeG1Inspire
+from .unitreeG1_inspire_mjx import MjxUnitreeG1Inspire
 from .myoskeleton import MyoSkeleton
 from .myoskeleton_mjx import MjxMyoSkeleton
 from .unitreeG1_mjx import MjxUnitreeG1
@@ -32,7 +34,9 @@ MjxUnitreeH1.register()
 UnitreeH1v2.register()
 MjxUnitreeH1v2.register()
 UnitreeG1.register()
+UnitreeG1Inspire.register()
 MjxUnitreeG1.register()
+MjxUnitreeG1Inspire.register()
 Apollo.register()
 MjxApollo.register()
 BoosterT1.register()
