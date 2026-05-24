@@ -1092,8 +1092,18 @@ def interpolate_trajectories(traj_data: TrajectoryData, traj_info: TrajectoryInf
             Array of shape (len(new_times), 4) containing interpolated quaternions, where the quaternion is scalar last.
 
         """
+        # prevent using zero norm quaternions; use [1, 0, 0, 0] instead => no rotation
+        quats_np = np.array(quats)
+        zeroNorm = quats_np[:] == [0.0, 0.0, 0.0, 0.0]
+        zeroNorm[:,1] = False
+        zeroNorm[:,2] = False
+        zeroNorm[:,3] = False
+        # print(np.shape(zeroNorm))
+        # print(np.sum(zeroNorm))
+        quats_np[zeroNorm] = 1.0
+
         # Create the Slerp object for the single trajectory
-        slerp = Slerp(times, Rotation.from_quat(quats))
+        slerp = Slerp(times, Rotation.from_quat(quats_np))
         # Interpolate and return the results
         return slerp(new_times).as_quat()
 
