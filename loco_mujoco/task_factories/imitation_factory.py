@@ -122,6 +122,8 @@ class ImitationFactory(TaskFactory):
             env_name = env_name.replace("Mjx", "")
         if "Inspire" in env_name:
             env_name = env_name.replace("Inspire", "")
+        if "Ball" in env_name:
+            env_name = env_name.replace("Ball", "")
 
         if isinstance(default_dataset_conf.task, str):
             default_dataset_conf.task = [default_dataset_conf.task]
@@ -255,6 +257,8 @@ class ImitationFactory(TaskFactory):
         env_name = env.__class__.__name__
         if "Inspire" in env_name:
             env_name = env_name.replace("Inspire", "")
+        if "Ball" in env_name:
+            env_name = env_name.replace("Ball", "")
 
         # Load LAFAN1 Trajectory
         traj = load_lafan1_trajectory(env_name, dataset_paths)

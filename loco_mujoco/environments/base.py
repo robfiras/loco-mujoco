@@ -564,7 +564,7 @@ class LocoEnv(Mjx):
         # get the initial state of the current trajectory
         traj_data_init = self.th.traj.data.get(traj_state.traj_no, traj_state.subtraj_step_no_init, np)
         # subtract the initial state from the current state
-        traj_data.qpos[all_free_jnt_qpos_id_xy] -= traj_data_init.qpos[robot_free_jnt_qpos_id_xy]
+        traj_data.qpos[all_free_jnt_qpos_id_xy] -= traj_data_init.qpos[all_free_jnt_qpos_id_xy]
         return Mjx.set_sim_state_from_traj_data(data, traj_data, carry)
 
     def mjx_set_sim_state_from_traj_data(self, data, traj_data, carry) -> Data:
@@ -587,7 +587,7 @@ class LocoEnv(Mjx):
         traj_data_init = self.th.traj.data.get(traj_state.traj_no, traj_state.subtraj_step_no_init, jnp)
         # subtract the initial state from the current state
         traj_data = traj_data.replace(
-            qpos=traj_data.qpos.at[all_free_jnt_qpos_id_xy].add(-traj_data_init.qpos[robot_free_jnt_qpos_id_xy]))
+            qpos=traj_data.qpos.at[all_free_jnt_qpos_id_xy].add(-traj_data_init.qpos[all_free_jnt_qpos_id_xy]))
         return Mjx.mjx_set_sim_state_from_traj_data(data, traj_data, carry)
 
     def _init_additional_carry(self,
