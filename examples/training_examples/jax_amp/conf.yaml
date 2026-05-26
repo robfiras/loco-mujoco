@@ -16,9 +16,9 @@ experiment:
     disable_arms: false
     headless: True
     horizon: 1000
-    goal_type: GoalTrajRootVelocity
-    goal_params:
-      visualize_goal: true
+    # goal_type: GoalTrajRootVelocity
+    # goal_params:
+    #   visualize_goal: true
     reward_type: TargetVelocityTrajReward
   hidden_layers: [512, 256]
   lr: 6e-5

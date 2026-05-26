@@ -30,7 +30,7 @@ experiment:
     headless: true
     disable_arms: false
     horizon: 1000
-    goal_type: GoalTrajMimic
+    # goal_type: GoalTrajMimic
     # the parameter proportion_env_reward decides how much the environment reward is used
     reward_type: MimicReward
     reward_params:

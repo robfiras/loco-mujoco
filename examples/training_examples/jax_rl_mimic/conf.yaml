@@ -32,9 +32,9 @@ experiment:
     nconmax: 7000
     headless: True
     horizon: 1000
-    goal_type: GoalTrajMimic
-    goal_params:
-      visualize_goal: true
+    # goal_type: GoalTrajMimic  ### Problem!!! Increases the observation space from 60 to 513. Issues with conversion to SB3 model.
+    # goal_params:
+    #   visualize_goal: true
     control_type: ${control_config.torque_control.control_type}
     control_params: ${control_config.torque_control.control_params}
     reward_type: MimicReward
