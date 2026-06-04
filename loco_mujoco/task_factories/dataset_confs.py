@@ -72,7 +72,10 @@ class CustomDatasetConf:
     Configuration for loading custom trajectories.
 
     Attributes:
-        traj (Trajectory): A custom trajectory to load.
+        paths (Union[str, list]): A list of paths to custom trajectory files to load.
 
     """
-    traj: Trajectory
+    paths: Union[str, list]
+
+    def __post_init__(self):
+        assert self.paths is not None, "The `paths` attribute must be set."

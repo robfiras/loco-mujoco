@@ -283,15 +283,29 @@ class ImitationFactory(TaskFactory):
 
         """
         env_name = env.__class__.__name__
-        traj = custom_dataset_conf.traj
-        env_params = {}
-        # # extend the motion to the desired length
-        # if not traj.data.is_complete:
-        #
-        #     traj = extend_motion(env_name, env_params, traj)
+        if "Mjx" in env_name:
+            env_name = env_name.replace("Mjx", "")
+        if "Inspire" in env_name:
+            env_name = env_name.replace("Inspire", "")
+        if "Ball" in env_name:
+            env_name = env_name.replace("Ball", "")
+        
+        trajs = []
+        # load each trajectory from the provided paths and concatenate them
+        for file_path in custom_dataset_conf.paths:
 
-        # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
-        # and to filter out or add necessary entities is needed
-        default_th = TrajectoryHandler(env.model, control_dt=env.dt, traj=traj)
+            traj = Trajectory.load(file_path)
 
-        return default_th.traj
+            # extend the motion to the desired length
+            if not traj.data.is_complete:
+                traj = extend_motion(env_name, load_robot_conf_file(env_name).env_params, traj)
+
+            # pass the default trajectory through a TrajectoryHandler to interpolate it to the environment frequency
+            # and to filter out or add necessary entities is needed
+            default_th = TrajectoryHandler(env.model, control_dt=env.dt, traj=traj)
+
+            trajs.append(default_th.traj)
+
+        trajs = Trajectory.concatenate(trajs)
+
+        return trajs

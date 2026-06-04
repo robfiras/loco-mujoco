@@ -14,7 +14,7 @@ class MjxUnitreeG1BallInspire(UnitreeG1BallInspire):
         else:
             model_option_conf = kwargs["model_option_conf"]
             del kwargs["model_option_conf"]
-        super().__init__(timestep=timestep, n_substeps=n_substeps, model_option_conf=model_option_conf, njmax=100, **kwargs)
+        super().__init__(timestep=timestep, n_substeps=n_substeps, model_option_conf=model_option_conf, njmax=500, **kwargs)
 
     def _modify_spec_for_mjx(self, spec: MjSpec):
         """
