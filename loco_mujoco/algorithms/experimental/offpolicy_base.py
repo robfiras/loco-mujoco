@@ -321,7 +321,18 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             q1_next, q2_next, new_tgt_rs = _critic_forward_target(
                 nobs_b, next_action, tgt_p, tgt_rs
             )
-            q_next = jnp.minimum(q1_next, q2_next) + next_q_bonus
+            # Q-target aggregation across twins. Default is the standard TD3/SAC
+            # `min(Q1, Q2)` (worst-case pessimism). If `pessimism_penalty` is set,
+            # use Motivo-style ensemble pessimism: `mean(Q) - k * |Q1 - Q2|`,
+            # which treats the inter-twin disagreement as an uncertainty estimate.
+            pessimism_penalty = getattr(exp, "pessimism_penalty", None)
+            if pessimism_penalty is None:
+                q_next = jnp.minimum(q1_next, q2_next) + next_q_bonus
+            else:
+                k = float(pessimism_penalty)
+                q_mean = 0.5 * (q1_next + q2_next)
+                q_unc = jnp.abs(q1_next - q2_next)
+                q_next = q_mean - k * q_unc + next_q_bonus
             q_target = rew_b + gamma * (1.0 - done_b) * q_next
             q_target = jax.lax.stop_gradient(q_target)
 

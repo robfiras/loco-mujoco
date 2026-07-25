@@ -38,17 +38,21 @@ from loco_mujoco.algorithms.experimental.offpolicy_base import (
 class TD3ActorNet(nn.Module):
     """Deterministic actor.
 
-    Intentionally outputs RAW (unbounded) logits — the environment clips to
-    its own action space. Bounding via tanh saturates gradients when logits
-    drift large; letting them float and penalising only when they actually
-    exceed [-1, 1] preserves useful gradient inside the in-bounds region.
-    The out-of-bounds penalty is applied in the actor loss (see
-    `TD3Jax._actor_loss`).
+    Default (output_squash="none") emits RAW (unbounded) logits — the env / actor
+    loss clips and penalises OOB. Bounding via tanh saturates gradients when
+    logits drift large, so unconstrained outputs preserve useful gradient inside
+    [-1, 1] at the cost of needing the OOB penalty to keep them there.
+
+    output_squash="tanh" applies jnp.tanh to the final Dense output, bounding the
+    mean to (-1, 1) before exploration / target-policy noise is added. Use this
+    when the actor is drifting OOB enough that the critic extrapolation is
+    destabilising training (raw-actor failure mode on the kin G1 env).
     """
     action_dim: int
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "relu"
     use_obs_norm: bool = True
+    output_squash: str = "none"
 
     @nn.compact
     def __call__(self, x):
@@ -61,6 +65,11 @@ class TD3ActorNet(nn.Module):
             x = activation_fn(x)
         a = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
                      bias_init=constant(0.0))(x)
+        if self.output_squash == "tanh":
+            a = jnp.tanh(a)
+        elif self.output_squash != "none":
+            raise ValueError(f"Unknown output_squash: {self.output_squash!r} "
+                             "(expected 'none' or 'tanh')")
         return a
 
 
@@ -217,6 +226,7 @@ class TD3Jax(OffPolicyBase):
             hidden_layer_dims=tuple(hidden_layers),
             activation=str(exp.activation),
             use_obs_norm=bool(getattr(exp, 'use_obs_norm', False)),
+            output_squash=str(getattr(exp, 'output_squash', 'none')),
         )
         critic_net = cls._build_critic_net(exp)
         actor_tx, critic_tx = cls._build_optimisers(exp)
@@ -290,7 +300,13 @@ class TD3Jax(OffPolicyBase):
         if not deterministic:
             sigma_act = float(getattr(exp, 'exploration_noise', 0.1))
             noise = sigma_act * jax.random.normal(rng, action.shape)
-            action = jnp.clip(action + noise, -1.0, 1.0)
+            # Pass tanh(mean) + noise to the env un-clipped. With output_squash=tanh
+            # the mean is already in (-1, 1) so noise can push the action slightly
+            # OOB — that's what the reward-side OOB term and the kin control's
+            # input clip are there to handle. With output_squash=none the actor is
+            # raw and OOB is unbounded; in that case the reward / actor-loss OOB
+            # plumbing is the only restoring force.
+            action = action + noise
         return action, actor_state
 
     @classmethod
@@ -316,12 +332,30 @@ class TD3Jax(OffPolicyBase):
             {"params": actor_params, "run_stats": actor_run_stats},
             obs_b, mutable=["run_stats"],
         )
-        # Query Q ONLY on in-bounds actions — clipping blocks gradient flow
-        # to the actor when a logit is outside [-1, 1], so the critic's
-        # extrapolated / hallucinated Q-values do not feed back into the
-        # actor update. Out-of-bounds logits are disciplined by the OOB
-        # penalty below instead.
-        action_for_Q = jnp.clip(action_raw, -1.0, 1.0)
+        # Optional stochastic actor loss (Motivo-style): query Q on
+        # tanh(mean) + clip(N(0, target_noise), -noise_clip, noise_clip)
+        # instead of the deterministic mean. Smooths the objective by penalizing
+        # actions that sit on narrow Q peaks.
+        stochastic_actor_loss = bool(getattr(exp, 'stochastic_actor_loss', False))
+        if stochastic_actor_loss:
+            sigma_tgt = float(getattr(exp, 'target_noise', 0.05))
+            noise_clip = float(getattr(exp, 'noise_clip', 0.15))
+            noise = jnp.clip(sigma_tgt * jax.random.normal(rng, action_raw.shape),
+                             -noise_clip, noise_clip)
+            action_for_Q = jnp.clip(action_raw + noise, -1.0, 1.0)
+        else:
+            # When the actor-side OOB penalty is off (lambda_oob == 0.0), route Q's
+            # gradient through the RAW action so the critic itself pulls OOB logits
+            # back toward in-bounds regions. This relies on the reward-side OOB
+            # term (LmjMimicReward.action_out_of_bounds_coeff) teaching the critic
+            # that OOB actions are bad. When lambda_oob > 0.0, keep clipping so the
+            # critic's extrapolated Q on OOB queries cannot feed back into the actor
+            # and the actor-side penalty is the sole restoring force on OOB channels.
+            lambda_oob_branch = float(getattr(exp, 'lambda_oob', 0.1))
+            if lambda_oob_branch == 0.0:
+                action_for_Q = action_raw
+            else:
+                action_for_Q = jnp.clip(action_raw, -1.0, 1.0)
         (q1, q2), _ = critic_apply_fn(
             {"params": critic_st.params, "run_stats": critic_st.run_stats},
             obs_b, action_for_Q, mutable=["run_stats"],
