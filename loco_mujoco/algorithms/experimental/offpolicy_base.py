@@ -208,6 +208,44 @@ def _normalize_dense_kernels(params, normalize_last_layer: bool = True):
     return flax.traverse_util.unflatten_dict(flat, sep="/")
 
 
+def _c51_project_target(target_log_probs, target_bin_values, num_atoms,
+                        min_v, max_v):
+    """Project the next-state log-probabilities onto the C51 support after
+    shifting the bin centers by the bootstrapped target ``r + γ·(z-α·log π)``.
+
+    Mirrors ``xqc.agents.xqc.critic.categorical_td_loss``:
+      - ``target_bin_values``: (B, num_atoms) bin centers AFTER the
+        ``reward + gamma * (bin - actor_entropy) * (1 - done)`` shift.
+      - Distribute each old bin's probability mass between the two nearest
+        new bins using floor/ceil weights.
+
+    Returns the target distribution (B, num_atoms) ready for the cross-entropy
+    against the predicted log-probabilities.
+    """
+    target_bin_values = jnp.clip(target_bin_values, min_v, max_v)
+
+    # `b` indexes new-bin positions for each shifted old bin center.
+    b = (target_bin_values - min_v) / ((max_v - min_v) / (num_atoms - 1))
+    l = jnp.floor(b)
+    u = jnp.ceil(b)
+    l_mask = jax.nn.one_hot(l.reshape(-1), num_atoms).reshape(
+        (-1, num_atoms, num_atoms)
+    )
+    u_mask = jax.nn.one_hot(u.reshape(-1), num_atoms).reshape(
+        (-1, num_atoms, num_atoms)
+    )
+
+    target_probs_old = jnp.exp(target_log_probs)
+    # When floor == ceil (target value lands exactly on a bin center), put all
+    # mass on that bin; else split (u-b) to lower and (b-l) to upper.
+    m_l = (target_probs_old * (u + (l == u).astype(jnp.float32) - b)).reshape(
+        (-1, num_atoms, 1)
+    )
+    m_u = (target_probs_old * (b - l)).reshape((-1, num_atoms, 1))
+    target_probs = jnp.sum(m_l * l_mask + m_u * u_mask, axis=1)
+    return target_probs
+
+
 # ---------------------------------------------------------------------------
 # Base agent conf / state
 # ---------------------------------------------------------------------------
@@ -379,7 +417,9 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             # Bundle every non-params variable collection (run_stats, batch_stats)
             # into `critic_state.run_stats` so subsequent apply / target-update
             # sites can plumb a single object regardless of whether BN is on.
-            critic_bundle = {k: v for k, v in critic_params.items() if k != "params"}
+            # `log_probs_collection` is a sow output, not long-lived state.
+            _BUNDLE_EXCLUDE = {"params", "log_probs_collection"}
+            critic_bundle = {k: v for k, v in critic_params.items() if k not in _BUNDLE_EXCLUDE}
             critic_state = TrainState.create(
                 apply_fn=critic_net.apply,
                 params=critic_params["params"],
