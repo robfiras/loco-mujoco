@@ -28,6 +28,7 @@ from loco_mujoco.algorithms.common.networks import (RunningMeanStd,
 from loco_mujoco.core.wrappers import SummaryMetrics
 from loco_mujoco.algorithms.experimental.offpolicy_base import (
     OffPolicyBase, OffPolicyCriticNet, ReplayBuffer, OffPolicyAgentState,
+    _normalize_dense_kernels,
 )
 
 
@@ -490,7 +491,17 @@ class TD3Jax(OffPolicyBase):
             q1n, q2n, new_tgt_rs = _critic_forward_target(
                 nobs_b, next_action, tgt_p, tgt_rs
             )
-            q_next = jnp.minimum(q1n, q2n) + next_q_bonus
+            # Q-target aggregation across twins. Default is standard TD3
+            # `min(Q1, Q2)`. If `pessimism_penalty` is set, use Motivo-style
+            # ensemble pessimism: `mean(Q) - k * |Q1 - Q2|`.
+            pessimism_penalty = getattr(exp, "pessimism_penalty", None)
+            if pessimism_penalty is None:
+                q_next = jnp.minimum(q1n, q2n) + next_q_bonus
+            else:
+                k = float(pessimism_penalty)
+                q_mean = 0.5 * (q1n + q2n)
+                q_unc = jnp.abs(q1n - q2n)
+                q_next = q_mean - k * q_unc + next_q_bonus
             q_target = rew_b + gamma * (1.0 - done_b) * q_next
             q_target = jax.lax.stop_gradient(q_target)
 
@@ -507,6 +518,19 @@ class TD3Jax(OffPolicyBase):
             )(critic_st.params)
             critic_st = critic_st.apply_gradients(grads=critic_grads)
             critic_st = critic_st.replace(run_stats=new_critic_rs)
+
+            # Post-step weight normalization (XQC / Salimans-Kingma).
+            # When `use_weight_norm=True`, renormalize each Dense kernel after
+            # the gradient step: W <- W / ||W||_axis=-2 (per-output-unit norm).
+            # `normalize_last_layer=True` also renormalizes the predictor head.
+            # No-op when the flag is unset, so the TD3 baseline is unchanged.
+            if bool(getattr(exp, 'use_weight_norm', False)):
+                critic_st = critic_st.replace(
+                    params=_normalize_dense_kernels(
+                        critic_st.params,
+                        normalize_last_layer=bool(getattr(exp, 'normalize_last_layer', True)),
+                    )
+                )
 
             # actor (delayed)
             rng_up, rng_actor = jax.random.split(rng_up)

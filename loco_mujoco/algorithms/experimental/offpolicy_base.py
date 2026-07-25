@@ -92,6 +92,67 @@ class OffPolicyCriticNet(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# Weight-normalization helper (Salimans-Kingma / XQC-style post-step renorm)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_dense_kernels(params, normalize_last_layer: bool = True):
+    """Renormalize every Dense layer's kernel (and bias if present) so that
+    ``||kernel||_axis=-2 = 1``. Mirrors ``xqc/networks/common.py::norm_network``.
+
+    Args:
+        params: Flax params PyTree (FrozenDict).
+        normalize_last_layer: If False, skip the final Dense in each twin's
+            ``_QNet`` (matches the XQC ``normalize_last_layer`` flag).
+
+    Returns:
+        New params PyTree with the same structure.
+    """
+    flat = flax.traverse_util.flatten_dict(params, sep="/")
+
+    dense_paths = sorted({
+        "/".join(k.split("/")[:-1])
+        for k in flat
+        if k.endswith("/kernel") and "Dense" in k
+    })
+
+    if not normalize_last_layer and dense_paths:
+        # Drop the last Dense under each q1/q2 (or other) prefix — that's the
+        # predictor head.
+        from collections import defaultdict
+        last_per_prefix = defaultdict(lambda: ("", -1))
+        for path in dense_paths:
+            parts = path.split("/")
+            prefix = "/".join(parts[:-1])
+            dense_name = parts[-1]
+            if dense_name.startswith("Dense_"):
+                try:
+                    idx = int(dense_name[len("Dense_"):])
+                except ValueError:
+                    continue
+                if idx > last_per_prefix[prefix][1]:
+                    last_per_prefix[prefix] = (path, idx)
+        skip = {p for (p, _) in last_per_prefix.values()}
+        dense_paths = [p for p in dense_paths if p not in skip]
+
+    for path in dense_paths:
+        kernel_key = f"{path}/kernel"
+        bias_key = f"{path}/bias"
+        kernel = flat[kernel_key]
+        if bias_key in flat:
+            bias = flat[bias_key]
+            w = jnp.concatenate([kernel, jnp.expand_dims(bias, -2)], axis=-2)
+            norm = jnp.linalg.norm(w, axis=-2, keepdims=True) + 1e-12
+            flat[kernel_key] = kernel / norm
+            flat[bias_key] = bias / norm.squeeze(-2)
+        else:
+            norm = jnp.linalg.norm(kernel, axis=-2, keepdims=True) + 1e-12
+            flat[kernel_key] = kernel / norm
+
+    return flax.traverse_util.unflatten_dict(flat, sep="/")
+
+
+# ---------------------------------------------------------------------------
 # Base agent conf / state
 # ---------------------------------------------------------------------------
 
@@ -349,6 +410,19 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             )(critic_st.params)
             critic_st = critic_st.apply_gradients(grads=critic_grads)
             critic_st = critic_st.replace(run_stats=new_critic_rs)
+
+            # Post-step weight normalization (XQC / Salimans-Kingma).
+            # When `use_weight_norm=True`, renormalize each Dense kernel after
+            # the gradient step: W <- W / ||W||_axis=-2 (per-output-unit norm).
+            # `normalize_last_layer=True` also renormalizes the predictor head.
+            # No-op when the flag is unset, so SAC/TD3 baselines are unchanged.
+            if bool(getattr(exp, 'use_weight_norm', False)):
+                critic_st = critic_st.replace(
+                    params=_normalize_dense_kernels(
+                        critic_st.params,
+                        normalize_last_layer=bool(getattr(exp, 'normalize_last_layer', True)),
+                    )
+                )
 
             # -- actor loss + extra update (delayed for TD3) --
             rng_up, rng_actor = jax.random.split(rng_up)
