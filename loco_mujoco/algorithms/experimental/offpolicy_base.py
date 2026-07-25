@@ -51,23 +51,65 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 # ---------------------------------------------------------------------------
 
 class _QNet(nn.Module):
-    """One Q-network sub-module (s,a) -> q."""
+    """One Q-network sub-module (s,a) -> q.
+
+    Optional pieces (all gated; defaults preserve the original MLP critic):
+      - `use_batch_norm`: insert BatchNorm into each hidden block. With
+        `pre_activation_bn=True`: `Dense(no bias) -> BN -> activation`.
+        With `pre_activation_bn=False`: `Dense -> activation -> BN`.
+      - `num_atoms > 1`: replace the scalar head with a categorical head
+        of `num_atoms` logits. Returns the scalar value `sum(softmax * z)`
+        where `z = linspace(min_v, max_v, num_atoms)`. The per-atom
+        log-probs are stashed via `self.sow("log_probs_collection", ...)`
+        so the categorical CE loss can retrieve them.
+    """
 
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "tanh"
+    use_batch_norm: bool = False
+    pre_activation_bn: bool = True
+    num_atoms: int = 1
+    min_v: float = -5.0
+    max_v: float = 5.0
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, *, training=False):
         activation_fn = get_activation_fn(self.activation)
         for dim in self.hidden_layer_dims:
-            x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
-                         bias_init=constant(0.0))(x)
-            x = activation_fn(x)
-        return jnp.squeeze(
-            nn.Dense(1, kernel_init=orthogonal(1.0),
-                     bias_init=constant(0.0))(x),
-            axis=-1,
-        )
+            if self.use_batch_norm:
+                if self.pre_activation_bn:
+                    # XQC pre-activation: Dense(no bias) -> BN -> act
+                    x = nn.Dense(dim, use_bias=False,
+                                 kernel_init=orthogonal(jnp.sqrt(2)))(x)
+                    x = nn.BatchNorm(use_running_average=not training,
+                                     momentum=0.99, epsilon=0.001)(x)
+                    x = activation_fn(x)
+                else:
+                    # CrossQ post-activation: Dense -> act -> BN
+                    x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
+                                 bias_init=constant(0.0))(x)
+                    x = activation_fn(x)
+                    x = nn.BatchNorm(use_running_average=not training,
+                                     momentum=0.99, epsilon=0.001)(x)
+            else:
+                x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
+                             bias_init=constant(0.0))(x)
+                x = activation_fn(x)
+
+        # Head
+        n_out = max(1, int(self.num_atoms))
+        head = nn.Dense(n_out, kernel_init=orthogonal(1.0),
+                        bias_init=constant(0.0))(x)
+        if n_out == 1:
+            return jnp.squeeze(head, axis=-1)
+        # Categorical: convert logits -> log_probs over `num_atoms` bins,
+        # extract scalar value via support.
+        log_probs = nn.log_softmax(head, axis=-1)
+        # Stash log-probs so the CE loss can find them via mutable collection.
+        self.sow("log_probs_collection", "log_probs", log_probs)
+        bin_values = jnp.linspace(self.min_v, self.max_v, n_out)
+        value = jnp.sum(jnp.exp(log_probs) * bin_values, axis=-1)
+        return value
 
 
 class OffPolicyCriticNet(nn.Module):
@@ -76,14 +118,28 @@ class OffPolicyCriticNet(nn.Module):
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "tanh"
     use_obs_norm: bool = True
+    use_batch_norm: bool = False
+    pre_activation_bn: bool = True
+    num_atoms: int = 1
+    min_v: float = -5.0
+    max_v: float = 5.0
 
     @nn.compact
-    def __call__(self, obs, action):
+    def __call__(self, obs, action, *, training=False):
         if self.use_obs_norm:
             obs = RunningMeanStd()(obs)
         x = jnp.concatenate([obs, action], axis=-1)
-        q1 = _QNet(self.hidden_layer_dims, self.activation, name="q1")(x)
-        q2 = _QNet(self.hidden_layer_dims, self.activation, name="q2")(x)
+        kwargs = dict(
+            hidden_layer_dims=self.hidden_layer_dims,
+            activation=self.activation,
+            use_batch_norm=self.use_batch_norm,
+            pre_activation_bn=self.pre_activation_bn,
+            num_atoms=self.num_atoms,
+            min_v=self.min_v,
+            max_v=self.max_v,
+        )
+        q1 = _QNet(**kwargs, name="q1")(x, training=training)
+        q2 = _QNet(**kwargs, name="q2")(x, training=training)
         return q1, q2
 
 
@@ -276,6 +332,11 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             hidden_layer_dims=tuple(hidden),
             activation=str(exp.activation),
             use_obs_norm=bool(getattr(exp, 'use_obs_norm', False)),
+            use_batch_norm=bool(getattr(exp, 'use_batch_norm', False)),
+            pre_activation_bn=bool(getattr(exp, 'pre_activation_bn', True)),
+            num_atoms=int(getattr(exp, 'num_atoms', 1)),
+            min_v=float(getattr(exp, 'min_v', -5.0)),
+            max_v=float(getattr(exp, 'max_v', 5.0)),
         )
 
     # ---------- Training loop (the shared engine) ------------------------
@@ -315,14 +376,18 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             critic_params = critic_net.init(
                 rng_c, jnp.zeros((1, obs_dim)), jnp.zeros((1, action_dim))
             )
+            # Bundle every non-params variable collection (run_stats, batch_stats)
+            # into `critic_state.run_stats` so subsequent apply / target-update
+            # sites can plumb a single object regardless of whether BN is on.
+            critic_bundle = {k: v for k, v in critic_params.items() if k != "params"}
             critic_state = TrainState.create(
                 apply_fn=critic_net.apply,
                 params=critic_params["params"],
-                run_stats=critic_params.get("run_stats", {}),
+                run_stats=critic_bundle,
                 tx=agent_conf.critic_tx,
             )
             target_critic_params = critic_params["params"]
-            target_critic_run_stats = critic_params.get("run_stats", {})
+            target_critic_run_stats = critic_bundle
             extra_state = cls._init_extra_state(rng_e, exp)
             replay_buffer = ReplayBuffer.create(
                 int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
@@ -345,11 +410,17 @@ class OffPolicyBase(JaxRLAlgorithmBase):
         gradient_steps = int(getattr(exp, 'gradient_steps', 1))
 
         def _critic_forward_target(obs, action, params, run_stats):
+            # `run_stats` is the full mutable-variables bundle for the critic
+            # (run_stats + optional batch_stats). Splatting `**run_stats` lets
+            # us handle both old (only run_stats) and BN (run_stats + batch_stats)
+            # critics without conditional plumbing through every call site.
+            mutables = list(run_stats.keys())
             (q1, q2), updates = critic_net.apply(
-                {"params": params, "run_stats": run_stats},
-                obs, action, mutable=["run_stats"],
+                {"params": params, **run_stats},
+                obs, action, mutable=mutables, training=False,
             )
-            return q1, q2, updates["run_stats"]
+            new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+            return q1, q2, new_bundle
 
         # ----- collect transition -----
         def _collect_transition(actor_state, replay_buffer, env_state,
@@ -398,12 +469,15 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             q_target = jax.lax.stop_gradient(q_target)
 
             def _critic_loss_fn(params):
+                run_stats = critic_st.run_stats
+                mutables = list(run_stats.keys())
                 (q1, q2), updates = critic_net.apply(
-                    {"params": params, "run_stats": critic_st.run_stats},
-                    obs_b, act_b, mutable=["run_stats"],
+                    {"params": params, **run_stats},
+                    obs_b, act_b, mutable=mutables, training=False,
                 )
                 loss = jnp.mean((q1 - q_target) ** 2) + jnp.mean((q2 - q_target) ** 2)
-                return loss, updates["run_stats"]
+                new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+                return loss, new_bundle
 
             (critic_loss, new_critic_rs), critic_grads = jax.value_and_grad(
                 _critic_loss_fn, has_aux=True
@@ -458,10 +532,16 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             if new_actor_rs is not None:
                 actor_st = actor_st.replace(run_stats=new_actor_rs)
 
-            # -- soft target update --
+            # -- soft target update -- (params + the bundle of mutable
+            # variables; jax.tree.map over an empty dict is a no-op, so the
+            # bundle update is safe when BN/obs_norm are off).
             new_tgt_p = jax.tree.map(
                 lambda tp, cp: tau * cp + (1.0 - tau) * tp,
                 tgt_p, critic_st.params,
+            )
+            new_tgt_rs = jax.tree.map(
+                lambda tp, cp: tau * cp + (1.0 - tau) * tp,
+                new_tgt_rs, critic_st.run_stats,
             )
 
             new_carry = (actor_st, critic_st, new_tgt_p, new_tgt_rs,

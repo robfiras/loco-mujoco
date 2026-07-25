@@ -371,9 +371,11 @@ class SACJax(OffPolicyBase):
         sampled_action, log_pi = _squashed_gaussian_sample_and_log_prob(
             mean_a, log_std_a, rng
         )
+        actor_bundle = critic_st.run_stats
+        actor_mutables = list(actor_bundle.keys())
         (q1_a, q2_a), _ = critic_apply_fn(
-            {"params": critic_st.params, "run_stats": critic_st.run_stats},
-            obs_b, sampled_action, mutable=["run_stats"],
+            {"params": critic_st.params, **actor_bundle},
+            obs_b, sampled_action, mutable=actor_mutables, training=False,
         )
         q_a = jnp.minimum(q1_a, q2_a)
         alpha = jnp.exp(extra_state.train_state.params["log_alpha"])

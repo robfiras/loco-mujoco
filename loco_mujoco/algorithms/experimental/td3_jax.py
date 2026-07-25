@@ -257,14 +257,20 @@ class TD3Jax(OffPolicyBase):
         critic_params = agent_conf.critic_net.init(
             rng_c, jnp.zeros((1, obs_dim)), jnp.zeros((1, action_dim))
         )
+        # `critic_state.run_stats` is treated as the FULL mutable-variables
+        # bundle for the critic (everything except `params`). Today it holds
+        # `{"run_stats": ...}` when RunningMeanStd is in the trunk; with BN on,
+        # it also holds `{"batch_stats": ...}`. Bundling avoids threading a
+        # second carry field through every apply / target-update site.
+        critic_bundle = {k: v for k, v in critic_params.items() if k != "params"}
         critic_state = TrainState.create(
             apply_fn=agent_conf.critic_net.apply,
             params=critic_params["params"],
-            run_stats=critic_params.get("run_stats", {}),
+            run_stats=critic_bundle,
             tx=agent_conf.critic_tx,
         )
         target_critic_params = critic_params["params"]
-        target_critic_run_stats = critic_params.get("run_stats", {})
+        target_critic_run_stats = critic_bundle
         extra_state = _TD3Extra(
             target_actor_params=actor_params["params"],
             target_actor_run_stats=actor_params.get("run_stats", {}),
@@ -357,9 +363,15 @@ class TD3Jax(OffPolicyBase):
                 action_for_Q = action_raw
             else:
                 action_for_Q = jnp.clip(action_raw, -1.0, 1.0)
+        # Actor's critic query uses the SAME bundle as the critic loss (the
+        # `critic_st.run_stats` field holds run_stats + optional batch_stats).
+        # `training=False` so any BN inside the critic uses running averages
+        # (the small per-actor-step batch would otherwise corrupt them).
+        actor_bundle = critic_st.run_stats
+        actor_mutables = list(actor_bundle.keys())
         (q1, q2), _ = critic_apply_fn(
-            {"params": critic_st.params, "run_stats": critic_st.run_stats},
-            obs_b, action_for_Q, mutable=["run_stats"],
+            {"params": critic_st.params, **actor_bundle},
+            obs_b, action_for_Q, mutable=actor_mutables, training=False,
         )
         # TD3 uses Q1 for the policy gradient
         q_loss = -jnp.mean(q1)
@@ -457,11 +469,41 @@ class TD3Jax(OffPolicyBase):
         gradient_steps = int(getattr(exp, 'gradient_steps', 1))
 
         def _critic_forward_target(obs, action, params, run_stats):
+            # `run_stats` here is the full mutable-variables bundle for the
+            # critic (run_stats + optional batch_stats).
+            #
+            # Non-joint forward suffices when BN is off; this is the legacy
+            # path. When BN is on the caller should instead use
+            # _critic_forward_target_joint so BN sees both the bootstrap and
+            # current-state batches together.
+            mutables = list(run_stats.keys())
             (q1, q2), updates = critic_net.apply(
-                {"params": params, "run_stats": run_stats},
-                obs, action, mutable=["run_stats"],
+                {"params": params, **run_stats},
+                obs, action,
+                mutable=mutables,
+                training=False,
             )
-            return q1, q2, updates["run_stats"]
+            new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+            return q1, q2, new_bundle
+
+        def _critic_forward_target_joint(obs, nobs, act, next_act,
+                                         params, run_stats):
+            """Joint forward: concat (obs, nobs)/(act, next_act) so BN sees
+            both halves, then split. Returns (q1_curr, q2_curr, q1_next,
+            q2_next, new_bundle)."""
+            mutables = list(run_stats.keys())
+            cat_obs = jnp.concatenate([obs, nobs], axis=0)
+            cat_act = jnp.concatenate([act, next_act], axis=0)
+            (q1c, q2c), updates = critic_net.apply(
+                {"params": params, **run_stats},
+                cat_obs, cat_act,
+                mutable=mutables,
+                training=True,
+            )
+            q1_curr, q1_next = jnp.split(q1c, 2)
+            q2_curr, q2_next = jnp.split(q2c, 2)
+            new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+            return q1_curr, q2_curr, q1_next, q2_next, new_bundle
 
         def _collect_transition(actor_state, replay_buffer, env_state,
                                 last_obs, rng, extra_state):
@@ -506,12 +548,36 @@ class TD3Jax(OffPolicyBase):
             q_target = jax.lax.stop_gradient(q_target)
 
             def _critic_loss_fn(params):
-                (q1, q2), updates = critic_net.apply(
-                    {"params": params, "run_stats": critic_st.run_stats},
-                    obs_b, act_b, mutable=["run_stats"],
-                )
+                run_stats = critic_st.run_stats
+                mutables = list(run_stats.keys())
+                training = bool(getattr(exp, 'use_batch_norm', False))
+                critic_loss_kind = str(getattr(exp, 'critic_loss', 'mse'))
+                if training and critic_loss_kind == 'mse':
+                    # XQC / CrossQ joint forward: run the online critic on
+                    # concat([obs, nobs], [act, next_act]) so BN sees both
+                    # batches together, then split.
+                    cat_obs = jnp.concatenate([obs_b, nobs_b], axis=0)
+                    cat_act = jnp.concatenate([act_b, next_action], axis=0)
+                    (q1c, q2c), updates = critic_net.apply(
+                        {"params": params, **run_stats},
+                        cat_obs, cat_act,
+                        mutable=mutables, training=True,
+                    )
+                    q1, _ = jnp.split(q1c, 2)
+                    q2, _ = jnp.split(q2c, 2)
+                elif critic_loss_kind == 'categorical':
+                    raise NotImplementedError(
+                        "categorical critic loss path not yet wired into TD3"
+                    )
+                else:
+                    (q1, q2), updates = critic_net.apply(
+                        {"params": params, **run_stats},
+                        obs_b, act_b,
+                        mutable=mutables, training=False,
+                    )
                 loss = jnp.mean((q1 - q_target) ** 2) + jnp.mean((q2 - q_target) ** 2)
-                return loss, updates["run_stats"]
+                new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+                return loss, new_bundle
 
             (critic_loss, new_critic_rs), critic_grads = jax.value_and_grad(
                 _critic_loss_fn, has_aux=True
@@ -574,10 +640,18 @@ class TD3Jax(OffPolicyBase):
                 (actor_st, ex_st, tgt_p, tgt_rs),
             )
 
-            # critic target soft-update (every step)
+            # critic target soft-update (every step). Params via Polyak. Also
+            # soft-update the bundle of mutable variables (RunningMeanStd's
+            # run_stats and, when BN is on, batch_stats) the same way XQC does.
+            # `jax.tree.map` over an empty dict is a no-op, so this is safe
+            # for the baseline configuration where the bundle is empty.
             new_tgt_p = jax.tree.map(
                 lambda tp, cp: tau * cp + (1.0 - tau) * tp,
                 tgt_p, critic_st.params,
+            )
+            new_tgt_rs = jax.tree.map(
+                lambda tp, cp: tau * cp + (1.0 - tau) * tp,
+                new_tgt_rs, critic_st.run_stats,
             )
 
             new_carry = (actor_st, critic_st, new_tgt_p, new_tgt_rs,
