@@ -258,7 +258,8 @@ class Mjx(Mujoco):
         cur_obs = jnp.nan_to_num(cur_obs, nan=0.0)
 
         # create state
-        carry = carry.replace(cur_step_in_episode=carry.cur_step_in_episode + 1)
+        carry = carry.replace(cur_step_in_episode=carry.cur_step_in_episode + 1,
+                              global_step=carry.global_step + 1)
         state = state.replace(data=data, observation=cur_obs, reward=reward,
                               absorbing=absorbing, done=done, info=cur_info, additional_carry=carry)
 

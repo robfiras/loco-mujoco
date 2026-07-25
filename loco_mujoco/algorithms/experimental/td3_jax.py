@@ -54,10 +54,13 @@ class TD3ActorNet(nn.Module):
     activation: str = "relu"
     use_obs_norm: bool = True
     output_squash: str = "none"
+    obs_ind: jnp.ndarray = None
 
     @nn.compact
     def __call__(self, x):
         activation_fn = get_activation_fn(self.activation)
+        if self.obs_ind is not None:
+            x = x[..., self.obs_ind]
         if self.use_obs_norm:
             x = RunningMeanStd()(x)
         for dim in self.hidden_layer_dims:
@@ -84,6 +87,11 @@ class TD3SummaryMetrics(SummaryMetrics):
     mean_actor_loss: float = 0.0
     mean_action_norm: float = 0.0
     mean_oob_penalty: float = 0.0
+    mean_critic_grad_norm: float = 0.0
+    mean_actor_grad_norm: float = 0.0
+    mean_action_smoothness: float = 0.0
+    mean_curriculum_cur_max: float = 0.0
+    mean_global_step: float = 0.0
     buffer_size: int = 0
 
 
@@ -184,7 +192,11 @@ class TD3AgentState(OffPolicyAgentState):
         )
         extra_state = flax.serialization.from_state_dict(template_extra, d["extra_state"])
 
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return cls(
             actor_state=actor_state,
@@ -210,6 +222,24 @@ class TD3Jax(OffPolicyBase):
         obs_dim = int(env.info.observation_space.shape[0])
         action_dim = int(env.info.action_space.shape[0])
 
+        # Resolve actor/critic obs groups -> obs_ind arrays (mirrors ppo_jax).
+        actor_obs_group = getattr(config.experiment, "actor_obs_group", None)
+        critic_obs_group = getattr(config.experiment, "critic_obs_group", None)
+        if actor_obs_group is not None:
+            actor_obs_ind = jnp.asarray(
+                env.obs_container.get_obs_ind_by_group(str(actor_obs_group)),
+                dtype=jnp.int32,
+            )
+        else:
+            actor_obs_ind = None
+        if critic_obs_group is not None:
+            critic_obs_ind = jnp.asarray(
+                env.obs_container.get_obs_ind_by_group(str(critic_obs_group)),
+                dtype=jnp.int32,
+            )
+        else:
+            critic_obs_ind = None
+
         with open_dict(config.experiment):
             config.experiment.obs_dim = obs_dim
             config.experiment.action_dim = action_dim
@@ -228,8 +258,9 @@ class TD3Jax(OffPolicyBase):
             activation=str(exp.activation),
             use_obs_norm=bool(getattr(exp, 'use_obs_norm', False)),
             output_squash=str(getattr(exp, 'output_squash', 'none')),
+            obs_ind=actor_obs_ind,
         )
-        critic_net = cls._build_critic_net(exp)
+        critic_net = cls._build_critic_net(exp, obs_ind=critic_obs_ind)
         actor_tx, critic_tx = cls._build_optimisers(exp)
 
         return cls._agent_conf(
@@ -278,7 +309,11 @@ class TD3Jax(OffPolicyBase):
             target_actor_params=actor_params["params"],
             target_actor_run_stats=actor_params.get("run_stats", {}),
         )
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return TD3AgentState(
             actor_state=actor_state,
@@ -337,7 +372,7 @@ class TD3Jax(OffPolicyBase):
     @classmethod
     def _actor_loss(cls, actor_params, actor_apply_fn, actor_run_stats,
                     critic_st, critic_apply_fn,
-                    obs_b, rng, exp, extra_state):
+                    obs_b, rng, exp, extra_state, nobs_b=None):
         action_raw, updates = actor_apply_fn(
             {"params": actor_params, "run_stats": actor_run_stats},
             obs_b, mutable=["run_stats"],
@@ -390,12 +425,30 @@ class TD3Jax(OffPolicyBase):
         lambda_oob = float(getattr(exp, 'lambda_oob', 0.1))
         penalty_loss = lambda_oob * jax.lax.stop_gradient(q_scale) * oob_penalty
 
-        loss = q_loss + penalty_loss
+        # Optional action-smoothness regularizer: penalize the L2 distance
+        # between the (tanh-squashed) actor output on consecutive states.
+        # Discourages bang-bang policies. With output_squash="tanh" the
+        # actor returns post-tanh actions, so action_raw is already in (-1,1)
+        # and we compare it directly to actor(next_obs).
+        lambda_smooth = float(getattr(exp, 'lambda_action_smooth', 0.0))
+        if lambda_smooth > 0.0 and nobs_b is not None:
+            next_action, _ = actor_apply_fn(
+                {"params": actor_params, "run_stats": updates["run_stats"]},
+                nobs_b, mutable=["run_stats"],
+            )
+            smoothness = jnp.mean((action_raw - next_action) ** 2)
+            smooth_loss = lambda_smooth * smoothness
+        else:
+            smoothness = jnp.array(0.0)
+            smooth_loss = jnp.array(0.0)
+
+        loss = q_loss + penalty_loss + smooth_loss
         return loss, {
             "run_stats": updates["run_stats"],
             "action_norm": jnp.mean(jnp.linalg.norm(action_raw, axis=-1)),
             "oob_penalty": oob_penalty,
             "q_scale": q_scale,
+            "action_smoothness": smoothness,
         }
 
     @classmethod
@@ -440,6 +493,7 @@ class TD3Jax(OffPolicyBase):
             OffPolicyAgentState as _S,
         )
         from loco_mujoco.core.wrappers import LogEnvState
+        from loco_mujoco.core.mujoco_mjx import MjxState
         from loco_mujoco.utils import ValidationSummary
 
         exp = agent_conf.config.experiment
@@ -517,9 +571,16 @@ class TD3Jax(OffPolicyBase):
             next_obs, reward, absorbing, done, info, env_state = env.step(
                 env_state, action, traj
             )
-            replay_buffer = replay_buffer.add_batch(
-                last_obs, next_obs, action, reward, done.astype(jnp.float32)
-            )
+            if replay_buffer.add_subsample:
+                rng, rng_buf = jax.random.split(rng)
+                replay_buffer = replay_buffer.add_batch(
+                    last_obs, next_obs, action, reward,
+                    absorbing.astype(jnp.float32), rng=rng_buf,
+                )
+            else:
+                replay_buffer = replay_buffer.add_batch(
+                    last_obs, next_obs, action, reward, absorbing.astype(jnp.float32)
+                )
             return actor_state, replay_buffer, env_state, next_obs, rng
 
         def _single_gradient_update(carry, step_idx):
@@ -638,6 +699,7 @@ class TD3Jax(OffPolicyBase):
             (critic_loss, new_critic_rs), critic_grads = jax.value_and_grad(
                 _critic_loss_fn, has_aux=True
             )(critic_st.params)
+            critic_grad_norm = optax.global_norm(critic_grads)
             critic_st = critic_st.apply_gradients(grads=critic_grads)
             critic_st = critic_st.replace(run_stats=new_critic_rs)
 
@@ -662,12 +724,16 @@ class TD3Jax(OffPolicyBase):
                 return cls._actor_loss(
                     params, actor_st.apply_fn, actor_st.run_stats,
                     critic_st, critic_net.apply,
-                    obs_b, rng_actor, exp, ex_st,
+                    obs_b, rng_actor, exp, ex_st, nobs_b=nobs_b,
                 )
 
             (actor_loss, actor_aux), actor_grads = jax.value_and_grad(
                 _actor_loss_fn, has_aux=True
             )(actor_st.params)
+            # raw pre-clip grad norm; reported only on steps where the actor
+            # actually updates (zero on policy-delay skip steps).
+            actor_grad_norm_raw = optax.global_norm(actor_grads)
+            actor_grad_norm = jnp.where(do_actor_update, actor_grad_norm_raw, 0.0)
 
             def _apply_actor(args):
                 a_st, ex_st_in, t_p, t_rs = args
@@ -714,7 +780,10 @@ class TD3Jax(OffPolicyBase):
                          ex_st, buf, rng_up)
             return new_carry, (critic_loss, actor_loss,
                                 actor_aux["action_norm"],
-                                actor_aux["oob_penalty"])
+                                actor_aux["oob_penalty"],
+                                critic_grad_norm,
+                                actor_grad_norm,
+                                actor_aux["action_smoothness"])
 
         def _do_updates(actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up):
             carry = (actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up)
@@ -722,13 +791,22 @@ class TD3Jax(OffPolicyBase):
                 _single_gradient_update, carry, jnp.arange(gradient_steps)
             )
             actor_st, critic_st, tgt_p, tgt_rs, ex_st, _, _ = carry
+            # losses[5] is actor_grad_norm, zeroed on policy-delay skip steps.
+            # Sum then divide by the number of *actual* actor updates to get
+            # a mean over only the steps where the actor moved.
+            n_actor_updates = jnp.maximum(jnp.sum(losses[5] != 0.0), 1)
             return (actor_st, critic_st, tgt_p, tgt_rs, ex_st,
                     jnp.mean(losses[0]), jnp.mean(losses[1]),
-                    jnp.mean(losses[2]), jnp.mean(losses[3]))
+                    jnp.mean(losses[2]), jnp.mean(losses[3]),
+                    jnp.mean(losses[4]),
+                    jnp.sum(losses[5]) / n_actor_updates,
+                    jnp.mean(losses[6]))
 
         def _skip_updates(actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up):
             return (actor_st, critic_st, tgt_p, tgt_rs, ex_st,
-                    jnp.array(0.0), jnp.array(0.0), jnp.array(0.0), jnp.array(0.0))
+                    jnp.array(0.0), jnp.array(0.0), jnp.array(0.0),
+                    jnp.array(0.0), jnp.array(0.0), jnp.array(0.0),
+                    jnp.array(0.0))
 
         def _update_step(runner_state, unused):
             (actor_state, critic_state, tgt_params, tgt_run_stats,
@@ -747,7 +825,8 @@ class TD3Jax(OffPolicyBase):
                  ex_state, replay_buffer, rng_update),
             )
             (actor_state, critic_state, tgt_params, tgt_run_stats,
-             ex_state, critic_loss, actor_loss, action_norm, oob_penalty) = result
+             ex_state, critic_loss, actor_loss, action_norm, oob_penalty,
+             critic_grad_norm, actor_grad_norm, action_smoothness) = result
 
             log_env_state = env_state.find(LogEnvState)
             logged_metrics = log_env_state.metrics
@@ -763,8 +842,22 @@ class TD3Jax(OffPolicyBase):
                 mean_actor_loss=actor_loss,
                 buffer_size=replay_buffer.size,
             )
+            # Curriculum-progress metrics. Read from MjxState.additional_carry
+            # via env.find_attr(...), which recurses through the wrapper chain.
+            additional_carry = env.find_attr(env_state, "additional_carry")
+            global_step_mean = jnp.mean(
+                additional_carry.global_step.astype(jnp.float32)
+            )
+            curriculum_cur_max = jnp.mean(
+                additional_carry.curriculum_cur_max.astype(jnp.float32)
+            )
             metric = TD3SummaryMetrics(mean_action_norm=action_norm,
                                         mean_oob_penalty=oob_penalty,
+                                        mean_critic_grad_norm=critic_grad_norm,
+                                        mean_actor_grad_norm=actor_grad_norm,
+                                        mean_action_smoothness=action_smoothness,
+                                        mean_curriculum_cur_max=curriculum_cur_max,
+                                        mean_global_step=global_step_mean,
                                         **base_kwargs)
 
             runner_state = (actor_state, critic_state, tgt_params, tgt_run_stats,

@@ -32,6 +32,8 @@ from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Traject
 class AdditionalCarry:
     key: jax.Array
     cur_step_in_episode: int
+    global_step: int
+    curriculum_cur_max: int
     last_action: Union[np.ndarray, jax.Array]
     observation_states: struct.PyTreeNode
     reward_state: struct.PyTreeNode
@@ -876,6 +878,8 @@ class Mujoco:
         carry = AdditionalCarry(
             key=key,
             cur_step_in_episode=1,
+            global_step=0,
+            curriculum_cur_max=0,
             last_action=backend.zeros(self.info.action_space.shape),
             observation_states=self.obs_container.init_state(self, _k1, model, data, backend, traj),
             reward_state=self._reward_function.init_state(self, _k2, model, data, backend, traj),

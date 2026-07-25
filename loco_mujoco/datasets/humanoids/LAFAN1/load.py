@@ -10,7 +10,9 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from scipy.spatial.transform import Rotation as sRot
 from huggingface_hub import hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
+from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError, OfflineModeIsEnabled
+import httpx
+import requests
 
 import loco_mujoco
 from loco_mujoco.core.utils.math import quat_scalarlast2scalarfirst
@@ -120,6 +122,11 @@ def load_lafan1_trajectory(
     all_trajectories = []
     for d_name in dataset_name:
 
+        # Strip the .npz suffix once up-front so it's consistent throughout
+        # the loop (and for the recursive retargeting call).
+        if d_name.endswith(".npz"):
+            d_name = d_name[:-len(".npz")]
+
         if path_to_convert_lafan1_datasets:
             target_path_dataset = os.path.join(path_to_convert_lafan1_datasets, env_name, f"{d_name}.npz")
         else:
@@ -134,21 +141,25 @@ def load_lafan1_trajectory(
                 continue
 
         # load the npz file
-        d_name = d_name if d_name.endswith(".npz") else f"{d_name}.npz"
+        hf_filename = f"{d_name}.npz"
 
         try:
             file_path = hf_hub_download(
                 repo_id="robfiras/loco-mujoco-datasets",
-                filename=f"Lafan1/mocap/{env_name}/{d_name}",
+                filename=f"Lafan1/mocap/{env_name}/{hf_filename}",
                 repo_type="dataset"
             )
             traj = Trajectory.load(file_path)
-        except (EntryNotFoundError, HfHubHTTPError):
-            # Target env not on HF → retarget on-the-fly from the source env
-            logger.info(f"Lafan1/mocap/{env_name}/{d_name} not on HuggingFace. "
+        except (EntryNotFoundError, HfHubHTTPError,
+                requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                httpx.TransportError, httpx.HTTPError,
+                OfflineModeIsEnabled):
+            # Target env not on HF (or HF unreachable) → retarget from source env
+            logger.info(f"Lafan1/mocap/{env_name}/{hf_filename} not on HuggingFace. "
                         f"Retargeting from {source_env} on-the-fly.")
             traj_source = load_lafan1_trajectory(source_env, [d_name],
-                                                 max_steps=max_steps)
+                                                 max_steps=max_steps,
+                                                 source_env=source_env)
             traj = retarget_traj_from_robot_to_robot(source_env, traj_source, env_name)
 
         # extend the motion to the desired length
@@ -169,7 +180,7 @@ def load_lafan1_trajectory(
         logger.info("Concatenating trajectories ...")
         traj_datas = [t.data for t in all_trajectories]
         traj_infos = [t.info for t in all_trajectories]
-        traj_data, traj_info = TrajectoryData.concatenate(traj_datas, traj_infos)
+        traj_data, traj_info = TrajectoryData.concatenate(traj_datas, traj_infos, backend=np)
         trajectory = Trajectory(traj_info, traj_data)
 
     logger.info("Trajectory data loaded!")

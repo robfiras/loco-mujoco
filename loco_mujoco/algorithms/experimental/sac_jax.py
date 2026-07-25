@@ -211,7 +211,11 @@ class SACAgentState(OffPolicyAgentState):
                 apply_fn=lambda p, x: p["log_alpha"])
         )
 
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return cls(
             actor_state=actor_state,
@@ -302,7 +306,11 @@ class SACJax(OffPolicyBase):
         target_critic_run_stats = critic_params.get("run_stats", {})
 
         extra_state = cls._init_extra_state(rng_x, exp, alpha_tx=agent_conf.alpha_tx)
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return SACAgentState(
             actor_state=actor_state,

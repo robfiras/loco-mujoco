@@ -124,6 +124,11 @@ class ReplayBuffer:
     Any of `next_obs` / `value_target` can be turned off at `create` time;
     disabled columns become zero-sized dummies (0 bytes). Flags are static
     metadata so `if self.store_*` branches are baked at trace time.
+
+    Optional Bernoulli sub-sampling at write time: with `add_subsample=True`
+    and `add_prob=p`, each transition in an incoming batch is kept with
+    probability p. Effective temporal coverage becomes ~capacity / p without
+    growing GPU memory. `add_batch` requires an `rng` when subsampling is on.
     """
     obs: jnp.ndarray
     next_obs: jnp.ndarray
@@ -135,11 +140,15 @@ class ReplayBuffer:
     size: int
     store_next_obs: bool = struct.field(pytree_node=False, default=True)
     store_value_target: bool = struct.field(pytree_node=False, default=False)
+    add_subsample: bool = struct.field(pytree_node=False, default=False)
+    add_prob: float = struct.field(pytree_node=False, default=1.0)
 
     @classmethod
     def create(cls, obs_dim: int, action_dim: int, capacity: int,
                store_next_obs: bool = True,
-               store_value_target: bool = False):
+               store_value_target: bool = False,
+               add_subsample: bool = False,
+               add_prob: float = 1.0):
         next_obs_shape = (capacity, obs_dim) if store_next_obs else (0, 0)
         value_shape = (capacity,) if store_value_target else (0,)
         return cls(
@@ -153,11 +162,69 @@ class ReplayBuffer:
             size=0,
             store_next_obs=store_next_obs,
             store_value_target=store_value_target,
+            add_subsample=bool(add_subsample),
+            add_prob=float(add_prob),
         )
 
-    def add_batch(self, obs, next_obs, action, reward, done, value_target=None):
+    def add_batch(self, obs, next_obs, action, reward, done,
+                  value_target=None, rng=None):
         capacity = self.obs.shape[0]
         batch_size = obs.shape[0]
+
+        if self.add_subsample:
+            assert rng is not None, (
+                "buffer was created with add_subsample=True but "
+                "add_batch received rng=None"
+            )
+            # Per-element Bernoulli keep mask.
+            keep = jax.random.uniform(rng, (batch_size,)) < self.add_prob
+            kept_cnt = jnp.sum(keep.astype(jnp.int32))
+            # Running write offset: -1 for dropped, 0..K-1 for kept entries.
+            # Dropped entries write onto the slot of the most recent kept
+            # entry (idempotent — the next kept entry overwrites it).
+            offsets = jnp.cumsum(keep.astype(jnp.int32)) - 1
+            offsets = jnp.maximum(offsets, 0)
+            indices = (self.ptr + offsets) % capacity
+            # Masked writes: where keep is False, write back the current slot
+            # contents so the .at[].set is a no-op for that entry.
+            cur_obs = self.obs[indices]
+            new_obs_vals = jnp.where(keep[:, None], obs, cur_obs)
+            new_action_vals = jnp.where(
+                keep[:, None], action, self.action[indices]
+            )
+            new_reward_vals = jnp.where(keep, reward, self.reward[indices])
+            done_f32 = done.astype(jnp.float32)
+            new_done_vals = jnp.where(keep, done_f32, self.done[indices])
+            if self.store_next_obs:
+                cur_next_obs = self.next_obs[indices]
+                new_next_obs_vals = jnp.where(
+                    keep[:, None], next_obs, cur_next_obs
+                )
+                new_next_obs = self.next_obs.at[indices].set(new_next_obs_vals)
+            else:
+                new_next_obs = self.next_obs
+            if self.store_value_target:
+                assert value_target is not None, (
+                    "buffer was created with store_value_target=True but "
+                    "add_batch received value_target=None"
+                )
+                new_vt_vals = jnp.where(
+                    keep, value_target, self.value_target[indices]
+                )
+                new_value_target = self.value_target.at[indices].set(new_vt_vals)
+            else:
+                new_value_target = self.value_target
+            return self.replace(
+                obs=self.obs.at[indices].set(new_obs_vals),
+                next_obs=new_next_obs,
+                action=self.action.at[indices].set(new_action_vals),
+                reward=self.reward.at[indices].set(new_reward_vals),
+                done=self.done.at[indices].set(new_done_vals),
+                value_target=new_value_target,
+                ptr=(self.ptr + kept_cnt) % capacity,
+                size=jnp.minimum(self.size + kept_cnt, capacity),
+            )
+
         indices = (self.ptr + jnp.arange(batch_size)) % capacity
         new_next_obs = (self.next_obs.at[indices].set(next_obs)
                         if self.store_next_obs else self.next_obs)

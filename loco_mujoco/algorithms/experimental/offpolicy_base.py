@@ -123,9 +123,12 @@ class OffPolicyCriticNet(nn.Module):
     num_atoms: int = 1
     min_v: float = -5.0
     max_v: float = 5.0
+    obs_ind: jnp.ndarray = None
 
     @nn.compact
     def __call__(self, obs, action, *, training=False):
+        if self.obs_ind is not None:
+            obs = obs[..., self.obs_ind]
         if self.use_obs_norm:
             obs = RunningMeanStd()(obs)
         x = jnp.concatenate([obs, action], axis=-1)
@@ -361,7 +364,7 @@ class OffPolicyBase(JaxRLAlgorithmBase):
 
     # ---------- Conf helpers (subclasses can override) -------------------
     @classmethod
-    def _build_critic_net(cls, exp):
+    def _build_critic_net(cls, exp, obs_ind=None):
         import ast
         from omegaconf import ListConfig
         hidden = (exp.hidden_layers if isinstance(exp.hidden_layers, (list, ListConfig))
@@ -375,6 +378,7 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             num_atoms=int(getattr(exp, 'num_atoms', 1)),
             min_v=float(getattr(exp, 'min_v', -5.0)),
             max_v=float(getattr(exp, 'max_v', 5.0)),
+            obs_ind=obs_ind,
         )
 
     # ---------- Training loop (the shared engine) ------------------------
@@ -430,7 +434,9 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             target_critic_run_stats = critic_bundle
             extra_state = cls._init_extra_state(rng_e, exp)
             replay_buffer = ReplayBuffer.create(
-                int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size)
+                int(exp.obs_dim), int(exp.action_dim), int(exp.buffer_size),
+                add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+                add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
             )
 
         # ----- env init -----
@@ -472,9 +478,16 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             next_obs, reward, absorbing, done, info, env_state = env.step(
                 env_state, action, traj
             )
-            replay_buffer = replay_buffer.add_batch(
-                last_obs, next_obs, action, reward, done.astype(jnp.float32)
-            )
+            if replay_buffer.add_subsample:
+                rng, rng_buf = jax.random.split(rng)
+                replay_buffer = replay_buffer.add_batch(
+                    last_obs, next_obs, action, reward,
+                    absorbing.astype(jnp.float32), rng=rng_buf,
+                )
+            else:
+                replay_buffer = replay_buffer.add_batch(
+                    last_obs, next_obs, action, reward, absorbing.astype(jnp.float32)
+                )
             return actor_state, replay_buffer, env_state, next_obs, rng
 
         # ----- single gradient update -----
