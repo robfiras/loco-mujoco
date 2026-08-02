@@ -41,6 +41,30 @@ dynamic = ["version"]
 [tool.setuptools.packages.find]
 where = ["."]
 
+[tool.coverage.run]
+source = ["loco_mujoco"]
+branch = false
+omit = [
+    # Interactive OpenGL viewer: opens a GUI window / requires a live display,
+    # so it cannot run under headless CI. Excluded from the coverage metric.
+    "*/loco_mujoco/core/visuals/viewer.py",
+    # Namespace/boilerplate that carries no testable logic.
+    "*/loco_mujoco/**/__init__.py",
+]
+
+[tool.coverage.report]
+# Lines/blocks that are intentionally not exercised by the test suite.
+exclude_also = [
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+    "pragma: no cover",
+]
+show_missing = true
+skip_covered = false
+
 [project.optional-dependencies]
 # To install SMPL, you need to accept the license as described here https://github.com/vchoutas/smplx
 smpl = [
@@ -48,6 +72,11 @@ smpl = [
     "tqdm",
     "smplx @ git+https://github.com/ZhengyiLuo/smplx",
     "joblib",
+]
+# Test/dev tooling. Install with: pip install -e ".[test]"
+test = [
+    "pytest",
+    "pytest-cov",
 ]
 
 [project.urls]
