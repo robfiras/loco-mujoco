@@ -182,3 +182,52 @@ When using a Mjx environment, the `mjx_step` and `mjx_reset` functions are a jit
 on the GPU, while the `step` and `reset` functions are running the simulation on the CPU. It is important
 to note that `mjx_step` does asyhronous resetting of each environment simiar to vector environments of Gymansium and 
 stable-baselines3. `mjx_reset` resets all the environments at once.
+
+## Rendering in the browser with viser
+
+Next to the OpenGL viewer used by `render()` and `mjx_render()`, every environment has a
+[viser](https://viser.studio)-based counterpart that serves the scene to a browser instead of
+opening a local window. This is useful over SSH and on machines without a display. It requires
+the optional dependencies:
+
+```bash
+pip install loco-mujoco[viser]
+```
+
+The methods are drop-in replacements and accept the same viewer parameters:
+
+```python
+env.render_viser()                          # instead of env.render()
+mjx_env.mjx_render_viser(state)             # instead of mjx_env.mjx_render(state)
+env.play_trajectory(n_episodes=3, viser=True)
+```
+
+The server URL (`http://localhost:8080` by default) is printed on startup; configure it with the
+`host`, `port` and `verbose` environment kwargs. If the port is already taken, viser falls back to
+the next free one and the viewer warns about it.
+
+The browser panel exposes the same controls as the OpenGL viewer — geom and site group toggles,
+the three camera modes, pause and run speed — plus mjviser's contact, tendon, inertia and
+reference-frame overlays. The goal markers carried in `carry.user_scene` (velocity arrows, mimic
+targets, ghost robots) are drawn as well. `mjx_render_viser` lays the parallel environments out on
+the same grid as `mjx_render` and adds an environment selector to the panel.
+
+### Appearance
+
+The look is configurable through environment kwargs, and the ground plane and sky can also be
+recolored live from the *Visualization* tab in the browser:
+
+| kwarg | default | meaning |
+|---|---|---|
+| `floor_color` | `(28, 30, 34)` | RGB of the ground plane, or `"model"` to take the plane's material and texture colors, or `None` for mjviser's default |
+| `sky` | `"model"` | Background gradient read from the model's skybox, a `(top_rgb, bottom_rgb)` pair, or `None` |
+| `logo` / `logo_width` | LocoMuJoCo banner, `170` | Logo pinned to the top left. A URL is fetched by the browser, a local path is embedded, `None` disables it |
+
+### Caveats
+
+* There is no local framebuffer, so frames are read back from a connected browser via
+  `client.get_render()`. `record=True` therefore only produces a non-empty video while a browser
+  is open, and `render_viser(record=False)` returns a zero-filled array rather than the displayed
+  image.
+* The sky is a flat backdrop rather than a real cube map, so it does not rotate with the camera.
+* The default logo is loaded from GitHub by the browser; pass a local path when working offline.

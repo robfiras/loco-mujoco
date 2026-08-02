@@ -49,6 +49,12 @@ smpl = [
     "smplx @ git+https://github.com/ZhengyiLuo/smplx",
     "joblib",
 ]
+# Browser-based rendering with viser, used by env.render_viser() and env.mjx_render_viser().
+viser = [
+    "viser>=1.0.27",
+    "mjviser>=0.0.14",
+    "trimesh>=4.8.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/robfiras/loco-mujoco"

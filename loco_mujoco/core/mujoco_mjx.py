@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from loco_mujoco.core.mujoco_base import Mujoco, AdditionalCarry
-from loco_mujoco.core.visuals import MujocoViewer
+from loco_mujoco.core.visuals import MujocoViewer, ViserViewer
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
 
@@ -594,7 +594,44 @@ class Mjx(Mujoco):
         if self._viewer is None:
             if "default_camera_mode" not in self._viewer_params.keys():
                 self._viewer_params["default_camera_mode"] = "static"
-            self._viewer = MujocoViewer(self._model, self.dt, record=record, **self._viewer_params)
+            self._viewer = MujocoViewer(self._model, self.dt, record=record,
+                                        **self._glfw_viewer_params())
+
+        if self._terrain.is_dynamic:
+            terrain_state = state.additional_carry.terrain_state
+            assert hasattr(terrain_state, "height_field_raw"), "Terrain state does not have height_field_raw."
+            assert self._terrain.hfield_id is not None, "Terrain hfield id is not set."
+            hfield_data = np.array(terrain_state.height_field_raw)
+            self._model.hfield_data = hfield_data[0]
+            self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)
+
+        return self._viewer.parallel_render(state, record)
+
+    def mjx_render_viser(self, state,
+                         record: bool = False) -> np.ndarray:
+        """
+        Renders all environments in parallel in the browser using viser.
+
+        This is the viser counterpart of :meth:`mjx_render`. As with
+        :meth:`~loco_mujoco.core.mujoco_base.Mujoco.render_viser`, the returned frame is only
+        meaningful when recording with a browser connected, since there is no local framebuffer.
+
+        Args:
+            state: Current environment state.
+            record (bool): Whether to record the rendering.
+
+        Returns:
+            np.ndarray: Rendered image.
+        """
+        if self._viewer is None:
+            viewer_params = dict(self._viewer_params)
+            if "default_camera_mode" not in viewer_params.keys():
+                viewer_params["default_camera_mode"] = "static"
+            self._viewer = ViserViewer(self._model, self.dt, record=record,
+                                       num_envs=state.data.qpos.shape[0], **viewer_params)
+        else:
+            assert isinstance(self._viewer, ViserViewer), \
+                "An OpenGL viewer is already running. Call stop() before rendering with viser."
 
         if self._terrain.is_dynamic:
             terrain_state = state.additional_carry.terrain_state
@@ -619,7 +656,8 @@ class Mjx(Mujoco):
         assert len(trajectory) > 0, "Mjx render got provided with an empty trajectory."
 
         if self._viewer is None:
-            self._viewer = MujocoViewer(self._model, self.dt, record=record, **self._viewer_params)
+            self._viewer = MujocoViewer(self._model, self.dt, record=record,
+                                        **self._glfw_viewer_params())
 
         n_envs = trajectory[0].data.qpos.shape[0]
 

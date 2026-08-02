@@ -22,7 +22,8 @@ from loco_mujoco.core.domain_randomizer import DomainRandomizer
 from loco_mujoco.core.terrain import Terrain
 from loco_mujoco.core.initial_state_handler import InitialStateHandler
 from loco_mujoco.core.terminal_state_handler.base import TerminalStateHandler
-from loco_mujoco.core.visuals import MjvScene, MujocoViewer
+from loco_mujoco.core.visuals import MjvScene, MujocoViewer, ViserViewer
+from loco_mujoco.core.visuals.viser_viewer import VISER_ONLY_VIEWER_PARAMS
 from importlib.resources import files
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
@@ -322,7 +323,8 @@ class Mujoco:
         """
 
         if self._viewer is None:
-            self._viewer = MujocoViewer(self._model, self.dt, record=record, **self._viewer_params)
+            self._viewer = MujocoViewer(self._model, self.dt, record=record,
+                                        **self._glfw_viewer_params())
 
             headless = self._viewer_params.get("headless", False)
 
@@ -335,6 +337,51 @@ class Mujoco:
             assert hasattr(terrain_state, "height_field_raw"), "Terrain state does not have height_field_raw."
             assert self._terrain.hfield_id is not None, "Terrain hfield id is not set."
             # todo: updating hfield buffer at every render is not efficient, rendering will be slow
+            hfield_data = np.array(terrain_state.height_field_raw)
+            self._model.hfield_data = hfield_data
+            self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)
+
+        return self._viewer.render(self._data, self._additional_carry, record)
+
+    def _glfw_viewer_params(self) -> Dict:
+        """
+        Returns the viewer parameters without the ones that only apply to the viser viewer, so
+        that both viewers can be configured through the same environment kwargs.
+
+        """
+        return {k: v for k, v in self._viewer_params.items() if k not in VISER_ONLY_VIEWER_PARAMS}
+
+    def render_viser(self, record: bool = False) -> np.ndarray:
+        """
+        Renders the current state of the environment in the browser using viser.
+
+        This is the viser counterpart of :meth:`render`. It uses the same ``viewer_params``
+        passed to the environment constructor, so switching backends does not require changing
+        the environment setup.
+
+        Unlike :meth:`render`, the returned frame is only meaningful when ``record`` is True,
+        and even then only while a browser is connected: there is no local framebuffer, so
+        frames are read back from the client. Otherwise a zero-filled array is returned.
+
+        Args:
+            record (bool): A flag indicating whether to record the video or not.
+
+        Returns:
+            The rendered image as a numpy array.
+
+        """
+
+        if self._viewer is None:
+            self._viewer = ViserViewer(self._model, self.dt, record=record, **self._viewer_params)
+            atexit.register(self.stop)
+        else:
+            assert isinstance(self._viewer, ViserViewer), \
+                "An OpenGL viewer is already running. Call stop() before rendering with viser."
+
+        if self._terrain.is_dynamic:
+            terrain_state = self._additional_carry.terrain_state
+            assert hasattr(terrain_state, "height_field_raw"), "Terrain state does not have height_field_raw."
+            assert self._terrain.hfield_id is not None, "Terrain hfield id is not set."
             hfield_data = np.array(terrain_state.height_field_raw)
             self._model.hfield_data = hfield_data
             self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)

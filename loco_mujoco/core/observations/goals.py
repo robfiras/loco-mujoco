@@ -933,6 +933,8 @@ class GoalTrajMimicv2(GoalTrajMimic):
 
     def __init__(self, info_props: Dict,
                  rel_body_names: List[str] = None,
+                 sites_for_mimic: List[str] = None,
+                 main_site_name: str = None,
                  target_geom_rgba: Tuple[float, float, float, float] = (0.471, 0.38, 0.812, 0.5),
                  **kwargs):
 
@@ -940,12 +942,18 @@ class GoalTrajMimicv2(GoalTrajMimic):
         self._geom_group_to_include = 0
         self._geom_ids_to_exclude = (0,)  # worldbody
         self._target_geom_rgba = target_geom_rgba
+        # same site configuration as GoalTrajMimic. GoalTrajMimic.__init__ is skipped here
+        # because the visual geoms are the robot's own geoms rather than one box per site,
+        # but the inherited _init_from_mj still resolves the sites through these.
+        self._sites_for_mimic_override = sites_for_mimic
+        self._main_site_name = main_site_name
         super(GoalTrajMimic, self).__init__(info_props, **kwargs)
 
         self.main_body_name = self._info_props["upper_body_xml_name"]
         self._qpos_ind = None
         self._qvel_ind = None
         self._size_additional_observation = None
+        self._main_site_id = 0   # index into self._rel_site_ids; resolved in _init_from_mj
 
         # To be initialized
         self._relevant_body_names = [] if rel_body_names is None else rel_body_names

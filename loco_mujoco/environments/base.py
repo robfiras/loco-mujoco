@@ -421,6 +421,7 @@ class LocoEnv(Mjx):
                         recorder_params: Dict = None,
                         callback_class=None,
                         quiet: bool = False,
+                        viser: bool = False,
                         key: jax.random.PRNGKey = None) -> None:
         """
         Plays a demo of the loaded trajectory by forcing the model
@@ -436,11 +437,15 @@ class LocoEnv(Mjx):
             recorder_params (dict): Dictionary containing the recorder parameters.
             callback_class: Object to be called at each step of the simulation.
             quiet (bool): If True, disable tqdm.
+            viser (bool): If True, the browser-based viser viewer is used instead of the
+                OpenGL viewer. Recording then requires a connected browser.
             key (jax.random.PRNGKey): Random key to use for the simulation.
 
         """
 
         assert self.th is not None
+
+        render_fn = self.render_viser if viser else self.render
 
         if not TrajectoryHandler.is_numpy(self._traj.data):
             was_jax = True
@@ -477,7 +482,7 @@ class LocoEnv(Mjx):
         traj_data_sample = self.th.get_current_traj_data(self._traj.data, self._additional_carry, np)
 
         if render:
-            frame = self.render(record)
+            frame = render_fn(record)
         else:
             frame = None
 
@@ -534,7 +539,7 @@ class LocoEnv(Mjx):
                 obs, self._additional_carry = self._create_observation(self._model, self._data, self._additional_carry)
 
                 if render:
-                    frame = self.render(record)
+                    frame = render_fn(record)
                 else:
                     frame = None
 
