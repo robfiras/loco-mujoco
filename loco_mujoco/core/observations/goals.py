@@ -940,6 +940,13 @@ class GoalTrajMimicv2(GoalTrajMimic):
         self._geom_group_to_include = 0
         self._geom_ids_to_exclude = (0,)  # worldbody
         self._target_geom_rgba = target_geom_rgba
+        # NOTE: this deliberately calls Goal.__init__ (grandparent), skipping
+        # GoalTrajMimic.__init__, so the attributes GoalTrajMimic sets up must be
+        # replicated here. v2 does not expose a sites_for_mimic / main_site_name
+        # override, so both default to None (i.e. use the env's defaults).
+        self._sites_for_mimic_override = None
+        self._main_site_name = None
+        self._main_site_id = 0   # index into self._rel_site_ids; resolved in _init_from_mj
         super(GoalTrajMimic, self).__init__(info_props, **kwargs)
 
         self.main_body_name = self._info_props["upper_body_xml_name"]
