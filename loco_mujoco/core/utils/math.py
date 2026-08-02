@@ -46,7 +46,7 @@ def mat2angle_xy(mat):
 
     """
 
-    angle = mat_to_euler(mat.reshape((3, 3)))[-1]
+    angle = np_R.from_matrix(mat.reshape((3, 3))).as_euler("xyz")[-1]
 
     return angle
 
@@ -63,7 +63,7 @@ def angle2mat_xy(angle):
 
     """
 
-    mat = euler_to_mat(np.array([0, 0, angle]))
+    mat = np_R.from_euler("xyz", np.array([0, 0, angle])).as_matrix()
 
     return mat
 
