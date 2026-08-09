@@ -599,6 +599,54 @@ def test_TD3_pessimism_penalty(td3_config):
     assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
 
 
+def test_TD3_categorical_critic(td3_config):
+    """With `critic_loss='categorical'` (+ num_atoms>1) TD3 uses a C51-style
+    distributional critic: the target twin is picked per-sample by scalar Q, the
+    next-state distribution is projected onto the shifted support, and the loss is
+    a cross-entropy over both twins' sown log-probs. Run a short chunk to drive
+    the categorical target build (607-626) and categorical critic loss (648-675)."""
+    config = OmegaConf.create(OmegaConf.to_container(td3_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.critic_loss = "categorical"
+        config.experiment.num_atoms = 51
+        config.experiment.min_v = -10.0
+        config.experiment.max_v = 10.0
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = TD3Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = TD3Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(TD3Jax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    leaves = jax.tree_util.tree_leaves(result["agent_state"].critic_state.params)
+    assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
+
+
+def test_TD3_crossq_batch_norm(td3_config):
+    """With `use_batch_norm=True` TD3 uses the XQC/CrossQ joint forward: the online
+    critic sees concat([obs, nobs]) / concat([act, next_act]) in one pass so
+    BatchNorm normalises both batches together, then splits. Drives the BN critic
+    net build + the CrossQ branch of the MSE critic loss (676-688)."""
+    config = OmegaConf.create(OmegaConf.to_container(td3_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.use_batch_norm = True
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = TD3Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = TD3Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(TD3Jax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    # BN keeps a batch_stats collection in the critic bundle, and params stay finite
+    leaves = jax.tree_util.tree_leaves(result["agent_state"].critic_state.params)
+    assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
+    assert "batch_stats" in result["agent_state"].critic_state.run_stats
+
+
 def test_VanillaDagger_build_train_fn(vanilla_dagger_config):
     config = vanilla_dagger_config
 
