@@ -253,6 +253,7 @@ def _build_capped_conf(monkeypatch):
     conf.optimization_params.shape_iterations = 2
     conf.optimization_params.motion_iterations = 1
     conf.optimization_params.init_motion_iterations = 1
+    conf.optimization_params.pose_iterations = 2  # robot2robot pose opt
     conf.optimization_params.torch_device = "cpu"
     return conf
 
@@ -418,4 +419,69 @@ def test_motion_transfer_robot_to_robot_load_branch(tmp_path, monkeypatch):
     assert isinstance(traj, Trajectory)
     assert np.asarray(traj.data.qpos).shape[0] == T - 2
     # the target shape was fitted and cached on the way
+    assert (target_dir / retargeting.OPTIMIZED_SHAPE_FILE_NAME).is_file()
+
+
+def test_motion_transfer_robot_to_robot_optimize_branch(tmp_path, monkeypatch):
+    """With no precomputed fitted-motion file, motion_transfer_robot_to_robot runs
+    its source-motion optimization (extend source traj -> fit source shape ->
+    Adam-optimize an SMPL pose to match the source site poses -> Gaussian-smooth)
+    and then retargets onto the target robot. This path used to hardcode
+    torch.device('cuda'); it now respects optimization_params.torch_device, so it
+    runs on CPU. All loops are capped to 1-2 iterations."""
+    torch = pytest.importorskip("torch")  # noqa: F841
+    pytest.importorskip("smplx")
+    pytest.importorskip("joblib")
+    import logging
+    from loco_mujoco.core.trajectory import Trajectory
+    from loco_mujoco.smpl.parser import SMPLH_Parser as _RealSMPLH
+
+    conf = _build_capped_conf(monkeypatch)
+
+    def _patched_smplh(*args, **kwargs):
+        kwargs.setdefault("vertex_ids", _tiny_vertex_ids())
+        kwargs.setdefault("num_betas", 16)
+        return _RealSMPLH(*args, **kwargs)
+
+    monkeypatch.setattr(retargeting, "SMPLH_Parser", _patched_smplh)
+
+    model_path = _write_synthetic_smplh(tmp_path / "SMPLH_NEUTRAL.pkl")
+    logger = logging.getLogger("test")
+
+    # build a source trajectory to transfer (raw qpos/qvel from the fit pipeline)
+    source_shape = str(tmp_path / "src_shape" / "out.pkl")
+    retargeting.fit_smpl_shape(
+        "MjxUnitreeG1", conf, model_path, source_shape, logger, visualize=False,
+    )
+    T = 6
+    trans = np.zeros((T, 3), dtype=np.float64)
+    trans[:, 0] = np.linspace(0.0, 0.05, T)
+    src_motion = {"pose_aa": np.zeros((T, 72), dtype=np.float64),
+                  "trans": trans, "fps": 30}
+    traj_source = retargeting.fit_smpl_motion(
+        "UnitreeG1", conf, model_path, src_motion, source_shape, logger,
+        skip_steps=False, visualize=False,
+    )
+
+    # empty data dirs -> source & target shapes are fitted inside the call.
+    # path_to_fitted_motion_source=None -> the optimization (if) branch runs and
+    # writes the fitted motion out.
+    source_dir = tmp_path / "source"; source_dir.mkdir()
+    target_dir = tmp_path / "target"; target_dir.mkdir()
+    fitted_out = tmp_path / "fitted" / "src_motion.npz"
+
+    traj = retargeting.motion_transfer_robot_to_robot(
+        env_name_source="UnitreeG1", robot_conf_source=conf, traj_source=traj_source,
+        path_source_robot_smpl_data=str(source_dir),
+        env_name_target="UnitreeG1", robot_conf_target=conf,
+        path_target_robot_smpl_data=str(target_dir),
+        path_to_smpl_model=model_path, logger=logger,
+        path_to_fitted_motion_source=str(fitted_out), visualize=False,
+    )
+
+    assert isinstance(traj, Trajectory)
+    assert np.asarray(traj.data.qpos).shape[0] > 0
+    assert np.all(np.isfinite(np.asarray(traj.data.qpos)))
+    # the optimization branch cached the fitted source motion + the target shape
+    assert fitted_out.is_file()
     assert (target_dir / retargeting.OPTIMIZED_SHAPE_FILE_NAME).is_file()

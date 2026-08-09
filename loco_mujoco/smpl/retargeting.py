@@ -611,7 +611,7 @@ def motion_transfer_robot_to_robot(
 
     if path_to_fitted_motion_source is None or not os.path.exists(path_to_fitted_motion_source):
 
-        device = torch.device("cuda")
+        device = torch.device(robot_conf_source.optimization_params.torch_device)
 
         # get the source env
         env_cls = LocoEnv.registered_envs[env_name_source]
