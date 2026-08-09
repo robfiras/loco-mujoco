@@ -237,3 +237,48 @@ def test_GoalTrajMimic(backend, standing_trajectory):
         obs, goal, err_msg="Mismatch between Mujoco observation and goal",
         atol=_GOAL_ATOL, rtol=_GOAL_RTOL,
     )
+
+
+@pytest.mark.parametrize("backend", ["jax", "numpy"])
+def test_GoalTrajMimicv2(backend, standing_trajectory):
+    seed = 0
+    key = jax.random.PRNGKey(seed)
+
+    # GoalTrajMimicv2 adds robot-geom visualization on top of GoalTrajMimic;
+    # the observation contract is identical, so it must match the env obs too.
+    mjx_env = DummyHumamoidEnv(
+        enable_mjx=True,
+        goal_type="GoalTrajMimicv2",
+        reward_type="NoReward",
+        **DEFAULTS,
+    )
+
+    trajectory: Trajectory = standing_trajectory
+    mjx_env.process_trajectory(trajectory)
+
+    backend = jnp if backend == "jax" else np
+
+    goal: Goal = mjx_env._goal
+    dim = goal.dim
+
+    assert goal.requires_trajectory == True
+    assert goal.has_visual == True
+
+    if backend == np:
+        obs = mjx_env.reset(key)
+        carry = mjx_env._additional_carry
+    else:
+        state = mjx_env.mjx_reset(key)
+        obs = state.observation
+        carry = state.additional_carry
+
+    obs = obs[-dim:]
+
+    goal, carry = goal.get_obs_and_update_state(
+        mjx_env, mjx_env._model, mjx_env._data, carry, backend
+    )
+
+    np.testing.assert_allclose(
+        obs, goal, err_msg="Mismatch between Mujoco observation and goal",
+        atol=_GOAL_ATOL, rtol=_GOAL_RTOL,
+    )
