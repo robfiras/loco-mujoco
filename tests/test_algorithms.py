@@ -145,6 +145,81 @@ def test_PPO_adaptive_kl_lr(ppo_rl_config):
     assert jnp.all(jnp.isfinite(lr))
 
 
+def test_PPO_in_training_eval_and_debug(imitation_config):
+    """Drive PPO's in-training validation path and the debug callback.
+
+    PPO's ``_evaluation_step`` (the ``mh is not None`` branch) only runs when a
+    MetricsHandler is threaded into ``build_train_fn`` and the env carries
+    trajectory data. The RL config has neither, so we reuse the imitation env
+    (mimic sites + trajectory) but train it with plain PPO. Flipping
+    ``debug=True`` also exercises the episodic-return print callback.
+    """
+    config = OmegaConf.create(OmegaConf.to_container(imitation_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.n_seeds = 1
+        config.experiment.debug = True
+        config.experiment.validation.active = True
+        config.experiment.validation.num = 1
+        config.experiment.validation.num_envs = 4
+        config.experiment.validation.num_steps = 8
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = PPOJax.init_agent_conf(env, config)
+    mh = MetricsHandler(config, env)
+
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(PPOJax.build_train_fn(env, agent_conf, mh=mh))
+
+    result = train_fn(rng, agent_state, traj)
+    # in-training validation produced finite metrics
+    assert "validation_metrics" in result
+    assert jnp.all(jnp.isfinite(result["training_metrics"].learning_rate))
+
+
+@pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
+def test_Imitation_init_from_scratch_and_debug(algorithm, imitation_config):
+    """Cover the init-from-scratch branch (agent_state=None) plus the debug
+    callback in the imitation training loop.
+
+    Passing ``agent_state=None`` to the train fn forces the ``else`` branch that
+    initializes the actor/discriminator params from scratch, and ``debug=True``
+    exercises the discriminator-output and episodic-return print callbacks.
+    """
+    alg_cls = GAILJax if algorithm == "GAIL" else AMPJax
+    config = OmegaConf.create(OmegaConf.to_container(imitation_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.n_seeds = 1
+        config.experiment.debug = True
+        config.experiment.validation.active = False
+        config.experiment.validation.num = 1
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    expert_dataset = env.create_dataset()
+    agent_conf = alg_cls.init_agent_conf(env, config)
+    agent_conf = agent_conf.add_expert_dataset(expert_dataset)
+
+    rng = jax.random.PRNGKey(0)
+    train_fn = jax.jit(alg_cls.build_train_fn(env, agent_conf, mh=None))
+
+    # agent_state=None -> params are initialized from scratch inside _train_fn
+    result = train_fn(rng, None, traj)
+    assert "agent_state" in result
+    params = result["agent_state"].train_state.params
+    assert all(jnp.all(jnp.isfinite(x)) for x in jax.tree_util.tree_leaves(params))
+
+
 @pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
 def test_Imitation_save_and_load_agent(algorithm, imitation_config, tmp_path):
     """Train imitation agent for a few steps, save, load, and verify params match."""
