@@ -91,6 +91,33 @@ def test_PPO_save_and_load_agent(ppo_rl_config, tmp_path):
     assert _params_allclose(agent_state.train_state.run_stats, loaded_state.train_state.run_stats)
 
 
+def test_PPO_eval_fn(ppo_rl_config):
+    """Standalone eval_fn should jit, run, and produce finite metrics without
+    mutating the agent's training state (mirrors the VanillaDagger eval test)."""
+    config = ppo_rl_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = PPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+
+    eval_fn = jax.jit(PPOJax.build_eval_fn(env, agent_conf))
+
+    try:
+        jaxpr = make_jaxpr(eval_fn)(rng, agent_state, traj)
+        assert jaxpr is not None
+    except Exception as e:
+        pytest.fail(f"JAX eval function compilation failed: {e}")
+
+    out = eval_fn(rng, agent_state, traj)
+    assert "eval_summary" in out
+    assert "validation_metrics" in out
+    assert jnp.isfinite(out["eval_summary"].mean_episode_return)
+    assert jnp.isfinite(out["eval_summary"].mean_episode_length)
+
+
 @pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
 def test_Imitation_save_and_load_agent(algorithm, imitation_config, tmp_path):
     """Train imitation agent for a few steps, save, load, and verify params match."""

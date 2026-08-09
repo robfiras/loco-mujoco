@@ -61,6 +61,11 @@ exclude_also = [
     "@(abc\\.)?abstractmethod",
     "if __name__ == .__main__.:",
     "pragma: no cover",
+    # play_policy / play_policy_mujoco render every step (they call env.render /
+    # env.mjx_render unconditionally, ignoring the `render` flag), so they need a
+    # live GL context and cannot run under headless CI -- same rationale as the
+    # excluded interactive viewer. One entry covers every algorithm's variant.
+    "def play_policy",
 ]
 show_missing = true
 skip_covered = false
