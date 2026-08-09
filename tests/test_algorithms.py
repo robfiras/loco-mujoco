@@ -118,6 +118,33 @@ def test_PPO_eval_fn(ppo_rl_config):
     assert jnp.isfinite(out["eval_summary"].mean_episode_length)
 
 
+def test_PPO_adaptive_kl_lr(ppo_rl_config):
+    """With anneal_lr off and desired_kl set, PPO uses an inject_hyperparams
+    optimizer and the RSL-style adaptive-KL learning-rate branch. Exercise it
+    by running a short training chunk."""
+    config = OmegaConf.create(OmegaConf.to_container(ppo_rl_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.validation.num = 1
+        config.experiment.anneal_lr = False
+        config.experiment.desired_kl = 0.01
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = PPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(PPOJax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    # training completed and produced a finite adapted learning rate
+    lr = result["training_metrics"].learning_rate
+    assert jnp.all(jnp.isfinite(lr))
+
+
 @pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
 def test_Imitation_save_and_load_agent(algorithm, imitation_config, tmp_path):
     """Train imitation agent for a few steps, save, load, and verify params match."""
