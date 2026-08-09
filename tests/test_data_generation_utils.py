@@ -14,6 +14,8 @@ import pytest
 from omegaconf import OmegaConf
 from scipy.spatial.transform import Rotation as sRot
 
+import jax
+
 from loco_mujoco.datasets.data_generation.utils import (
     ExtendTrajData,
     add_mocap_bodies,
@@ -23,6 +25,9 @@ from loco_mujoco.datasets.data_generation.utils import (
     load_dataset_conf,
 )
 from loco_mujoco.core.utils.math import quat_scalarfirst2scalarlast
+
+from test_conf import DummyHumamoidEnv
+from test_conf import *  # noqa: F401,F403 (standing_trajectory fixture)
 
 _MODEL_XML = (Path(__file__).resolve().parent / "test_conf" / "humanoid_test.xml").as_posix()
 
@@ -200,3 +205,49 @@ def test_add_mocap_bodies_with_robot_conf():
     # disable_collisions zeroed contype/conaffinity on all geoms
     assert not np.any(model.geom_contype)
     assert not np.any(model.geom_conaffinity)
+
+
+# --------------------------- ExtendTrajData as a replay callback ---------------------------
+
+def test_extend_traj_data_via_play_trajectory(standing_trajectory):
+    """Drive ExtendTrajData as a play_trajectory callback headlessly.
+
+    This covers the ``callback_class`` branch of ``LocoEnv.play_trajectory``,
+    ``ReplayCallback.__call__`` (set-state + pre/forward/post), the recording in
+    ``ExtendTrajData.__call__``, and the fold-back in ``extend_trajectory_data``.
+    We shrink the trajectory to a handful of samples so the pure-Python replay
+    loop stays fast while still filling the recorder exactly.
+    """
+    jax.config.update('jax_platform_name', 'cpu')
+
+    # shrink the 1000-sample fixture to N frames (single sub-trajectory)
+    N = 4
+    data = standing_trajectory.data
+    small_data = data.replace(
+        qpos=data.qpos[:N], qvel=data.qvel[:N], xpos=data.xpos[:N],
+        xquat=data.xquat[:N], cvel=data.cvel[:N], subtree_com=data.subtree_com[:N],
+        site_xpos=data.site_xpos[:N], site_xmat=data.site_xmat[:N],
+        split_points=jnp.array([0, N]),
+    )
+    from loco_mujoco.core.trajectory import Trajectory
+    traj = Trajectory(standing_trajectory.info, small_data)
+
+    env = DummyHumamoidEnv(enable_mjx=False, goal_type="NoGoal",
+                           reward_type="NoReward", horizon=1000, gamma=0.99, n_envs=1)
+    env.process_trajectory(traj)
+
+    callback = ExtendTrajData(env, n_samples=N, model=env._model)
+    env.play_trajectory(n_episodes=1, n_steps_per_episode=N,
+                        render=False, record=False, quiet=True,
+                        callback_class=callback, key=jax.random.key(0))
+
+    assert callback.current_length == N
+
+    # fold the recorded kinematics back into the (un-padded) N-sample trajectory.
+    # NOTE: env._traj.data is padded to the handler's max_n_samples, so we pass the
+    # original small_data/info -- extend_trajectory_data asserts current_length ==
+    # traj_data.qpos.shape[0].
+    new_data, new_info = callback.extend_trajectory_data(small_data, traj.info)
+    assert new_data.xpos.shape == (N, env._model.nbody, 3)
+    assert new_data.site_xpos.shape == (N, env._model.nsite, 3)
+    assert new_info.model.njnt == env._model.njnt

@@ -626,6 +626,29 @@ def test_SAC_build_train_fn(sac_config):
         pytest.fail(f"JAX function compilation failed: {e}")
 
 
+@pytest.mark.parametrize("alg_name", ("SAC", "TD3"))
+def test_OffPolicy_init_from_scratch(alg_name, sac_config, td3_config):
+    """Passing ``agent_state=None`` forces the shared offpolicy_base new-run
+    branch that initializes the actor/critic TrainStates, target params, extra
+    state and replay buffer from scratch (offpolicy_base.py ~407-437) instead of
+    restoring them from a supplied agent_state."""
+    alg_cls = SACJax if alg_name == "SAC" else TD3Jax
+    config = sac_config if alg_name == "SAC" else td3_config
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = alg_cls.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    train_fn = jax.jit(alg_cls.build_train_fn(env, agent_conf))
+
+    # agent_state=None -> actor/critic/buffer built inside _train_fn
+    result = train_fn(rng, None, traj)
+    assert "agent_state" in result
+    leaves = jax.tree_util.tree_leaves(result["agent_state"].actor_state.params)
+    assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
+    assert int(result["agent_state"].replay_buffer.size) > 0
+
+
 def test_SAC_save_and_load_agent(sac_config, tmp_path):
     """Train SAC for a few steps, save agent, load it, and verify params match."""
     config = OmegaConf.create(OmegaConf.to_container(sac_config, resolve=True))
