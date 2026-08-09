@@ -578,6 +578,27 @@ def test_TD3_save_and_load_agent(td3_config, tmp_path):
     assert _params_allclose(agent_state.critic_state.run_stats, loaded_state.critic_state.run_stats)
 
 
+def test_TD3_pessimism_penalty(td3_config):
+    """With `pessimism_penalty` set, TD3 aggregates the twin Q-targets with
+    Motivo-style ensemble pessimism (mean - k*|Q1-Q2|) instead of min(Q1,Q2).
+    Run a short training chunk to exercise that branch."""
+    config = OmegaConf.create(OmegaConf.to_container(td3_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.pessimism_penalty = 1.0
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = TD3Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = TD3Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(TD3Jax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    # training ran and produced finite actor/critic params
+    leaves = jax.tree_util.tree_leaves(result["agent_state"].critic_state.params)
+    assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
+
+
 def test_VanillaDagger_build_train_fn(vanilla_dagger_config):
     config = vanilla_dagger_config
 
