@@ -66,6 +66,13 @@ exclude_also = [
     # live GL context and cannot run under headless CI -- same rationale as the
     # excluded interactive viewer. One entry covers every algorithm's variant.
     "def play_policy",
+    # AMASS retargeting orchestration: both download the (large) AMASS datasets
+    # AND require the license-restricted SMPL body model, so neither can run under
+    # CI -- same rationale as the viewer. The heavy lifting they delegate to
+    # (motion_transfer_robot_to_robot / fit_smpl_* / extend_motion) IS tested with
+    # synthetic SMPL-H fixtures; only these two network-bound entry points are excluded.
+    "def load_retargeted_amass_trajectory",
+    "def retarget_traj_from_robot_to_robot",
 ]
 show_missing = true
 skip_covered = false
