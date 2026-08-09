@@ -892,7 +892,7 @@ class Force(Observation):
                 con = data.contact[con_i]
                 con_geom_ids = (con.geom1, con.geom2)
 
-                if geom_ids == con_geom_ids:
+                if np.array_equal(geom_ids, con_geom_ids):
                     mujoco.mj_contactForce(model, data,
                                            con_i, c_array[i])
 
