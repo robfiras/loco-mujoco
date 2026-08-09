@@ -403,6 +403,78 @@ def test_History_PPO_save_and_load_agent(history_ppo_config, tmp_path):
     assert _params_allclose(agent_state.train_state.run_stats, loaded_state.train_state.run_stats)
 
 
+def test_S2PG_PPO_adaptive_kl_lr(s2pg_ppo_config):
+    """With anneal_lr off and desired_kl set, S2PG-PPO uses an inject_hyperparams
+    optimizer and exercises the adaptive-KL learning-rate branch."""
+    config = OmegaConf.create(OmegaConf.to_container(s2pg_ppo_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.validation.num = 1
+        config.experiment.anneal_lr = False
+        config.experiment.desired_kl = 0.01
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = S2PGPPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = S2PGPPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(S2PGPPOJax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    assert jnp.all(jnp.isfinite(result["training_metrics"].learning_rate))
+
+
+def test_BPTT_PPO_adaptive_kl_lr(bptt_ppo_config):
+    """With anneal_lr off and desired_kl set, BPTT-PPO uses an inject_hyperparams
+    optimizer and exercises the adaptive-KL learning-rate branch."""
+    config = OmegaConf.create(OmegaConf.to_container(bptt_ppo_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 4
+        config.experiment.validation.num = 1
+        config.experiment.anneal_lr = False
+        config.experiment.desired_kl = 0.01
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = BPTTPPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = BPTTPPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(BPTTPPOJax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    assert jnp.all(jnp.isfinite(result["training_metrics"].learning_rate))
+
+
+def test_History_PPO_adaptive_kl_lr(history_ppo_config):
+    """With anneal_lr off and desired_kl set, History-PPO uses an inject_hyperparams
+    optimizer and exercises the adaptive-KL learning-rate branch."""
+    config = OmegaConf.create(OmegaConf.to_container(history_ppo_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.validation.num = 1
+        config.experiment.anneal_lr = False
+        config.experiment.desired_kl = 0.01
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = HistoryPPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = HistoryPPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(HistoryPPOJax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    assert jnp.all(jnp.isfinite(result["training_metrics"].learning_rate))
+
+
 def test_SAC_build_train_fn(sac_config):
 
     config = sac_config
