@@ -230,6 +230,55 @@ def test_metrics_handler_all_quantities(imitation_config):
         assert jnp.all(jnp.isfinite(measure.qpos))
 
 
+@pytest.mark.parametrize("variant", ("S2PG", "BPTT", "History"))
+def test_PPO_variant_in_training_eval(variant, imitation_config,
+                                      s2pg_ppo_config, bptt_ppo_config, history_ppo_config):
+    """Drive the in-training validation path of the experimental PPO variants.
+
+    Each variant gates ``_evaluation_step`` behind ``if mh is None`` exactly like
+    vanilla PPO, so the variant build-train-fn tests (which pass no MetricsHandler)
+    leave that path dark. We keep each variant's own hyperparameters but swap in
+    the imitation env/task/validation subtrees (MjxUnitreeH1 + mimic sites +
+    trajectory) so a real MetricsHandler can run during training.
+    """
+    variant_cls, variant_cfg = {
+        "S2PG": (S2PGPPOJax, s2pg_ppo_config),
+        "BPTT": (BPTTPPOJax, bptt_ppo_config),
+        "History": (HistoryPPOJax, history_ppo_config),
+    }[variant]
+
+    base = OmegaConf.to_container(variant_cfg, resolve=True)
+    imi = OmegaConf.to_container(imitation_config, resolve=True)
+    # keep variant-specific hyperparameters; borrow the trajectory-carrying env
+    base["experiment"]["task_factory"] = imi["experiment"]["task_factory"]
+    base["experiment"]["env_params"] = imi["experiment"]["env_params"]
+    base["experiment"]["validation"] = imi["experiment"]["validation"]
+    config = OmegaConf.create(base)
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 4
+        config.experiment.n_seeds = 1
+        config.experiment.validation.active = True
+        config.experiment.validation.num = 1
+        config.experiment.validation.num_envs = 4
+        config.experiment.validation.num_steps = 8
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = variant_cls.init_agent_conf(env, config)
+    mh = MetricsHandler(config, env)
+    rng = jax.random.PRNGKey(0)
+    agent_state = variant_cls.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(variant_cls.build_train_fn(env, agent_conf, mh=mh))
+
+    result = train_fn(rng, agent_state, traj)
+    assert "validation_metrics" in result
+    assert jnp.all(jnp.isfinite(result["training_metrics"].learning_rate))
+
+
 @pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
 def test_Imitation_init_from_scratch_and_debug(algorithm, imitation_config):
     """Cover the init-from-scratch branch (agent_state=None) plus the debug
