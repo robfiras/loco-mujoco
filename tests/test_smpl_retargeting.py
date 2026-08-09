@@ -241,3 +241,74 @@ def test_fit_smpl_shape_runs_end_to_end(tmp_path, monkeypatch):
     n_sites = smpl2robot_rot_mat.shape[0]
     assert smpl2robot_pos.shape == (n_sites, 3)
     assert smpl2robot_rot_mat.shape == (n_sites, 3, 3)
+
+
+def _build_capped_conf(monkeypatch):
+    """Real UnitreeG1 conf with every optimization loop capped to a couple of
+    iterations so the torch/mujoco pipeline runs fast under CI."""
+    from omegaconf import OmegaConf
+    monkeypatch.setattr(loco_mujoco, "get_variable", lambda *_a, **_k: None)
+    conf = retargeting.load_robot_conf_file("UnitreeG1")
+    OmegaConf.set_struct(conf, False)
+    conf.optimization_params.shape_iterations = 2
+    conf.optimization_params.motion_iterations = 1
+    conf.optimization_params.init_motion_iterations = 1
+    conf.optimization_params.torch_device = "cpu"
+    return conf
+
+
+def test_fit_smpl_motion_runs_end_to_end(tmp_path, monkeypatch):
+    """Drive the full motion-retargeting pipeline: optimize a (synthetic) shape,
+    then fit a short synthetic AMASS-style motion to the UnitreeG1 robot. Numerical
+    realism is not asserted -- the point is that the shape-load / joint-transform /
+    mocap-drive / mj_step / qpos-qvel-assembly path executes and yields a valid
+    Trajectory of the expected shape."""
+    torch = pytest.importorskip("torch")  # noqa: F841
+    pytest.importorskip("smplx")
+    pytest.importorskip("joblib")
+    import logging
+    from loco_mujoco.core.trajectory import Trajectory
+    from loco_mujoco.smpl.parser import SMPLH_Parser as _RealSMPLH
+
+    conf = _build_capped_conf(monkeypatch)
+
+    def _patched_smplh(*args, **kwargs):
+        kwargs.setdefault("vertex_ids", _tiny_vertex_ids())
+        kwargs.setdefault("num_betas", 16)
+        return _RealSMPLH(*args, **kwargs)
+
+    monkeypatch.setattr(retargeting, "SMPLH_Parser", _patched_smplh)
+
+    model_path = _write_synthetic_smplh(tmp_path / "SMPLH_NEUTRAL.pkl")
+    shape_path = str(tmp_path / "shape" / "out.pkl")
+    logger = logging.getLogger("test")
+
+    # 1) optimize the shape -> writes the shape file fit_smpl_motion consumes
+    retargeting.fit_smpl_shape(
+        "MjxUnitreeG1", conf, model_path, shape_path, logger, visualize=False,
+    )
+
+    # 2) synthetic AMASS-style motion (T frames): zero pose, gently drifting root
+    T = 6
+    trans = np.zeros((T, 3), dtype=np.float64)
+    trans[:, 0] = np.linspace(0.0, 0.05, T)  # small forward drift
+    motion_data = {
+        "pose_aa": np.zeros((T, 72), dtype=np.float64),
+        "trans": trans,
+        "fps": 30,
+    }
+
+    traj = retargeting.fit_smpl_motion(
+        "UnitreeG1", conf, model_path, motion_data, shape_path, logger,
+        skip_steps=False, visualize=False,
+    )
+
+    assert isinstance(traj, Trajectory)
+    # velocity uses a centered difference -> traj length is T-2
+    qpos = np.asarray(traj.data.qpos)
+    qvel = np.asarray(traj.data.qvel)
+    assert qpos.shape[0] == T - 2
+    assert qvel.shape[0] == T - 2
+    assert qpos.shape[1] > 0 and qvel.shape[1] > 0
+    assert np.all(np.isfinite(qpos)) and np.all(np.isfinite(qvel))
+    assert traj.info.frequency == 30
