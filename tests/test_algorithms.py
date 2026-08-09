@@ -183,6 +183,53 @@ def test_PPO_in_training_eval_and_debug(imitation_config):
     assert jnp.all(jnp.isfinite(result["training_metrics"].learning_rate))
 
 
+def test_metrics_handler_all_quantities(imitation_config):
+    """Exercise every MetricsHandler quantity getter and every distance measure.
+
+    The default validation config only asks for Joint*/RelSite* quantities, so
+    the Body*/Site* getters (get_body_positions/orientations/velocities,
+    get_site_positions/orientations/velocities) stay dark. Enable all 11
+    supported quantities (with all 3 measures) and run PPO's in-training
+    validation once so the whole ``MetricsHandler.__call__`` fan-out is traced
+    and executed on the real imitation env + trajectory.
+    """
+    from loco_mujoco.utils.metrics import SUPPORTED_QUANTITIES, SUPPORTED_MEASURES
+
+    config = OmegaConf.create(OmegaConf.to_container(imitation_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.n_seeds = 1
+        config.experiment.validation.active = True
+        config.experiment.validation.num = 1
+        config.experiment.validation.num_envs = 4
+        config.experiment.validation.num_steps = 8
+        # ask for the full set of quantities + measures
+        config.experiment.validation.quantities = list(SUPPORTED_QUANTITIES)
+        config.experiment.validation.measures = list(SUPPORTED_MEASURES)
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+
+    agent_conf = PPOJax.init_agent_conf(env, config)
+    mh = MetricsHandler(config, env)
+    # every getter branch is selected at trace time by the quantity list
+    assert set(mh.quantaties) == set(SUPPORTED_QUANTITIES)
+
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(PPOJax.build_train_fn(env, agent_conf, mh=mh))
+
+    result = train_fn(rng, agent_state, traj)
+    assert "validation_metrics" in result
+    vm = result["validation_metrics"]
+    # each measure container carries a finite scalar for at least the joint qpos
+    for measure in (vm.euclidean_distance, vm.dynamic_time_warping, vm.discrete_frechet_distance):
+        assert jnp.all(jnp.isfinite(measure.qpos))
+
+
 @pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
 def test_Imitation_init_from_scratch_and_debug(algorithm, imitation_config):
     """Cover the init-from-scratch branch (agent_state=None) plus the debug
