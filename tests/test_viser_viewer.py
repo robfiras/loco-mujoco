@@ -439,3 +439,140 @@ def test_viser_only_params_are_hidden_from_the_opengl_viewer(env):
     filtered = env._glfw_viewer_params()
     assert not {"port", "verbose", "host", "num_envs"} & filtered.keys()
     assert filtered["default_camera_mode"] == "follow"
+
+
+# ---------------------------------------------------------------- lifecycle
+
+
+def test_port_collision_warns_and_falls_back():
+    """A stale viewer holding the port must not silently serve the old scene."""
+    blocker = viser.ViserServer(port=8931, verbose=False)
+    try:
+        e, _ = RLFactory.make("UnitreeH1", port=8931, verbose=False)
+        e.reset()
+        with pytest.warns(UserWarning, match="already in use"):
+            e.render_viser()
+        assert e.viewer.server.get_port() != 8931
+        e.stop()
+    finally:
+        blocker.stop()
+
+
+def test_stop_closes_the_server_and_returns_the_video_path(tmp_path):
+    e, _ = RLFactory.make("UnitreeH1", port=0, verbose=False,
+                          recorder_params=dict(path=str(tmp_path), compress=False))
+    e.reset()
+    with pytest.warns(UserWarning, match="No browser is connected"):
+        e.render_viser(record=True)
+    e.stop()
+
+    assert e._viewer is None
+    assert e.video_file_path is not None
+    assert list(tmp_path.rglob("*.mp4")), "the recorder should have written a video"
+
+
+def test_recording_feeds_the_recorder(tmp_path):
+    """Frames are pushed to the VideoRecorder even though they are empty without a browser."""
+    e, _ = RLFactory.make("UnitreeH1", port=0, verbose=False,
+                          recorder_params=dict(path=str(tmp_path), compress=False))
+    try:
+        e.reset()
+        with pytest.warns(UserWarning, match="No browser is connected"):
+            for _ in range(3):
+                e.step(np.zeros(e.info.action_space.shape))
+                frame = e.render_viser(record=True)
+        assert frame.shape == (720, 1280, 3)
+        assert e.viewer._recorder is not None
+    finally:
+        e.stop()
+
+
+def test_play_trajectory_with_viser(tmp_path):
+    from loco_mujoco.task_factories import ImitationFactory
+
+    e, _ = ImitationFactory.make("UnitreeH1", default_dataset_conf=dict(task="walk"),
+                                 port=0, verbose=False)
+    e.play_trajectory(n_episodes=1, n_steps_per_episode=3, viser=True, quiet=True)
+    # play_trajectory calls stop() itself
+    assert e._viewer is None
+
+
+def test_read_pixels_rejects_depth(env):
+    env.render_viser()
+    with pytest.raises(NotImplementedError, match="depth"):
+        env.viewer.read_pixels(depth=True)
+
+
+# ------------------------------------------------------------ parallel path
+
+
+def test_parallel_render_rejects_a_different_batch_size(mjx_env):
+    import jax
+
+    state = jax.jit(jax.vmap(mjx_env.mjx_reset))(jax.random.split(jax.random.key(0), 3))
+    mjx_env.mjx_render_viser(state)
+
+    bigger = jax.jit(jax.vmap(mjx_env.mjx_reset))(jax.random.split(jax.random.key(1), 5))
+    with pytest.raises(AssertionError, match="was created for 3 environments"):
+        mjx_env.mjx_render_viser(bigger)
+
+
+def test_parallel_markers_follow_the_grid_offsets():
+    """Each environment's markers must be shifted onto that environment's grid cell."""
+    import jax
+
+    n_envs = 4
+    e, _ = RLFactory.make("MjxUnitreeH1", port=0, verbose=False, use_mjwarp=False,
+                          goal_params=dict(visualize_goal=True))
+    try:
+        state = jax.jit(jax.vmap(e.mjx_reset))(jax.random.split(jax.random.key(0), n_envs))
+        e.mjx_render_viser(state)
+        viewer = e.viewer
+
+        offsets = np.array(viewer._offsets_for_parallel_render)
+        spheres = viewer._marker_handles[(_SPHERE, None)].batched_positions
+        assert spheres.shape[0] == n_envs
+
+        # the sphere marker sits above each robot's root, so its xy must track the grid
+        raw_xy = np.array(state.additional_carry.user_scene.geoms.pos)[:, :, :2]
+        sphere_idx = int(np.argmax(np.asarray(state.additional_carry.user_scene.geoms.type)[0] == _SPHERE))
+        expected_xy = raw_xy[:, sphere_idx, :] + offsets
+        np.testing.assert_allclose(spheres[:, :2], expected_xy + viewer._scene_offset()[:2],
+                                   atol=1e-4)
+    finally:
+        e.stop()
+
+
+# ------------------------------------------------------------- other models
+
+
+def test_model_without_skybox_or_texture_is_handled():
+    """A bare model has no skybox and an untextured plane; neither may raise."""
+    from loco_mujoco.core.visuals.viser_viewer import ViserViewer as VV
+
+    model = mujoco.MjModel.from_xml_string(
+        "<mujoco><worldbody><geom name='ground' type='plane' size='5 5 .1' rgba='.2 .4 .2 1'/>"
+        "<body><joint type='free'/><geom type='sphere' size='.1'/></body></worldbody></mujoco>")
+    # floor_color="model" so the untextured-plane fallback is the thing under test
+    viewer = VV(model, dt=0.01, port=0, verbose=False, floor_color=FLOOR_FROM_MODEL)
+    try:
+        assert viewer._skybox_gradient() is None
+        assert viewer._sky_rgb is None          # no skybox, so no background was set
+        # no texture on the plane, so its geom rgba (.2 .4 .2) is used directly
+        assert viewer._floor_rgb == (51, 102, 51)
+        viewer.render(mujoco.MjData(model), None, False)
+    finally:
+        viewer.stop()
+
+
+def test_dynamic_terrain_rebuilds_the_scene():
+    e, _ = RLFactory.make("UnitreeH1", port=0, verbose=False,
+                          terrain_type="RoughTerrain")
+    try:
+        e.reset()
+        e.render_viser()
+        assert e._terrain.is_dynamic
+        # exercised through render_viser above; calling it directly must also be safe
+        e.viewer.upload_hfield(e._model, hfield_id=e._terrain.hfield_id)
+    finally:
+        e.stop()
