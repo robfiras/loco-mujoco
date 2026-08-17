@@ -50,6 +50,19 @@ omit = [
     "*/loco_mujoco/core/visuals/viewer.py",
     # Namespace/boilerplate that carries no testable logic.
     "*/loco_mujoco/**/__init__.py",
+    # Un-CI-able: these require external, *gated* assets that cannot be fetched in
+    # CI, so mocking them would only test the mock. Same rationale as the viewer.
+    #   - retarget_for_env: CLI that lists+downloads clips from the HuggingFace repo
+    #     and SMPL-fits them; nothing real runs without the network + SMPL model.
+    #   - generate_smplh_model: reads the license-restricted SMPL + MANO model files.
+    #   - myomodel_init: `loco-mujoco-myomodel-init` git-clones a gated model repo.
+    #   - myoskeleton (+ _mjx): env loader downloads that same gated model; the
+    #     env-construction test already skips it for this reason.
+    "*/loco_mujoco/utils/retarget_for_env.py",
+    "*/loco_mujoco/smpl/generate_smplh_model.py",
+    "*/loco_mujoco/utils/myomodel_init.py",
+    "*/loco_mujoco/environments/humanoids/myoskeleton.py",
+    "*/loco_mujoco/environments/humanoids/myoskeleton_mjx.py",
 ]
 
 [tool.coverage.report]
@@ -61,6 +74,18 @@ exclude_also = [
     "@(abc\\.)?abstractmethod",
     "if __name__ == .__main__.:",
     "pragma: no cover",
+    # play_policy / play_policy_mujoco render every step (they call env.render /
+    # env.mjx_render unconditionally, ignoring the `render` flag), so they need a
+    # live GL context and cannot run under headless CI -- same rationale as the
+    # excluded interactive viewer. One entry covers every algorithm's variant.
+    "def play_policy",
+    # AMASS retargeting orchestration: both download the (large) AMASS datasets
+    # AND require the license-restricted SMPL body model, so neither can run under
+    # CI -- same rationale as the viewer. The heavy lifting they delegate to
+    # (motion_transfer_robot_to_robot / fit_smpl_* / extend_motion) IS tested with
+    # synthetic SMPL-H fixtures; only these two network-bound entry points are excluded.
+    "def load_retargeted_amass_trajectory",
+    "def retarget_traj_from_robot_to_robot",
 ]
 show_missing = true
 skip_covered = false

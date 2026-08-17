@@ -11,16 +11,23 @@ from pathlib import Path
 import mujoco
 import numpy as np
 import pytest
+from omegaconf import OmegaConf
 from scipy.spatial.transform import Rotation as sRot
+
+import jax
 
 from loco_mujoco.datasets.data_generation.utils import (
     ExtendTrajData,
+    add_mocap_bodies,
     calculate_qvel_with_finite_difference,
     expression_constructor,  # noqa: F401 (kept for import coverage / clarity)
     load_robot_conf,
     load_dataset_conf,
 )
 from loco_mujoco.core.utils.math import quat_scalarfirst2scalarlast
+
+from test_conf import DummyHumamoidEnv
+from test_conf import *  # noqa: F401,F403 (standing_trajectory fixture)
 
 _MODEL_XML = (Path(__file__).resolve().parent / "test_conf" / "humanoid_test.xml").as_posix()
 
@@ -124,3 +131,123 @@ def test_get_site_names_and_ids(model):
     assert ids == list(range(model.nsite))
     with pytest.raises(AssertionError, match="Could not find"):
         ExtendTrajData.get_site_names_and_ids(model, keys=["not_a_site"])
+
+
+# --------------------------- add_mocap_bodies ---------------------------
+
+_SITES = ["torso_site", "pelvis_site"]
+
+
+def _fresh_spec():
+    return mujoco.MjSpec.from_file(_MODEL_XML)
+
+
+def test_add_mocap_bodies_no_conf():
+    spec = _fresh_spec()
+    n_eq_before = spec.compile().neq
+    mocap = ["target_mocap_body_" + s for s in _SITES]
+
+    spec = add_mocap_bodies(spec, _SITES, mocap, add_equality_constraint=True)
+    model = spec.compile()
+
+    # both mocap bodies were added and a WELD equality created per site
+    assert model.nmocap == len(mocap)
+    assert model.neq == n_eq_before + len(_SITES)
+
+
+def test_add_mocap_bodies_without_equality():
+    spec = _fresh_spec()
+    n_eq_before = spec.compile().neq
+    mocap = ["target_mocap_body_" + s for s in _SITES]
+
+    spec = add_mocap_bodies(spec, _SITES, mocap, add_equality_constraint=False)
+    model = spec.compile()
+
+    assert model.nmocap == len(mocap)
+    assert model.neq == n_eq_before  # no equalities added
+
+
+def test_add_mocap_bodies_with_robot_conf():
+    spec = _fresh_spec()
+    mocap = ["target_mocap_body_" + s for s in _SITES]
+
+    robot_conf = OmegaConf.create({
+        "optimization_params": {
+            "disable_joint_limits": True,
+            "disable_collisions": True,
+        },
+        "site_joint_matches": {
+            "torso_site": {
+                "equality_constraint_type": "mjEQ_WELD",
+                "torque_scale": 0.5,
+                "solref": [0.02, 1.0],
+                "solimp": [0.9, 0.95, 0.001, 0.5, 2.0],
+            },
+            "pelvis_site": {
+                "equality_constraint_type": "mjEQ_WELD",
+                "torque_scale": 1.0,
+            },
+        },
+    })
+
+    spec = add_mocap_bodies(
+        spec, _SITES, mocap, robot_conf=robot_conf,
+        add_equality_constraint=True,
+        height_adjustment_geom_names=["right_foot", "left_foot"],
+        max_height_adjustment=0.5,
+    )
+    model = spec.compile()
+
+    assert model.nmocap == len(mocap)
+    assert model.neq >= len(_SITES)
+    # disable_joint_limits took effect -> no joint remains limited
+    assert not np.any(model.jnt_limited)
+    # disable_collisions zeroed contype/conaffinity on all geoms
+    assert not np.any(model.geom_contype)
+    assert not np.any(model.geom_conaffinity)
+
+
+# --------------------------- ExtendTrajData as a replay callback ---------------------------
+
+def test_extend_traj_data_via_play_trajectory(standing_trajectory):
+    """Drive ExtendTrajData as a play_trajectory callback headlessly.
+
+    This covers the ``callback_class`` branch of ``LocoEnv.play_trajectory``,
+    ``ReplayCallback.__call__`` (set-state + pre/forward/post), the recording in
+    ``ExtendTrajData.__call__``, and the fold-back in ``extend_trajectory_data``.
+    We shrink the trajectory to a handful of samples so the pure-Python replay
+    loop stays fast while still filling the recorder exactly.
+    """
+    jax.config.update('jax_platform_name', 'cpu')
+
+    # shrink the 1000-sample fixture to N frames (single sub-trajectory)
+    N = 4
+    data = standing_trajectory.data
+    small_data = data.replace(
+        qpos=data.qpos[:N], qvel=data.qvel[:N], xpos=data.xpos[:N],
+        xquat=data.xquat[:N], cvel=data.cvel[:N], subtree_com=data.subtree_com[:N],
+        site_xpos=data.site_xpos[:N], site_xmat=data.site_xmat[:N],
+        split_points=jnp.array([0, N]),
+    )
+    from loco_mujoco.core.trajectory import Trajectory
+    traj = Trajectory(standing_trajectory.info, small_data)
+
+    env = DummyHumamoidEnv(enable_mjx=False, goal_type="NoGoal",
+                           reward_type="NoReward", horizon=1000, gamma=0.99, n_envs=1)
+    env.process_trajectory(traj)
+
+    callback = ExtendTrajData(env, n_samples=N, model=env._model)
+    env.play_trajectory(n_episodes=1, n_steps_per_episode=N,
+                        render=False, record=False, quiet=True,
+                        callback_class=callback, key=jax.random.key(0))
+
+    assert callback.current_length == N
+
+    # fold the recorded kinematics back into the (un-padded) N-sample trajectory.
+    # NOTE: env._traj.data is padded to the handler's max_n_samples, so we pass the
+    # original small_data/info -- extend_trajectory_data asserts current_length ==
+    # traj_data.qpos.shape[0].
+    new_data, new_info = callback.extend_trajectory_data(small_data, traj.info)
+    assert new_data.xpos.shape == (N, env._model.nbody, 3)
+    assert new_data.site_xpos.shape == (N, env._model.nsite, 3)
+    assert new_info.model.njnt == env._model.njnt
