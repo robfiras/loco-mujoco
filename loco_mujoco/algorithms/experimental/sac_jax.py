@@ -381,11 +381,13 @@ class SACJax(OffPolicyBase):
         )
         actor_bundle = critic_st.run_stats
         actor_mutables = list(actor_bundle.keys())
-        (q1_a, q2_a), _ = critic_apply_fn(
+        qs_a, _ = critic_apply_fn(
             {"params": critic_st.params, **actor_bundle},
             obs_b, sampled_action, mutable=actor_mutables, training=False,
         )
-        q_a = jnp.minimum(q1_a, q2_a)
+        # min over the critic ensemble; identical to jnp.minimum(q1, q2) at the
+        # default num_critics=2.
+        q_a = jnp.min(jnp.stack(qs_a, axis=0), axis=0)
         alpha = jnp.exp(extra_state.train_state.params["log_alpha"])
         loss = jnp.mean(alpha * log_pi - q_a)
         return loss, {

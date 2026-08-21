@@ -112,8 +112,70 @@ class _QNet(nn.Module):
         return value
 
 
+def aggregate_q_target(qs, pessimism_penalty=None):
+    """Reduce an ensemble of target Q values to a single bootstrap value.
+
+    Args:
+        qs: sequence of K arrays, each shape (batch,) -- one per critic head.
+        pessimism_penalty: if None (default), take the elementwise ``min``,
+            i.e. standard TD3/SAC worst-case pessimism. Otherwise use
+            ``mean(Q) - k * (max(Q) - min(Q))``.
+
+    The spread term is the ensemble RANGE rather than the standard deviation so
+    that the K=2 case reproduces the historical formula exactly: for two heads
+    ``max - min == |Q1 - Q2|``, so ``mean - k*range`` is the documented
+    ``mean - k*|Q1-Q2|``, and ``k=0.5`` is then *identically* ``min(Q1, Q2)``.
+    That algebra is the reason this is a continuous dial rather than a flag:
+    k=0 is a plain ensemble mean (no pessimism), k=0.5 is standard TD3, and
+    k>0.5 is more conservative than TD3.
+    """
+    q_stack = jnp.stack(qs, axis=0)
+    if pessimism_penalty is None:
+        return jnp.min(q_stack, axis=0)
+    k = float(pessimism_penalty)
+    q_range = jnp.max(q_stack, axis=0) - jnp.min(q_stack, axis=0)
+    return jnp.mean(q_stack, axis=0) - k * q_range
+
+
+def pessimistic_mixture_weights(num_critics, pessimism_penalty):
+    """Weights for blending K categorical target distributions.
+
+    The distributional critic cannot average Q values -- it needs a single
+    coherent distribution -- so ``aggregate_q_target``'s arithmetic does not
+    transfer. The analogue is a mixture that concentrates on the most
+    pessimistic head as k rises:
+
+        w_argmin = 1/K + (k / 0.5) * (1 - 1/K),  the rest share the remainder.
+
+    k=0.5 puts all mass on the argmin head, reproducing the historical
+    hard-pick exactly; k=0 gives the uniform mixture (no pessimism). Mixing is
+    done on probabilities, not log-probabilities, so the result stays a valid
+    distribution for the C51 projection.
+
+    Returns:
+        (w_argmin, w_other) as Python floats.
+    """
+    K = int(num_critics)
+    if K < 1:
+        raise ValueError(f"num_critics must be >= 1, got {K}")
+    if K == 1:
+        return 1.0, 0.0
+    k = float(pessimism_penalty)
+    w_argmin = 1.0 / K + (k / 0.5) * (1.0 - 1.0 / K)
+    w_argmin = min(max(w_argmin, 1.0 / K), 1.0)
+    return w_argmin, (1.0 - w_argmin) / (K - 1)
+
+
 class OffPolicyCriticNet(nn.Module):
-    """Twin Q-networks, optionally with input observation normalisation."""
+    """Ensemble of ``num_critics`` Q-networks, optionally with input
+    observation normalisation.
+
+    Defaults to 2 -- the classic TD3/SAC twin -- in which case the sub-modules
+    are named ``q1``/``q2`` and the return value is the 2-tuple ``(q1, q2)``
+    exactly as before, so existing checkpoints and every ``(q1, q2) = ...``
+    call site keep working unchanged. With ``num_critics=K`` the return is a
+    K-tuple and the sub-modules are ``q1``..``qK``.
+    """
 
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "tanh"
@@ -124,6 +186,7 @@ class OffPolicyCriticNet(nn.Module):
     min_v: float = -5.0
     max_v: float = 5.0
     obs_ind: jnp.ndarray = None
+    num_critics: int = 2
 
     @nn.compact
     def __call__(self, obs, action, *, training=False):
@@ -141,9 +204,12 @@ class OffPolicyCriticNet(nn.Module):
             min_v=self.min_v,
             max_v=self.max_v,
         )
-        q1 = _QNet(**kwargs, name="q1")(x, training=training)
-        q2 = _QNet(**kwargs, name="q2")(x, training=training)
-        return q1, q2
+        # Named q1..qK so that K=2 yields exactly the historical q1/q2 param
+        # tree -- old checkpoints load without migration.
+        return tuple(
+            _QNet(**kwargs, name=f"q{i + 1}")(x, training=training)
+            for i in range(int(self.num_critics))
+        )
 
 
 # ReplayBuffer has moved to loco_mujoco.algorithms.common.dataclasses;
@@ -379,6 +445,7 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             min_v=float(getattr(exp, 'min_v', -5.0)),
             max_v=float(getattr(exp, 'max_v', 5.0)),
             obs_ind=obs_ind,
+            num_critics=int(getattr(exp, 'num_critics', 2)),
         )
 
     # ---------- Training loop (the shared engine) ------------------------
@@ -461,12 +528,12 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             # us handle both old (only run_stats) and BN (run_stats + batch_stats)
             # critics without conditional plumbing through every call site.
             mutables = list(run_stats.keys())
-            (q1, q2), updates = critic_net.apply(
+            qs, updates = critic_net.apply(
                 {"params": params, **run_stats},
                 obs, action, mutable=mutables, training=False,
             )
             new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
-            return q1, q2, new_bundle
+            return qs, new_bundle
 
         # ----- collect transition -----
         def _collect_transition(actor_state, replay_buffer, env_state,
@@ -503,32 +570,29 @@ class OffPolicyBase(JaxRLAlgorithmBase):
             next_action, next_q_bonus, _ = cls._next_action_and_q_bonus(
                 actor_st, nobs_b, rng_next, exp, ex_st
             )
-            q1_next, q2_next, new_tgt_rs = _critic_forward_target(
+            qs_next, new_tgt_rs = _critic_forward_target(
                 nobs_b, next_action, tgt_p, tgt_rs
             )
-            # Q-target aggregation across twins. Default is the standard TD3/SAC
-            # `min(Q1, Q2)` (worst-case pessimism). If `pessimism_penalty` is set,
-            # use Motivo-style ensemble pessimism: `mean(Q) - k * |Q1 - Q2|`,
-            # which treats the inter-twin disagreement as an uncertainty estimate.
-            pessimism_penalty = getattr(exp, "pessimism_penalty", None)
-            if pessimism_penalty is None:
-                q_next = jnp.minimum(q1_next, q2_next) + next_q_bonus
-            else:
-                k = float(pessimism_penalty)
-                q_mean = 0.5 * (q1_next + q2_next)
-                q_unc = jnp.abs(q1_next - q2_next)
-                q_next = q_mean - k * q_unc + next_q_bonus
+            # Q-target aggregation across the critic ensemble. Default is the
+            # standard TD3/SAC `min` (worst-case pessimism); `pessimism_penalty`
+            # switches to `mean(Q) - k * range(Q)`, which treats inter-head
+            # disagreement as an uncertainty estimate. See aggregate_q_target.
+            q_next = aggregate_q_target(
+                qs_next, getattr(exp, "pessimism_penalty", None)
+            ) + next_q_bonus
             q_target = rew_b + gamma * (1.0 - done_b) * q_next
             q_target = jax.lax.stop_gradient(q_target)
 
             def _critic_loss_fn(params):
                 run_stats = critic_st.run_stats
                 mutables = list(run_stats.keys())
-                (q1, q2), updates = critic_net.apply(
+                qs, updates = critic_net.apply(
                     {"params": params, **run_stats},
                     obs_b, act_b, mutable=mutables, training=False,
                 )
-                loss = jnp.mean((q1 - q_target) ** 2) + jnp.mean((q2 - q_target) ** 2)
+                # Sum (not mean) over heads, so each head's gradient magnitude
+                # is independent of K -- matches the historical q1 + q2 form.
+                loss = sum(jnp.mean((q - q_target) ** 2) for q in qs)
                 new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
                 return loss, new_bundle
 

@@ -29,6 +29,7 @@ from loco_mujoco.core.wrappers import SummaryMetrics
 from loco_mujoco.algorithms.experimental.offpolicy_base import (
     OffPolicyBase, OffPolicyCriticNet, ReplayBuffer, OffPolicyAgentState,
     _normalize_dense_kernels, _c51_project_target,
+    aggregate_q_target, pessimistic_mixture_weights,
 )
 
 
@@ -407,11 +408,15 @@ class TD3Jax(OffPolicyBase):
         # (the small per-actor-step batch would otherwise corrupt them).
         actor_bundle = critic_st.run_stats
         actor_mutables = list(actor_bundle.keys())
-        (q1, q2), _ = critic_apply_fn(
+        qs, _ = critic_apply_fn(
             {"params": critic_st.params, **actor_bundle},
             obs_b, action_for_Q, mutable=actor_mutables, training=False,
         )
-        # TD3 uses Q1 for the policy gradient
+        # TD3 uses Q1 for the policy gradient. Kept as head 0 rather than a
+        # min/mean over the ensemble so that raising num_critics changes only
+        # the TARGET's pessimism, not the actor's objective -- otherwise the
+        # K sweep would confound two things at once.
+        q1 = qs[0]
         q_loss = -jnp.mean(q1)
 
         # Out-of-bounds quadratic penalty on the RAW (unclipped) action:
@@ -534,33 +539,34 @@ class TD3Jax(OffPolicyBase):
             # _critic_forward_target_joint so BN sees both the bootstrap and
             # current-state batches together.
             mutables = list(run_stats.keys())
-            (q1, q2), updates = critic_net.apply(
+            qs, updates = critic_net.apply(
                 {"params": params, **run_stats},
                 obs, action,
                 mutable=mutables,
                 training=False,
             )
             new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
-            return q1, q2, new_bundle
+            return qs, new_bundle
 
         def _critic_forward_target_joint(obs, nobs, act, next_act,
                                          params, run_stats):
             """Joint forward: concat (obs, nobs)/(act, next_act) so BN sees
-            both halves, then split. Returns (q1_curr, q2_curr, q1_next,
-            q2_next, new_bundle)."""
+            both halves, then split. Returns (qs_curr, qs_next, new_bundle),
+            each a K-tuple."""
             mutables = list(run_stats.keys())
             cat_obs = jnp.concatenate([obs, nobs], axis=0)
             cat_act = jnp.concatenate([act, next_act], axis=0)
-            (q1c, q2c), updates = critic_net.apply(
+            qs_cat, updates = critic_net.apply(
                 {"params": params, **run_stats},
                 cat_obs, cat_act,
                 mutable=mutables,
                 training=True,
             )
-            q1_curr, q1_next = jnp.split(q1c, 2)
-            q2_curr, q2_next = jnp.split(q2c, 2)
+            split = [jnp.split(q, 2) for q in qs_cat]
+            qs_curr = tuple(s[0] for s in split)
+            qs_next = tuple(s[1] for s in split)
             new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
-            return q1_curr, q2_curr, q1_next, q2_next, new_bundle
+            return qs_curr, qs_next, new_bundle
 
         def _collect_transition(actor_state, replay_buffer, env_state,
                                 last_obs, rng, extra_state):
@@ -600,13 +606,15 @@ class TD3Jax(OffPolicyBase):
             num_atoms = int(getattr(exp, 'num_atoms', 1))
             min_v = float(getattr(exp, 'min_v', -5.0))
             max_v = float(getattr(exp, 'max_v', 5.0))
+            n_critics = int(getattr(exp, 'num_critics', 2))
+            pessimism_penalty = getattr(exp, "pessimism_penalty", None)
 
             # Compute the next-state target. For the MSE path we use the
             # scalar Q values returned by the critic; for categorical we also
             # need the per-atom target log-probs which the critic sows.
             if critic_loss_kind == 'categorical':
                 tgt_mutables = list(tgt_rs.keys()) + ["log_probs_collection"]
-                (q1n_v, q2n_v), tgt_updates = critic_net.apply(
+                qs_n_v, tgt_updates = critic_net.apply(
                     {"params": tgt_p, **tgt_rs},
                     nobs_b, next_action,
                     mutable=tgt_mutables, training=False,
@@ -615,30 +623,52 @@ class TD3Jax(OffPolicyBase):
                 # "q2": ...}. `sow` wraps the value in a tuple by default, so
                 # `[0]` extracts the actual log_probs array.
                 tgt_lp_coll = tgt_updates.get("log_probs_collection", {})
-                tgt_log_probs_q1 = tgt_lp_coll["q1"]["log_probs"][0]
-                tgt_log_probs_q2 = tgt_lp_coll["q2"]["log_probs"][0]
+                tgt_lp_stack = jnp.stack(
+                    [tgt_lp_coll[f"q{i + 1}"]["log_probs"][0]
+                     for i in range(n_critics)], axis=0,
+                )                                      # (K, batch, atoms)
                 new_tgt_rs = {k: tgt_updates.get(k, tgt_rs[k]) for k in tgt_rs}
-                # Pick the twin with the smaller scalar Q (per-sample); use its
-                # log-probs for the target distribution. Matches XQC.
-                pick_q1 = (q1n_v <= q2n_v)
-                tgt_log_probs = jnp.where(
-                    pick_q1[:, None], tgt_log_probs_q1, tgt_log_probs_q2,
-                )
+
+                # Pick the head with the smallest scalar Q (per-sample) and use
+                # its log-probs for the target distribution. Matches XQC.
+                q_stack_n = jnp.stack(qs_n_v, axis=0)   # (K, batch)
+                argmin = jnp.argmin(q_stack_n, axis=0)  # (batch,)
+                onehot = jax.nn.one_hot(argmin, n_critics, axis=0)  # (K, batch)
+
+                if pessimism_penalty is None:
+                    # All mass on the argmin head -- the historical hard pick.
+                    weights = onehot
+                else:
+                    # The distributional critic cannot average Q values, so the
+                    # scalar `mean - k*range` has no direct analogue. Blend the
+                    # head distributions instead, concentrating on the argmin as
+                    # k rises: k=0.5 reproduces the hard pick exactly, k=0 is the
+                    # uniform mixture. Mixing happens on PROBABILITIES so the
+                    # result stays a valid distribution for the C51 projection.
+                    w_argmin, w_other = pessimistic_mixture_weights(
+                        n_critics, pessimism_penalty
+                    )
+                    weights = onehot * w_argmin + (1.0 - onehot) * w_other
+
+                if pessimism_penalty is None and n_critics == 2:
+                    # Bit-identical to the pre-ensemble code path.
+                    tgt_log_probs = jnp.where(
+                        (qs_n_v[0] <= qs_n_v[1])[:, None],
+                        tgt_lp_stack[0], tgt_lp_stack[1],
+                    )
+                else:
+                    mixed = jnp.sum(
+                        weights[..., None] * jnp.exp(tgt_lp_stack), axis=0
+                    )
+                    tgt_log_probs = jnp.log(jnp.clip(mixed, 1e-12, None))
             else:
-                q1n, q2n, new_tgt_rs = _critic_forward_target(
+                qs_n, new_tgt_rs = _critic_forward_target(
                     nobs_b, next_action, tgt_p, tgt_rs
                 )
-                # Q-target aggregation across twins. Default is standard TD3
-                # `min(Q1, Q2)`. If `pessimism_penalty` is set, use Motivo-style
-                # ensemble pessimism: `mean(Q) - k * |Q1 - Q2|`.
-                pessimism_penalty = getattr(exp, "pessimism_penalty", None)
-                if pessimism_penalty is None:
-                    q_next = jnp.minimum(q1n, q2n) + next_q_bonus
-                else:
-                    k = float(pessimism_penalty)
-                    q_mean = 0.5 * (q1n + q2n)
-                    q_unc = jnp.abs(q1n - q2n)
-                    q_next = q_mean - k * q_unc + next_q_bonus
+                # Q-target aggregation across the critic ensemble; see
+                # aggregate_q_target. Default `min`, or `mean - k*range` when
+                # pessimism_penalty is set.
+                q_next = aggregate_q_target(qs_n, pessimism_penalty) + next_q_bonus
                 q_target = rew_b + gamma * (1.0 - done_b) * q_next
                 q_target = jax.lax.stop_gradient(q_target)
 
@@ -661,16 +691,21 @@ class TD3Jax(OffPolicyBase):
                         )
                     )
                     mutables_online = mutables + ["log_probs_collection"]
-                    (_q1, _q2), updates = critic_net.apply(
+                    _qs, updates = critic_net.apply(
                         {"params": params, **run_stats},
                         obs_b, act_b,
                         mutable=mutables_online, training=use_bn,
                     )
                     pred_lp_coll = updates.get("log_probs_collection", {})
-                    pred_lp_q1 = pred_lp_coll["q1"]["log_probs"][0]
-                    pred_lp_q2 = pred_lp_coll["q2"]["log_probs"][0]
-                    loss = -jnp.mean(jnp.sum(target_probs * pred_lp_q1, axis=-1))
-                    loss = loss - jnp.mean(jnp.sum(target_probs * pred_lp_q2, axis=-1))
+                    # Summed over heads (not averaged) so per-head gradient
+                    # magnitude is independent of K, matching the q1 + q2 form.
+                    loss = sum(
+                        -jnp.mean(jnp.sum(
+                            target_probs * pred_lp_coll[f"q{i + 1}"]["log_probs"][0],
+                            axis=-1,
+                        ))
+                        for i in range(n_critics)
+                    )
                     new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
                     return loss, new_bundle
                 if use_bn:
@@ -679,20 +714,19 @@ class TD3Jax(OffPolicyBase):
                     # batches together, then split.
                     cat_obs = jnp.concatenate([obs_b, nobs_b], axis=0)
                     cat_act = jnp.concatenate([act_b, next_action], axis=0)
-                    (q1c, q2c), updates = critic_net.apply(
+                    qs_cat, updates = critic_net.apply(
                         {"params": params, **run_stats},
                         cat_obs, cat_act,
                         mutable=mutables, training=True,
                     )
-                    q1, _ = jnp.split(q1c, 2)
-                    q2, _ = jnp.split(q2c, 2)
+                    qs = tuple(jnp.split(q, 2)[0] for q in qs_cat)
                 else:
-                    (q1, q2), updates = critic_net.apply(
+                    qs, updates = critic_net.apply(
                         {"params": params, **run_stats},
                         obs_b, act_b,
                         mutable=mutables, training=False,
                     )
-                loss = jnp.mean((q1 - q_target) ** 2) + jnp.mean((q2 - q_target) ** 2)
+                loss = sum(jnp.mean((q - q_target) ** 2) for q in qs)
                 new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
                 return loss, new_bundle
 
