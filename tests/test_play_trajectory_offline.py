@@ -10,6 +10,7 @@ synthetic ``standing_trajectory`` fixture -- no dataset download.
 import numpy as np
 import jax
 
+from loco_mujoco.environments.base import LocoEnv
 from test_conf import DummyHumamoidEnv
 from test_conf import *  # noqa: F401,F403  (standing_trajectory fixture, np/jnp/jax/pytest)
 
@@ -46,3 +47,41 @@ def test_play_trajectory_from_velocity_headless(standing_trajectory):
     env.play_trajectory_from_velocity(n_episodes=1, n_steps_per_episode=5,
                                       render=False, record=False, quiet=True,
                                       key=jax.random.key(0))
+
+
+def test_play_trajectory_from_velocity_forwards_its_arguments(standing_trajectory):
+    """Guards against a signature change silently shifting the wrapper's arguments.
+
+    ``play_trajectory_from_velocity`` used to forward positionally, so inserting a
+    parameter into ``play_trajectory`` ahead of ``key`` slid the key into the new
+    parameter and reset ``key`` to None. Keep the forwarding by keyword, and keep any
+    new parameter last.
+    """
+    import inspect
+
+    params = list(inspect.signature(LocoEnv.play_trajectory).parameters)
+    assert params.index("key") > params.index("quiet"), \
+        "`key` must stay after the flags so existing positional callers keep working"
+
+    env = _env_with_traj(standing_trajectory)
+    seen = {}
+    original = type(env).play_trajectory
+
+    def spy(self, *args, **kwargs):
+        seen.update(kwargs)
+        seen["_positional"] = args
+        return original(self, *args, **kwargs)
+
+    type(env).play_trajectory = spy
+    try:
+        key = jax.random.key(3)
+        env.play_trajectory_from_velocity(n_episodes=1, n_steps_per_episode=2,
+                                          render=False, record=False, quiet=True, key=key)
+    finally:
+        type(env).play_trajectory = original
+
+    assert seen["_positional"] == (), "forward by keyword, not positionally"
+    assert seen["from_velocity"] is True
+    # the key must arrive as the key, not be swallowed by another parameter
+    assert seen["key"] is key
+    assert seen.get("viser", False) is False

@@ -421,8 +421,8 @@ class LocoEnv(Mjx):
                         recorder_params: Dict = None,
                         callback_class=None,
                         quiet: bool = False,
-                        viser: bool = False,
-                        key: jax.random.PRNGKey = None) -> None:
+                        key: jax.random.PRNGKey = None,
+                        viser: bool = False) -> None:
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -437,9 +437,10 @@ class LocoEnv(Mjx):
             recorder_params (dict): Dictionary containing the recorder parameters.
             callback_class: Object to be called at each step of the simulation.
             quiet (bool): If True, disable tqdm.
-            viser (bool): If True, the browser-based viser viewer is used instead of the
-                OpenGL viewer. Recording then requires a connected browser.
             key (jax.random.PRNGKey): Random key to use for the simulation.
+            viser (bool): If True, the browser-based viser viewer is used instead of the
+                OpenGL viewer. Recording then requires a connected browser. Keyword only in
+                practice: it is last so that existing positional callers keep working.
 
         """
 
@@ -589,8 +590,10 @@ class LocoEnv(Mjx):
             category=DeprecationWarning,
             stacklevel=3
         )
-        self.play_trajectory(n_episodes, n_steps_per_episode, True, render,
-                             record, recorder_params, callback_class, quiet, key)
+        self.play_trajectory(n_episodes=n_episodes, n_steps_per_episode=n_steps_per_episode,
+                             from_velocity=True, render=render, record=record,
+                             recorder_params=recorder_params, callback_class=callback_class,
+                             quiet=quiet, key=key)
 
     def set_sim_state_from_traj_data(self, data, traj_data, carry) -> MjData:
         """
