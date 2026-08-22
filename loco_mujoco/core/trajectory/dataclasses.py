@@ -151,6 +151,10 @@ class TrajectoryInfo:
         j_qvel = 0
         for i, item in enumerate(zip(self.joint_names, self.model.jnt_type)):
             j_name, j_type = item
+            # jnt_type may be a jax array. Since jax 0.11, comparing a jax scalar against
+            # mujoco's pybind11 enum returns False instead of coercing it, which silently sent
+            # every joint to the error branch below, so compare as plain ints.
+            j_type = int(j_type)
             if j_type == mujoco.mjtJoint.mjJNT_FREE:
                 self.joint_name2ind_qpos[j_name] = np.arange(j_qpos, j_qpos + 7)
                 self.joint_name2ind_qvel[j_name] = np.arange(j_qvel, j_qvel + 6)
