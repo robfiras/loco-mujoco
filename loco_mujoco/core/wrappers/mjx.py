@@ -10,6 +10,21 @@ from flax import struct
 from loco_mujoco.core import MjxState, Mjx
 from loco_mujoco.core.utils.env import Box
 
+#: Name of the vmap axis :class:`VecEnv` maps the environments over. Naming it lets any
+#: code inside the traced region recover its own environment index with
+#: ``jax.lax.axis_index(VECENV_AXIS_NAME)``, which is how ``AdditionalCarry.env_id`` is
+#: populated. That index is what makes MjWarp's *global* contact buffer usable: the
+#: buffer is shared by every world, and ``contact__worldid`` only becomes meaningful
+#: once an environment knows which world it is.
+VECENV_AXIS_NAME = "env"
+
+#: Name for the OUTER vmap over seeds, applied by the training drivers (not here) when
+#: ``n_seeds > 1``. MjWarp flattens nested batch axes into a single world dimension, so
+#: with a seed axis present ``axis_index(VECENV_AXIS_NAME)`` alone no longer equals
+#: ``worldid`` -- the two indices have to be combined. Drivers should import this rather
+#: than hardcoding the string.
+SEED_AXIS_NAME = "seed"
+
 
 class LocoMjxWrapper:
 
@@ -221,8 +236,13 @@ class VecEnv(BaseWrapper):
 
     def __init__(self, env):
         super().__init__(env)
-        self.reset = jax.vmap(self.env.reset, in_axes=(0, None))
-        self.step = jax.vmap(self.env.step, in_axes=(0, 0, None))
+        # axis_name is what lets AdditionalCarry.env_id be filled in from inside the
+        # vmap; without it there is no way for an environment to know which world it is,
+        # which is exactly what reading MjWarp's shared contact buffer requires.
+        self.reset = jax.vmap(self.env.reset, in_axes=(0, None),
+                              axis_name=VECENV_AXIS_NAME)
+        self.step = jax.vmap(self.env.step, in_axes=(0, 0, None),
+                             axis_name=VECENV_AXIS_NAME)
 
 
 # NormalizeVecReward has been removed. Reward normalization now lives on the

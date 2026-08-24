@@ -29,12 +29,66 @@ from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
 
+def current_world_index(backend: ModuleType):
+    """Index of the world this trace belongs to, or 0 outside any vmap.
+
+    Under :class:`~loco_mujoco.core.wrappers.mjx.VecEnv` the environments are vmapped
+    with ``axis_name=VECENV_AXIS_NAME``, and the training drivers may add an OUTER vmap
+    over seeds named ``SEED_AXIS_NAME``. MjWarp flattens nested batch axes into one
+    world dimension, so the world index is the combination of both:
+
+        ``world = seed_index * n_envs_per_seed + env_index``
+
+    Consumers need this because MjWarp's contact arrays are a single buffer shared by
+    every world -- ``contact__worldid`` tells you which world each contact belongs to,
+    but only an environment that knows its own index can use that.
+
+    ``n_envs_per_seed`` comes from ``jax.lax.axis_size``, i.e. the ACTUAL vmap width,
+    not from the environment's ``n_envs`` construction argument. Those two can disagree
+    -- an env built with the default ``n_envs=1`` and then vmapped 6 ways produced
+    ``seed + env`` instead of ``seed * 6 + env``, silently pointing several worlds at
+    each other's contacts. Reading the width from the trace makes that impossible.
+
+    ``jax.lax.axis_index`` raises when the axis is not in scope, which is the normal
+    case for the CPU environment and for any un-vmapped call, so both lookups fall back
+    to 0.
+
+    Args:
+        backend: numpy or jax.numpy. numpy always yields 0 -- there is no vmap.
+
+    Returns:
+        Scalar world index.
+    """
+    if backend is np:
+        return 0
+
+    from loco_mujoco.core.wrappers.mjx import SEED_AXIS_NAME, VECENV_AXIS_NAME
+
+    def _index(name):
+        try:
+            return jax.lax.axis_index(name)
+        except NameError:
+            return 0  # not vmapped over this axis
+
+    def _size(name):
+        try:
+            return int(jax.lax.axis_size(name))
+        except NameError:
+            return 1
+
+    return _index(SEED_AXIS_NAME) * _size(VECENV_AXIS_NAME) + _index(VECENV_AXIS_NAME)
+
+
 @struct.dataclass
 class AdditionalCarry:
     key: jax.Array
     cur_step_in_episode: int
     global_step: int
     curriculum_cur_max: int
+    #: Index of this environment's world, used to attribute entries in MjWarp's shared
+    #: contact buffer. 0 for the CPU environment. Set once at reset and preserved by
+    #: ``_mjx_reset_in_step``'s ``carry.replace(...)``, so it survives auto-resets.
+    env_id: Union[int, jax.Array]
     last_action: Union[np.ndarray, jax.Array]
     observation_states: struct.PyTreeNode
     reward_state: struct.PyTreeNode
@@ -927,6 +981,7 @@ class Mujoco:
             cur_step_in_episode=1,
             global_step=0,
             curriculum_cur_max=0,
+            env_id=current_world_index(backend),
             last_action=backend.zeros(self.info.action_space.shape),
             observation_states=self.obs_container.init_state(self, _k1, model, data, backend, traj),
             reward_state=self._reward_function.init_state(self, _k2, model, data, backend, traj),
