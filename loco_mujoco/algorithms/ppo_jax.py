@@ -141,11 +141,29 @@ class PPOJax(JaxRLAlgorithmBase):
         else:
             critic_obs_ind = jnp.arange(env.mdp_info.observation_space.shape[0])
         if hasattr(config.experiment, "len_obs_history") and config.experiment.len_obs_history > 1:
-            obs_len = env.info.observation_space.shape[0]
-            actor_obs_ind = jnp.concatenate([actor_obs_ind + i*obs_len
-                                             for i in range(config.experiment.len_obs_history)])
-            critic_obs_ind = jnp.concatenate([critic_obs_ind + i*obs_len
-                                              for i in range(config.experiment.len_obs_history)])
+            n_hist = int(config.experiment.len_obs_history)
+            hist_group = getattr(config.experiment, "obs_history_group", None)
+            if hist_group is None:
+                # Legacy: NStepWrapper stacks the WHOLE observation n_hist times, so the
+                # current frame is no longer at its original indices and every consumer
+                # has to be shifted -- including the critic, which is why a history used
+                # to inflate the value network too.
+                obs_len = env.info.observation_space.shape[0]
+                actor_obs_ind = jnp.concatenate([actor_obs_ind + i*obs_len
+                                                 for i in range(n_hist)])
+                critic_obs_ind = jnp.concatenate([critic_obs_ind + i*obs_len
+                                                  for i in range(n_hist)])
+            else:
+                # Group mode: layout is [current full obs][group @ t-1] ... so the
+                # current frame keeps its indices and ONLY the actor grows. The critic is
+                # untouched, matching mjlab, whose privileged_state group has no history.
+                obs_len = env.info.observation_space.shape[0]
+                g_ind = jnp.asarray(
+                    env.obs_container.get_obs_ind_by_group(hist_group), dtype=int)
+                n_g = int(g_ind.size)
+                actor_obs_ind = jnp.concatenate(
+                    [actor_obs_ind]
+                    + [obs_len + i*n_g + jnp.arange(n_g) for i in range(n_hist - 1)])
         network = ActorCritic(
             env.info.action_space.shape[0],
             activation=config.experiment.activation,
@@ -733,7 +751,8 @@ class PPOJax(JaxRLAlgorithmBase):
     def _wrap_env(env, config):
 
         if "len_obs_history" in config and config.len_obs_history > 1:
-            env = NStepWrapper(env, config.len_obs_history)
+            env = NStepWrapper(env, config.len_obs_history,
+                               group=config.get("obs_history_group", None))
         env = LogWrapper(env)
         env = VecEnv(env)
         # reward normalization moved into _train_fn; stats live on the agent state
