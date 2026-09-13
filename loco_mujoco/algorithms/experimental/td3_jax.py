@@ -226,20 +226,24 @@ class TD3Jax(OffPolicyBase):
         # Resolve actor/critic obs groups -> obs_ind arrays (mirrors ppo_jax).
         actor_obs_group = getattr(config.experiment, "actor_obs_group", None)
         critic_obs_group = getattr(config.experiment, "critic_obs_group", None)
-        if actor_obs_group is not None:
-            actor_obs_ind = jnp.asarray(
-                env.obs_container.get_obs_ind_by_group(str(actor_obs_group)),
-                dtype=jnp.int32,
-            )
-        else:
-            actor_obs_ind = None
-        if critic_obs_group is not None:
-            critic_obs_ind = jnp.asarray(
-                env.obs_container.get_obs_ind_by_group(str(critic_obs_group)),
-                dtype=jnp.int32,
-            )
-        else:
-            critic_obs_ind = None
+        # No str() here: get_obs_ind_by_group accepts a group name OR a list of them,
+        # and str() on a ListConfig produces "['a', 'b']", which matches no group and
+        # silently yields an EMPTY index array -- an actor built with zero inputs rather
+        # than an error.
+        def _resolve(group, what):
+            ind = jnp.asarray(env.obs_container.get_obs_ind_by_group(group),
+                              dtype=jnp.int32)
+            if ind.size == 0:
+                raise ValueError(
+                    f"{what}={group!r} selected no observations. Check the group "
+                    f"name(s) against the observation spec."
+                )
+            return ind
+
+        actor_obs_ind = (_resolve(actor_obs_group, "actor_obs_group")
+                         if actor_obs_group is not None else None)
+        critic_obs_ind = (_resolve(critic_obs_group, "critic_obs_group")
+                          if critic_obs_group is not None else None)
 
         with open_dict(config.experiment):
             config.experiment.obs_dim = obs_dim
