@@ -291,6 +291,13 @@ class Mujoco:
         self._data, self._additional_carry =\
             self._reset_carry(self._model, self._data, self._additional_carry, traj)
 
+        # Re-run forward kinematics AFTER the initial-state handler has written qpos.
+        # The mj_forward above ran on the post-mj_resetData pose, so without this the
+        # episode's first observation is built from xpos/xmat belonging to the PREVIOUS
+        # pose -- about 1 cm of body-position error on the G1, and only on step 0 of each
+        # episode, which is why it is easy to miss. mj_step refreshes them thereafter.
+        mujoco.mj_forward(self._model, self._data)
+
         # reset all stateful entities
         self._data, self._additional_carry = self.obs_container.reset_state(self, self._model, self._data,
                                                                             self._additional_carry, jnp,
