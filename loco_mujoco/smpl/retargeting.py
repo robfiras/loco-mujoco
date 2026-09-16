@@ -231,7 +231,7 @@ def fit_smpl_motion(
 
     # get environment
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**robot_conf.env_params, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
 
     # add mocap bodies for all 'site_for_mimic' instances of an environment
     mjspec = env.mjspec
@@ -442,7 +442,7 @@ def fit_smpl_shape(
 
     # get environment
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**robot_conf.env_params, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
 
     # add mocap bodies for all 'site_for_mimic' instances of an environment
     mjspec = env.mjspec
@@ -615,7 +615,7 @@ def motion_transfer_robot_to_robot(
 
         # get the source env
         env_cls = LocoEnv.registered_envs[env_name_source]
-        env = env_cls(**robot_conf_source.env_params, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+        env = env_cls(**robot_conf_source.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
 
         # add mocap bodies for all 'site_for_mimic' instances of an environment
         mjspec = env.mjspec
@@ -809,7 +809,7 @@ def extend_motion(
 
     """
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**env_params, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+    env = env_cls(**env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
 
     traj_data, traj_info = interpolate_trajectories(traj.data, traj.info, 1.0 / env.dt)
     traj = Trajectory(info=traj_info, data=traj_data)

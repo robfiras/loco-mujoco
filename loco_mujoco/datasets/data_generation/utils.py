@@ -313,7 +313,7 @@ def optimize_for_collisions(
     from loco_mujoco import LocoEnv
     # add mocap bodies for all 'site_for_mimic' instances of an environment
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**robot_conf.env_params, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
     mjspec = env.mjspec
     sites_for_mimic = env.sites_for_mimic
     target_mocap_bodies = ["target_mocap_body_" + s for s in sites_for_mimic]

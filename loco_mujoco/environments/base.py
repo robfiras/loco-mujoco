@@ -19,7 +19,7 @@ from loco_mujoco.core.stateful_object import EmptyState
 from loco_mujoco.core.observations import Observation
 from loco_mujoco.core.mujoco_mjx import Mjx, MjxAdditionalCarry, MjxState
 from loco_mujoco.core.visuals import VideoRecorder
-from loco_mujoco.core.trajectory import TrajectoryHandler
+from loco_mujoco.core.trajectory import TrajectoryHandler, FixedStartTrajectoryHandler
 from loco_mujoco.core.utils import info_property
 from loco_mujoco.core.utils.mujoco import mj_jntname2qposid
 from loco_mujoco.core.trajectory import Trajectory, TrajState, TrajectoryTransitions
@@ -119,20 +119,17 @@ class LocoEnv(Mjx):
         processed_traj = traj.replace(data=traj_data, info=traj_info)
 
         # create or validate TrajectoryHandler using _th_params
-        th_params = self._th_params if self._th_params is not None else {}
-        random_start = th_params.get("random_start", True)
-        fixed_start_conf = th_params.get("fixed_start_conf", None)
-        max_n_samples = th_params.get("max_n_samples", 100_000)
-        max_n_trajs = th_params.get("max_n_trajs", 100)
-        if fixed_start_conf is not None:
-            random_start = False
+        th_params = dict(self._th_params) if self._th_params is not None else {}
+        th_name = th_params.pop("name", "RandomStartTrajectoryHandler")
 
         if self.th is None:
-            self.th = TrajectoryHandler(traj_info, control_dt=self.dt,
-                                        random_start=(fixed_start_conf is None and random_start),
-                                        fixed_start_conf=fixed_start_conf,
-                                        max_n_samples=max_n_samples,
-                                        max_n_trajs=max_n_trajs)
+            if th_name not in TrajectoryHandler.registered:
+                raise ValueError(
+                    f"Unknown TrajectoryHandler '{th_name}'. "
+                    f"Registered: {TrajectoryHandler.list_registered()}"
+                )
+            th_cls = TrajectoryHandler.registered[th_name]
+            self.th = th_cls(traj_info, control_dt=self.dt, **th_params)
         else:
             assert self.th.traj_info == traj_info, (
                 "New trajectory has incompatible structure with existing trajectory handler. "
@@ -321,7 +318,7 @@ class LocoEnv(Mjx):
                 data = deepcopy(self._traj.data)
                 data = data.to_numpy()
                 tmp_traj = Trajectory(info=info, data=data)
-                tmp_th = TrajectoryHandler(info, control_dt=self.dt, random_start=False, fixed_start_conf=(0, 0))
+                tmp_th = FixedStartTrajectoryHandler(info, control_dt=self.dt, start_conf=(0, 0))
 
                 # set trajectory handler and store old ones for later
                 orig_th = self.th
@@ -343,7 +340,7 @@ class LocoEnv(Mjx):
                 for i in tqdm(range(self.th.n_trajectories(self._traj.data)), desc="Creating Transition Dataset"):
 
                     # set configuration to the first state of the current trajectory
-                    self.th.fixed_start_conf = (i, 0)
+                    self.th.start_conf = (i, 0)
 
                     # do a reset
                     key, subkey = jax.random.split(rng_key)

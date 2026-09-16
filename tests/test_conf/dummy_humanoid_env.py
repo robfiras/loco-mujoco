@@ -164,7 +164,7 @@ class DummyHumamoidEnv(LocoEnv):
             for i in range(self.th.n_trajectories(self._traj.data)):
 
                 # set configuration to the first state of the current trajectory
-                self.th.fixed_start_conf = (i, 0)
+                self.th.start_conf = (i, 0)
 
                 # do a reset
                 key, subkey = jax.random.split(rng_key)
@@ -295,7 +295,7 @@ class DummyHumamoidEnv(LocoEnv):
             for i in range(self.th.n_trajectories(self._traj.data)):
 
                 # set configuration to the first state of the current trajectory
-                self.th.fixed_start_conf = (i, 0)
+                self.th.start_conf = (i, 0)
 
                 # do a reset
                 data_mjx = first_data_mjx
