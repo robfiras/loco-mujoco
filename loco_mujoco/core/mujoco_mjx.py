@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Tuple
 from types import ModuleType
+import atexit
 
 import mujoco
 from mujoco import mjx
@@ -10,7 +11,7 @@ import jax
 import jax.numpy as jnp
 
 from loco_mujoco.core.mujoco_base import Mujoco, AdditionalCarry
-from loco_mujoco.core.visuals import MujocoViewer, ViserViewer
+from loco_mujoco.core.visuals import MujocoViewer, UsdTrajectoryExporter, ViserViewer
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
 
@@ -624,7 +625,7 @@ class Mjx(Mujoco):
             np.ndarray: Rendered image.
         """
         if self._viewer is None:
-            viewer_params = dict(self._viewer_params)
+            viewer_params = self._viser_viewer_params()
             if "default_camera_mode" not in viewer_params.keys():
                 viewer_params["default_camera_mode"] = "static"
             self._viewer = ViserViewer(self._model, self.dt, record=record,
@@ -642,6 +643,40 @@ class Mjx(Mujoco):
             self._viewer.upload_hfield(self._model, hfield_id=self._terrain.hfield_id)
 
         return self._viewer.parallel_render(state, record)
+
+    def mjx_render_usd(self, state, env_idx: int = 0, **exporter_params) -> None:
+        """Append one environment from a batched MJX state to a USD stage.
+
+        USD is finalized by :meth:`stop_usd` (or :meth:`stop`). Only one
+        selected environment is exported because MuJoCo's USD exporter owns a
+        single model namespace; use ``env_idx`` to choose it.
+
+        Args:
+            state: Current, optionally batched MJX state.
+            env_idx: Environment selected from a batched state.
+            **exporter_params: Configuration accepted on the first frame by
+                :class:`~loco_mujoco.core.visuals.UsdTrajectoryExporter`.
+        """
+        qpos = np.asarray(state.data.qpos)
+        n_envs = 1 if qpos.ndim == 1 else qpos.shape[0]
+        if not 0 <= env_idx < n_envs:
+            raise IndexError(f"env_idx {env_idx} is outside a batch of size {n_envs}.")
+
+        if self._terrain.is_dynamic:
+            terrain_state = state.additional_carry.terrain_state
+            assert hasattr(terrain_state, "height_field_raw"), \
+                "Terrain state does not have height_field_raw."
+            hfield_data = np.asarray(terrain_state.height_field_raw)
+            self._model.hfield_data = hfield_data[env_idx] if hfield_data.ndim > 1 else hfield_data
+
+        if self._usd_exporter is None:
+            params = self._usd_exporter_params()
+            params.update(exporter_params)
+            self._usd_exporter = UsdTrajectoryExporter(self._model, self.dt, **params)
+            atexit.register(self.stop_usd)
+        elif exporter_params:
+            raise ValueError("USD exporter parameters can only be set on the first frame.")
+        self._usd_exporter.render_mjx(state, env_idx=env_idx)
 
     def mjx_render_trajectory(self, trajectory,
                               record: bool = False) -> None:

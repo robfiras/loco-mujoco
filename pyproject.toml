@@ -104,6 +104,16 @@ viser = [
     "mjviser>=0.0.14",
     "trimesh>=4.8.3",
 ]
+# Portable animated USD export used by the tested core API.
+usd = [
+    "usd-core>=24.5",
+]
+# Dependencies used by the standalone scripts under scripts/blender/. Blender
+# itself is an external application and is not installed by this extra.
+blender = [
+    "usd-core>=24.5",
+    "Pillow",
+]
 # Test/dev tooling. Install with: pip install -e ".[test]"
 test = [
     "pytest",

@@ -422,7 +422,9 @@ class LocoEnv(Mjx):
                         callback_class=None,
                         quiet: bool = False,
                         key: jax.random.PRNGKey = None,
-                        viser: bool = False) -> None:
+                        viser: bool = False,
+                        usd: bool = False,
+                        usd_params: Dict = None) -> None:
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -441,12 +443,29 @@ class LocoEnv(Mjx):
             viser (bool): If True, the browser-based viser viewer is used instead of the
                 OpenGL viewer. Recording then requires a connected browser. Keyword only in
                 practice: it is last so that existing positional callers keep working.
+            usd (bool): If True, collect the trajectory into an animated USD stage instead of
+                opening an interactive viewer.
+            usd_params (dict): Parameters passed to ``render_usd`` on its first frame.
 
         """
 
         assert self.th is not None
 
-        render_fn = self.render_viser if viser else self.render
+        if viser and usd:
+            raise ValueError("viser and USD export cannot both be enabled.")
+        if usd and record:
+            raise ValueError(
+                "record=True is for framebuffer viewers and cannot be combined with USD export."
+            )
+        pending_usd_params = {} if usd_params is None else dict(usd_params)
+
+        def render_usd_frame(_record=False):
+            nonlocal pending_usd_params
+            self.render_usd(**pending_usd_params)
+            pending_usd_params = {}
+            return None
+
+        render_fn = render_usd_frame if usd else (self.render_viser if viser else self.render)
 
         if not TrajectoryHandler.is_numpy(self._traj.data):
             was_jax = True
@@ -482,7 +501,10 @@ class LocoEnv(Mjx):
         subtraj_step_no = 0
         traj_data_sample = self.th.get_current_traj_data(self._traj.data, self._additional_carry, np)
 
-        if render:
+        # Offline USD export starts inside the loop after the trajectory
+        # sample has been written to MjData. Rendering here would otherwise
+        # prepend the reset pose, which may be far from the trajectory origin.
+        if render and not usd:
             frame = render_fn(record)
         else:
             frame = None

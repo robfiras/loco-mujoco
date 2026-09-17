@@ -231,3 +231,40 @@ recolored live from the *Visualization* tab in the browser:
   image.
 * The sky is a flat backdrop rather than a real cube map, so it does not rotate with the camera.
 * The default logo is loaded from GitHub by the browser; pass a local path when working offline.
+
+## Offline USD export
+
+The tested core API can collect CPU or MJX simulation states into a portable animated USD stage.
+Install the optional USD bindings with:
+
+```bash
+pip install -e ".[usd]"
+```
+
+```python
+env.reset()
+for i in range(300):
+    env.step(action)
+    env.render_usd(output_directory="render", fps=30) if i == 0 else env.render_usd()
+usd_path = env.stop_usd()
+```
+
+Dataset replay can export directly:
+
+```python
+env.play_trajectory(
+    n_episodes=1,
+    usd=True,
+    usd_params={"output_directory": "render", "fps": 30},
+)
+```
+
+For MJX, `mjx_render_usd(state, env_idx=0)` exports one selected environment from a batch.
+MuJoCo's USD exporter owns a single model namespace, so this intentionally does not arrange the
+whole batch into one stage. Export includes model geometry, materials, textures, lights, animation,
+SI-unit metadata, and an animated camera target. Visual geom groups default to group 0. Exported
+identifiers and material schema details are normalized for standards-compliant USD readers.
+
+Blender rendering and appearance policy are intentionally not part of the core API. Standalone,
+optional scripts for Blender, Cycles/Eevee, trajectory overlays, and mosaics live in
+`scripts/blender/`.

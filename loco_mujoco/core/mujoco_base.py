@@ -22,7 +22,8 @@ from loco_mujoco.core.domain_randomizer import DomainRandomizer
 from loco_mujoco.core.terrain import Terrain
 from loco_mujoco.core.initial_state_handler import InitialStateHandler
 from loco_mujoco.core.terminal_state_handler.base import TerminalStateHandler
-from loco_mujoco.core.visuals import MjvScene, MujocoViewer, ViserViewer
+from loco_mujoco.core.visuals import MjvScene, MujocoViewer, UsdTrajectoryExporter, ViserViewer
+from loco_mujoco.core.visuals.usd_exporter import USD_EXPORTER_PARAMS
 from loco_mujoco.core.visuals.viser_viewer import VISER_ONLY_VIEWER_PARAMS
 from importlib.resources import files
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
@@ -184,6 +185,7 @@ class Mujoco:
         self._n_intermediate_steps = 1
         self._viewer_params = viewer_params
         self._viewer = None
+        self._usd_exporter = None
         self._obs = None
         self._info = None
         self._additional_carry = None
@@ -254,6 +256,7 @@ class Mujoco:
 
         # path to the video file if one is recorded
         self._video_file_path = None
+        self._usd_output_path = None
         self._added_carry_visual_to_user_scene = False
         self._added_carry_visual_start_idx = None
         self._max_num_samples_traj = max_num_samples_traj
@@ -406,11 +409,31 @@ class Mujoco:
 
     def _glfw_viewer_params(self) -> Dict:
         """
-        Returns the viewer parameters without the ones that only apply to the viser viewer, so
-        that both viewers can be configured through the same environment kwargs.
+        Return parameters accepted by the GLFW viewer, excluding settings for
+        the viser and USD backends.
 
         """
-        return {k: v for k, v in self._viewer_params.items() if k not in VISER_ONLY_VIEWER_PARAMS}
+        backend_only = set(VISER_ONLY_VIEWER_PARAMS) | USD_EXPORTER_PARAMS
+        return {k: v for k, v in self._viewer_params.items() if k not in backend_only}
+
+    def _viser_viewer_params(self) -> Dict:
+        """Return viewer parameters without USD-only configuration."""
+        return {k: v for k, v in self._viewer_params.items() if k not in USD_EXPORTER_PARAMS}
+
+    def _usd_exporter_params(self) -> Dict:
+        """Translate prefixed environment kwargs to ``UsdTrajectoryExporter`` kwargs."""
+        mapping = {
+            "usd_output_directory": "output_directory",
+            "usd_fps": "fps",
+            "usd_light_intensity": "light_intensity",
+            "usd_camera_body_name": "camera_body_name",
+            "usd_filetype": "filetype",
+            "usd_verbose": "verbose",
+        }
+        params = {mapping[k]: v for k, v in self._viewer_params.items() if k in mapping}
+        if "geom_group_visualization_on_startup" in self._viewer_params:
+            params["geom_groups"] = self._viewer_params["geom_group_visualization_on_startup"]
+        return params
 
     def render_viser(self, record: bool = False) -> np.ndarray:
         """
@@ -433,7 +456,8 @@ class Mujoco:
         """
 
         if self._viewer is None:
-            self._viewer = ViserViewer(self._model, self.dt, record=record, **self._viewer_params)
+            self._viewer = ViserViewer(self._model, self.dt, record=record,
+                                       **self._viser_viewer_params())
             atexit.register(self.stop)
         else:
             assert isinstance(self._viewer, ViserViewer), \
@@ -449,6 +473,41 @@ class Mujoco:
 
         return self._viewer.render(self._data, self._additional_carry, record)
 
+    def render_usd(self, **exporter_params) -> None:
+        """Append the current state to an animated USD stage.
+
+        This is an offline renderer: each call records one animation frame, and
+        :meth:`stop_usd` writes the USD file. Parameters configure the exporter
+        on the first call only. For example::
+
+            env.render_usd(output_directory="render")
+            ...
+            env.render_usd()
+            usd_path = env.stop_usd()
+        """
+        if self._terrain.is_dynamic:
+            terrain_state = self._additional_carry.terrain_state
+            assert hasattr(terrain_state, "height_field_raw"), \
+                "Terrain state does not have height_field_raw."
+            self._model.hfield_data = np.asarray(terrain_state.height_field_raw)
+
+        if self._usd_exporter is None:
+            params = self._usd_exporter_params()
+            params.update(exporter_params)
+            self._usd_exporter = UsdTrajectoryExporter(self._model, self.dt, **params)
+            atexit.register(self.stop_usd)
+        elif exporter_params:
+            raise ValueError("USD exporter parameters can only be set on the first frame.")
+        self._usd_exporter.render(self._data, self._additional_carry)
+
+    def stop_usd(self) -> Optional[str]:
+        """Finalize the offline USD export and return its path."""
+        if self._usd_exporter is None:
+            return self._usd_output_path
+        self._usd_output_path = self._usd_exporter.stop()
+        self._usd_exporter = None
+        return self._usd_output_path
+
     def stop(self) -> None:
         """
         Stops the rendering of the environment. Disable glfw and delete the viewer.
@@ -458,6 +517,7 @@ class Mujoco:
             self._video_file_path = self._viewer.stop()
             del self._viewer
             self._viewer = None
+        self.stop_usd()
 
     @partial(jax.jit, static_argnums=(0,))
     def sample_action_space(self, key: jax.Array) -> jax.Array:
@@ -1428,6 +1488,11 @@ class Mujoco:
         return self._video_file_path
 
     @property
+    def usd_output_path(self) -> Optional[str]:
+        """Path to the finalized USD stage, if available."""
+        return self._usd_output_path
+
+    @property
     def info(self) -> MDPInfo:
         """
         Returns an object containing the info of the environment.
@@ -1515,4 +1580,3 @@ class Mujoco:
             return env.generate(*args, **kwargs)
         else:
             return env(*args, **kwargs)
-
