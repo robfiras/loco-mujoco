@@ -206,8 +206,13 @@ class NStepWrapper(BaseWrapper):
             if include_actions:
                 raise ValueError("include_actions is not supported with a group filter; "
                                  "put the action term in the stacked group instead.")
-            self._group_ind = jnp.asarray(
-                env.obs_container.get_obs_ind_by_group(group), dtype=int)
+            # numpy, NOT jnp. _wrap_env runs inside _train_fn, which is pmapped, so
+            # this __init__ and update_info execute during tracing -- a jnp array
+            # created here is traced, and update_info's np.asarray on it raises
+            # TracerArrayConversionError. Plain numpy indices sidestep that entirely and
+            # index jax arrays just as well.
+            self._group_ind = np.asarray(
+                env.obs_container.get_obs_ind_by_group(group), dtype=np.int64)
             if self._group_ind.size == 0:
                 raise ValueError(f"observation group {group!r} is empty -- nothing to "
                                  "stack. Check the group name in the observation spec.")
@@ -219,8 +224,8 @@ class NStepWrapper(BaseWrapper):
         if self.group is not None:
             # current full obs + (n_steps - 1) past frames of the group only
             n_hist = (self.n_steps - 1) * int(self._group_ind.size)
-            g_hi = np.asarray(info.observation_space.high)[np.asarray(self._group_ind)]
-            g_lo = np.asarray(info.observation_space.low)[np.asarray(self._group_ind)]
+            g_hi = np.asarray(info.observation_space.high)[self._group_ind]
+            g_lo = np.asarray(info.observation_space.low)[self._group_ind]
             high = np.concatenate([info.observation_space.high,
                                    np.tile(g_hi, self.n_steps - 1)])
             low = np.concatenate([info.observation_space.low,
