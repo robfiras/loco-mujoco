@@ -742,19 +742,17 @@ class DefaultRandomizer(DomainRandomizer):
         else:
             interpolation = np.random.uniform(size=model.nbody-1)
 
-        sampled_base_mass_multiplier = (
-            mult_base_min + (mult_base_max - mult_base_min) * interpolation[0]
-            if self.rand_conf["randomize_link_mass"]
-            else backend.array([1.0])
-        )
-
-        sampled_base_mass_multiplier = jnp.expand_dims(sampled_base_mass_multiplier, axis=0)
-
-        sampled_other_bodies_mass_multipliers = (
-            mult_other_min + (mult_other_max - mult_other_min) * interpolation[1:]
-            if self.rand_conf["randomize_link_mass"]
-            else backend.array([1.0]*(model.nbody-2))
-        )
+        # Both branches must yield (1,) and (nbody-2,) so the concatenate below lines up.
+        # The enabled branch indexes a scalar out of `interpolation` and has to be
+        # expanded; the disabled one is already the right shape.
+        if self.rand_conf["randomize_link_mass"]:
+            sampled_base_mass_multiplier = backend.expand_dims(
+                mult_base_min + (mult_base_max - mult_base_min) * interpolation[0], axis=0)
+            sampled_other_bodies_mass_multipliers = (
+                mult_other_min + (mult_other_max - mult_other_min) * interpolation[1:])
+        else:
+            sampled_base_mass_multiplier = backend.ones(1)
+            sampled_other_bodies_mass_multipliers = backend.ones(model.nbody-2)
 
         mass_multipliers = backend.concatenate([
             sampled_base_mass_multiplier,
