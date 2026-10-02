@@ -154,7 +154,7 @@ class BDSpot(BaseRobotQuadruped):
                                             nominal_joint_positions=self.init_qpos[7:])
 
         # set init position
-        if "init_state_handler" not in kwargs.keys():
+        if "init_state_type" not in kwargs.keys():
             kwargs["init_state_type"] = "DefaultInitialStateHandler"
             kwargs["init_state_params"] = (dict(qpos_init=self.init_qpos, qvel_init=self.init_qvel))
 
