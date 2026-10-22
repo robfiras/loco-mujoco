@@ -29,7 +29,8 @@ def _render_args(**overrides):
         fill_ratio=0.55, robot_roughness=0.9, robot_specular=0.05,
         floor_style="viser", floor_cell_size=1.0, floor_extent=10000.0,
         floor_roughness=0.35, sky_style="daylight", sky_saturation=1.35,
-        view_transform="Khronos PBR Neutral", exposure=0.7, quiet=False,
+        environment_strength=0.0, view_transform="Khronos PBR Neutral",
+        exposure=0.7, quiet=False,
         format="png",
     )
     values.update(overrides)
@@ -160,6 +161,7 @@ def test_render_usd_builds_blender_command_and_composites(tmp_path, monkeypatch)
     assert command[0] == str(executable.resolve())
     assert command[command.index("--render-frame") + 1] == "1"
     assert command[command.index("--overlay-interval-frames") + 1] == "15"
+    assert command[command.index("--environment-strength") + 1] == "0.0"
     assert command[-2:] == ["--hide-geom", "hidden"]
     assert kwargs == {"check": True}
 

@@ -25,7 +25,7 @@ def _parse_args():
     parser.add_argument("--frames", type=int, required=True)
     parser.add_argument("--engine", default="BLENDER_EEVEE_NEXT")
     parser.add_argument("--samples", type=int, default=64)
-    parser.add_argument("--lighting", choices=("uniform", "model"), default="uniform")
+    parser.add_argument("--lighting", choices=("uniform", "studio", "model"), default="uniform")
     parser.add_argument("--sun-energy", type=float, default=5.0)
     parser.add_argument("--fill-ratio", type=float, default=0.55)
     parser.add_argument("--robot-roughness", type=float, default=0.9)
@@ -36,6 +36,7 @@ def _parse_args():
     parser.add_argument("--floor-roughness", type=float, default=0.35)
     parser.add_argument("--sky-style", choices=("daylight", "model"), default="daylight")
     parser.add_argument("--sky-saturation", type=float, default=1.35)
+    parser.add_argument("--environment-strength", type=float, default=0.0)
     parser.add_argument("--view-transform", default="Khronos PBR Neutral")
     parser.add_argument("--exposure", type=float, default=0.7)
     parser.add_argument("--render-frame", type=int, default=-1)
@@ -116,6 +117,40 @@ def _configure_uniform_lighting(sun_energy, fill_ratio):
         light = bpy.data.objects.new(name, light_data)
         scene.collection.objects.link(light)
         light.rotation_euler = tuple(math.radians(value) for value in rotation)
+
+
+def _configure_studio_lighting(target):
+    """Use the soft key/fill/rim rig from the shape-fitting figure."""
+    scene = bpy.context.scene
+    for light in [obj for obj in scene.objects if obj.type == "LIGHT"]:
+        bpy.data.objects.remove(light, do_unlink=True)
+
+    target_position = target.matrix_world.translation if target is not None else Vector((0, 0, 1))
+    lights = (
+        ("LocoMuJoCoStudioKey", 600.0, (4.0, -5.0, 5.0), 5.0),
+        ("LocoMuJoCoStudioFill", 380.0, (-4.0, -2.0, 3.0), 4.0),
+        ("LocoMuJoCoStudioRim", 450.0, (2.0, 4.0, 4.0), 3.0),
+    )
+    for name, energy, offset, size in lights:
+        light_data = bpy.data.lights.new(name, type="AREA")
+        light_data.energy = energy
+        light_data.shape = "DISK"
+        light_data.size = size
+        light = bpy.data.objects.new(name, light_data)
+        scene.collection.objects.link(light)
+        light.location = target_position + Vector(offset)
+        if target is not None:
+            follow = light.constraints.new(type="COPY_LOCATION")
+            follow.target = target
+            follow.use_offset = True
+            track = light.constraints.new(type="TRACK_TO")
+            track.target = target
+            track.track_axis = "TRACK_NEGATIVE_Z"
+            track.up_axis = "UP_Y"
+        else:
+            light.rotation_euler = (
+                target_position - light.location
+            ).to_track_quat("-Z", "Y").to_euler()
 
 
 def _srgb(rgb):
@@ -212,7 +247,7 @@ def _configure_viser_floor(cell_size, extent, roughness):
         floor.data.materials.append(material)
 
 
-def _configure_daylight_sky(saturation):
+def _configure_daylight_sky(saturation, environment_strength=0.0):
     """Create a clear physical daylight sky visible only to the camera."""
     scene = bpy.context.scene
     if scene.world is None:
@@ -227,8 +262,8 @@ def _configure_daylight_sky(saturation):
     ray_type = nodes.new("ShaderNodeLightPath")
     mix_shader = nodes.new("ShaderNodeMixShader")
     dark_background = nodes.new("ShaderNodeBackground")
-    dark_background.inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
-    dark_background.inputs["Strength"].default_value = 0.0
+    dark_background.inputs["Color"].default_value = (0.92, 0.94, 0.97, 1.0)
+    dark_background.inputs["Strength"].default_value = environment_strength
     visible_background = nodes.new("ShaderNodeBackground")
     visible_background.inputs["Strength"].default_value = 0.5
 
@@ -334,13 +369,15 @@ def main():
     scene.frame_end = max(0, args.frames - 1)
 
     _configure_robot_materials(args.robot_roughness, args.robot_specular)
-    if args.lighting == "uniform":
-        _configure_uniform_lighting(args.sun_energy, args.fill_ratio)
     if args.floor_style == "viser":
         _configure_viser_floor(args.floor_cell_size, args.floor_extent, args.floor_roughness)
     if args.sky_style == "daylight":
-        _configure_daylight_sky(args.sky_saturation)
-    _configure_camera(args.camera_position, args.camera_look_at)
+        _configure_daylight_sky(args.sky_saturation, args.environment_strength)
+    target = _configure_camera(args.camera_position, args.camera_look_at)
+    if args.lighting == "uniform":
+        _configure_uniform_lighting(args.sun_energy, args.fill_ratio)
+    elif args.lighting == "studio":
+        _configure_studio_lighting(target)
     if args.render_frame >= 0:
         scene.frame_start = args.render_frame
         scene.frame_end = args.render_frame

@@ -133,6 +133,7 @@ def _render_usd(usd_path, output_directory, args, camera_position, camera_look_a
         "--floor-cell-size", str(args.floor_cell_size), "--floor-extent",
         str(args.floor_extent), "--floor-roughness", str(args.floor_roughness),
         "--sky-style", args.sky_style, "--sky-saturation", str(args.sky_saturation),
+        "--environment-strength", str(args.environment_strength),
         "--view-transform", args.view_transform, "--exposure", str(args.exposure),
         "--render-frame", str(render_frame), "--overlay-interval-frames",
         str(interval_frames), "--overlay-opacity", str(args.overlay_opacity),
@@ -202,7 +203,7 @@ def _parse_args():
     parser.add_argument("--samples", type=int, default=64)
     parser.add_argument("--fps", type=float, default=30)
     parser.add_argument("--light-intensity", type=int, default=1000)
-    parser.add_argument("--lighting", choices=("uniform", "model"), default="uniform")
+    parser.add_argument("--lighting", choices=("uniform", "studio", "model"), default="uniform")
     parser.add_argument("--sun-energy", type=float, default=5.0)
     parser.add_argument("--fill-ratio", type=float, default=0.55)
     parser.add_argument("--robot-roughness", type=float, default=0.9)
@@ -213,6 +214,7 @@ def _parse_args():
     parser.add_argument("--floor-roughness", type=float, default=0.35)
     parser.add_argument("--sky-style", choices=("daylight", "model"), default="daylight")
     parser.add_argument("--sky-saturation", type=float, default=1.35)
+    parser.add_argument("--environment-strength", type=float, default=0.0)
     parser.add_argument("--view-transform", default="Khronos PBR Neutral")
     parser.add_argument("--exposure", type=float, default=0.7)
     parser.add_argument("--render-frame", default=None)
