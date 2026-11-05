@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import jax
 import jax.numpy as jnp
+import mujoco
 import numpy as np
 import optax
 import pytest
@@ -11,6 +12,7 @@ from omegaconf import OmegaConf, open_dict
 
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms.experimental import SuperMimicJax
+from loco_mujoco.core.mujoco_base import Mujoco
 from loco_mujoco.algorithms.experimental.supermimic_jax import (WorldModelSpec, WindowBuffer, state_is_valid,
                                                                  skip_gradient_spikes, _quat_mul, _quat_from_rotvec,
                                                                  _rotvec_from_quat)
@@ -206,6 +208,38 @@ def test_SuperMimic_resume_in_chunks(supermimic_config, tmp_path):
     assert int(m3.num_updates[-1]) > int(m1.num_updates[-1])
     for name in ("mean_wm_loss", "mean_imag_return", "mean_critic_loss"):
         assert np.all(np.isfinite(np.asarray(getattr(m3, name)))), name
+
+
+def test_recenter_root_xy_off_starts_on_the_reference(supermimic_config):
+    config = OmegaConf.create(OmegaConf.to_container(supermimic_config, resolve=True))
+    with open_dict(config.experiment.env_params):
+        config.experiment.env_params.recenter_root_xy = False
+    env, traj = _make(config)
+    traj = traj.replace(data=traj.data.replace(qpos=traj.data.qpos.at[:, 0].add(1.0)))  # the clip is not at the origin
+    state = jax.jit(lambda k: env.mjx_reset(k, traj))(jax.random.PRNGKey(3))
+    ts = state.additional_carry.traj_state
+    ref = traj.data.get(ts.traj_no, ts.subtraj_step_no, jnp)
+    assert float(ref.qpos[0]) > 0.5
+    np.testing.assert_allclose(np.asarray(state.data.qpos[:2]), np.asarray(ref.qpos[:2]), atol=1e-5)
+
+
+def test_modify_contact_spec():
+    spec = mujoco.MjSpec.from_string("""
+    <mujoco><worldbody><geom name="floor" type="plane" size="1 1 .1"/>
+      <body><freejoint/><geom name="a" size=".1" condim="1"/><geom name="vis" size=".1" contype="0" conaffinity="0"/>
+        <body pos="0 0 .05"><joint axis="1 0 0"/><geom name="b" size=".1"/></body></body>
+    </worldbody></mujoco>""")
+    model = Mujoco._modify_contact_spec(spec, dict(self_collisions=False, condim=3)).compile()
+    get = lambda n: (int(model.geom(n).contype[0]), int(model.geom(n).conaffinity[0]), int(model.geom(n).condim[0]))
+    assert get("a") == get("b") == (0, 1, 3)
+    assert get("floor") == (1, 1, 3)
+    assert get("vis")[:2] == (0, 0)
+    data = mujoco.MjData(model)
+    data.qpos[2] = 0.05
+    mujoco.mj_forward(model, data)
+    pairs = {tuple(sorted((int(c.geom1), int(c.geom2)))) for c in data.contact[:data.ncon]}
+    floor = model.geom("floor").id
+    assert pairs and all(floor in p for p in pairs)
 
 
 def test_handler_absorbing_prob_replaces_learned_head(supermimic_config):

@@ -117,6 +117,7 @@ class Mujoco:
         timestep (int, optional): Simulation timestep. If None, it's read from the model.
         n_substeps (int, optional): Number of substeps per simulation step. Defaults to 1.
         model_option_conf (Dict, optional): Changes to apply to the Mujoco option config.
+        model_contact_conf (Dict, optional): Changes to the contact setup of the robot geoms, see _modify_contact_spec.
         reward_type (str, optional): The type of reward function. Defaults to "NoReward".
         reward_params (Dict, optional): Parameters for the reward function. Defaults to None.
         goal_type (str, optional): The type of goal specification. Defaults to "NoGoal".
@@ -153,6 +154,7 @@ class Mujoco:
                  timestep: int = None,
                  n_substeps: int = 1,
                  model_option_conf: Dict = None,
+                 model_contact_conf: Dict = None,
                  reward_type: str = "NoReward",
                  reward_params: Dict = None,
                  goal_type: str = "NoGoal",
@@ -176,6 +178,10 @@ class Mujoco:
                 model_option_conf = {"timestep": timestep}
             else:
                 model_option_conf["timestep"] = timestep
+
+        if model_contact_conf is not None:
+            spec = mujoco.MjSpec.from_file(spec) if isinstance(spec, str) else spec
+            spec = self._modify_contact_spec(spec, model_contact_conf)
 
         # load the model, spec and data
         self._init_model, self._model, self._data, self._mjspec = self.load_mujoco(spec, model_option_conf)
@@ -1132,6 +1138,33 @@ class Mujoco:
         if option_config is not None:
             for key, value in option_config.items():
                 setattr(spec.option, key, value)
+        return spec
+
+    @staticmethod
+    def _modify_contact_spec(spec: MjSpec, contact_config: Dict) -> MjSpec:
+        """
+        Modifies the contact setup of all colliding geoms outside the world body.
+
+        Args:
+            spec (MjSpec): The Mujoco specification.
+            contact_config (Dict): "self_collisions" (bool, default True): if False, these geoms only collide
+                with the world body. "condim" (int, optional): contact dimensionality to set on them.
+
+        Returns:
+            MjSpec: The modified Mujoco specification.
+        """
+        self_collisions = contact_config.get("self_collisions", True)
+        condim = contact_config.get("condim")
+        for body in spec.bodies:
+            if body.name == spec.worldbody.name:
+                continue
+            for geom in body.geoms:
+                if geom.contype == 0 and geom.conaffinity == 0:
+                    continue
+                if not self_collisions:
+                    geom.contype, geom.conaffinity = 0, 1
+                if condim is not None:
+                    geom.condim = condim
         return spec
 
     @staticmethod
