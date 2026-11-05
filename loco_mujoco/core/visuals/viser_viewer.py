@@ -35,7 +35,7 @@ DEFAULT_LOGO = "https://github.com/robfiras/loco-mujoco/assets/69359729/bd2a219e
 
 VISER_IMPORT_ERROR = (
     "The viser viewer requires the optional dependencies `viser` and `mjviser`. "
-    "Install them with:\n\n    pip install loco-mujoco[viser]\n"
+    "Install them with:\n\n    pip install -e \".[viser]\"\n"
 )
 
 

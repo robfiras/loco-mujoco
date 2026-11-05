@@ -82,7 +82,7 @@ loco-mujoco-set-conv-amass-path --path $HOME/amass_conv
 
 ## Generating the SMPL-H Model
 
-To combine the body and hand models into a single `SMPLH_NEUTRAL.PKL` file, follow one of the methods below:
+To combine the body and hand models into a single `SMPLH_NEUTRAL.pkl` file, follow one of the methods below:
 
 ---
 
@@ -101,7 +101,7 @@ To resolve dependency issues with deprecated packages, we provide an automated [
 This script will:
 - Create a Python 3.10 environment.
 - Install all required dependencies.
-- Generate the `SMPLH_NEUTRAL.PKL` file and place it in `/path/to/smpl/models`.
+- Generate the `SMPLH_NEUTRAL.pkl` file and place it in `/path/to/smpl/models`.
 - Finally, delete the created Python environment and dependencies. 
 
 ---
@@ -124,7 +124,7 @@ If you don’t have Conda installed or prefer a manual setup, follow these steps
 3. **Run the Script**:
    ```bash
    cd path/to/loco-mujoco
-   python loco_mujoco/smpl/generate_smplh_model.py --smpl-conf-file loco_mujoco/smpl/conf_paths.yaml
+   python loco_mujoco/smpl/generate_smplh_model.py --smpl-conf-file loco_mujoco/LOCOMUJOCO_VARIABLES.yaml
    ```
 
 4. **Deactivate the Environment**:

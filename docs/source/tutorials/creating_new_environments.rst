@@ -70,7 +70,7 @@ env resembling the Unitree G1 should use ``UnitreeG1`` as its LAFAN1 source):
 .. code-block:: python
 
     from loco_mujoco.core.utils import info_property
-    from loco_mujoco.environments.humanoids import BaseRobotHumanoid
+    from loco_mujoco.environments.humanoids.base_robot_humanoid import BaseRobotHumanoid
 
     class MyUnitreeG1Variant(BaseRobotHumanoid):
         @info_property

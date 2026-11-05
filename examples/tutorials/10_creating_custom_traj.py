@@ -78,6 +78,6 @@ env.play_trajectory(n_steps_per_episode=N_steps)
 
 
 # Alternatively, create an imitation learning environment and pass a custom trajectory
-#env = ImitationFactory.make("UnitreeH1", custom_dataset_conf=CustomDatasetConf(traj))
+#env, traj = ImitationFactory.make("UnitreeH1", custom_dataset_conf=CustomDatasetConf(traj))
 #env.play_trajectory(n_steps_per_episode=N_steps)
 

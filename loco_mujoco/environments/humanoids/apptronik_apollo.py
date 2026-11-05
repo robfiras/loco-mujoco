@@ -19,7 +19,7 @@ class Apollo(BaseRobotHumanoid):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================ ================ ==================================== ============================== ===
     Index in Obs Name             ObservationType  Min                                  Max                            Dim
@@ -159,7 +159,7 @@ class Apollo(BaseRobotHumanoid):
 
 
     Default Action Space
-    ------------
+    --------------------
     Control function type: **PDControl**
 
     See control function interface for more details.

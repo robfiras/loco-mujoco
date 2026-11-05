@@ -18,7 +18,7 @@ class SkeletonTorque(BaseSkeleton):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ =================== ================ ==================================== ============================== ===
     Index in Obs Name                ObservationType  Min                                  Max                            Dim
@@ -137,7 +137,7 @@ class SkeletonTorque(BaseSkeleton):
     ============ =================== ================ ==================================== ============================== ===
 
     Default Action Space
-    -------------------
+    --------------------
 
     Control function type: **DefaultControl**
 
@@ -303,7 +303,7 @@ class SkeletonMuscle(BaseSkeleton):
     .. note:: This Humanoid consists of 92 muscles on the lower limb. The upper body is torque actuated.
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ =================== ================ ==================================== ============================== ===
     Index in Obs Name                ObservationType  Min                                  Max                            Dim
@@ -422,7 +422,7 @@ class SkeletonMuscle(BaseSkeleton):
     ============ =================== ================ ==================================== ============================== ===
 
     Default Action Space
-    -------------------
+    --------------------
 
     Control function type: **DefaultControl**
 

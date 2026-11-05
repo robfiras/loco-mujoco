@@ -18,7 +18,7 @@ class Atlas(BaseRobotHumanoid):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================== ================ ==================================== ============================== ===
     Index in Obs Name               ObservationType  Min                                  Max                            Dim
@@ -137,7 +137,7 @@ class Atlas(BaseRobotHumanoid):
     ============ ================== ================ ==================================== ============================== ===
 
     Default Action Space
-    -----------------
+    --------------------
 
     Control function type: **PDControl**
 

@@ -6,7 +6,7 @@ a square grid, exactly like the OpenGL viewer, and streams the whole batch to th
 
 Requires the optional dependencies:
 
-    pip install loco-mujoco[viser]
+    pip install -e ".[viser]"
 
 Open the URL printed on startup (http://localhost:8080 by default). The "Scene" tab gets an
 "Environment > Select" slider for picking which environment the overlays and the contact

@@ -20,7 +20,7 @@ class MyoSkeleton(LocoEnv):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ============= ================ =========================================================================== ======================================================================== ===
     Index in Obs Name          ObservationType  Min                                                                         Max                                                                      Dim
@@ -36,7 +36,7 @@ class MyoSkeleton(LocoEnv):
 
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **DefaultControl**
 
@@ -410,7 +410,7 @@ class MyoSkeleton(LocoEnv):
     def _get_observation_specification(self, spec: MjSpec) -> List[Observation]:
         """
         Getter for the observation space specification. This function reads all joint names from the xml and adds
-        the prefix "q_" for the joint positions and "dq_" for the joint velocities. It also adds the free joint
+        the prefix ``q_`` for the joint positions and ``dq_`` for the joint velocities. It also adds the free joint
         position (disregarding the x and y position) and velocity.
 
         Returns:

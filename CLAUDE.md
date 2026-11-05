@@ -53,7 +53,7 @@ loco-mujoco-set-lafan1-path    # Configure LAFAN1 path
 - JAX/Flax implementations of PPO, GAIL, AMP, DeepMimic
 - Common utilities: `networks.py`, `dataclasses.py`, `base_algorithm.py`
 
-### Trajectories & datasets (`loco_mujoco/trajectory/`, `loco_mujoco/datasets/`)
+### Trajectories & datasets (`loco_mujoco/core/trajectory/`, `loco_mujoco/datasets/`)
 - `TrajectoryHandler` manages motion capture data loading and sampling
 - Trajectory metrics: DTW, discrete Fréchet distance
 - Dataset classes for AMASS, LAFAN1, and native datasets

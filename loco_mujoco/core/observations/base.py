@@ -253,11 +253,12 @@ class Observation:
         """
         Initialize the observation type from the Mujoco data structure and model.
         This method *must* initialize the following attributes:
-            - obs_ind: Indices of this observation in the observation space.
-            - data_type_ind: Indices of this observation in respective attribute
-                in the Mujoco data structure (like qpos, qvel, xpos, etc.).
-            - min: Minimum values of the observation in the observation space.
-            - max: Maximum values of the observation in the observation space.
+
+        - obs_ind: Indices of this observation in the observation space.
+        - data_type_ind: Indices of this observation in respective attribute
+          in the Mujoco data structure (like qpos, qvel, xpos, etc.).
+        - min: Minimum values of the observation in the observation space.
+        - max: Maximum values of the observation in the observation space.
 
         Args:
             env: Environment instance.

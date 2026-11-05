@@ -20,7 +20,7 @@ class Talos(BaseRobotHumanoid):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ==================== ================ ==================================== ============================== ===
     Index in Obs Name                 ObservationType  Min                                  Max                            Dim
@@ -151,7 +151,7 @@ class Talos(BaseRobotHumanoid):
     ============ ==================== ================ ==================================== ============================== ===
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **DefaultControl**
 

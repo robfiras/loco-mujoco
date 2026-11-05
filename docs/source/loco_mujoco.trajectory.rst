@@ -1,6 +1,7 @@
+Trajectory
+===========================================
 
-
-.. automodule:: loco_mujoco.trajectory.dataclasses
+.. automodule:: loco_mujoco.core.trajectory.dataclasses
     :members:
     :undoc-members:
     :private-members:

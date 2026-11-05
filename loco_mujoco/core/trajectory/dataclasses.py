@@ -655,7 +655,7 @@ class TrajectoryData(SingleData):
     """
     Data structure to store the trajectory data. It holds everything in SingleData, but with an additional dimension
     (the batch dimension for an arbitrary amount of samples and trajectories).
-     It also includes the split_points attribute to separate the different trajectories.
+    It also includes the split_points attribute to separate the different trajectories.
 
     Note 1: All samples are stacked along the first dimension, and the split_points attribute is used to separate
     the different trajectories. The split_points attribute is a list of indices that define the beginning of each

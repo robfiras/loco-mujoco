@@ -15,17 +15,15 @@ Welcome to LocoMuJoCo!
    :target: https://loco-mujoco.readthedocs.io/en/latest/?badge=latest
 .. image:: https://img.shields.io/badge/License-MIT-yellow.svg
    :target: https://opensource.org/licenses/MIT
-.. image:: https://img.shields.io/pypi/v/loco-mujoco
-   :target: https://pypi.org/project/loco-mujoco/
 .. image:: https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white
    :target: https://discord.gg/gEqR3xCVdn
 
 Latest News
 ===========
 
-🚀 **Since Release: v1.0**
+🚀 **New in Release v1.1**
 
-LocoMuJoCo now supports MJX and includes new JAX algorithms, expanded environments, and over **22,000 datasets**!
+MJX now supports the **MjWarp** backend for even faster parallel simulation on compatible GPUs.
 
 Overview
 ========
@@ -41,7 +39,7 @@ While designed for imitation learning, it also supports **pure reinforcement lea
 Key Advantages
 --------------
 
-- ✅ Supports **MuJoCo** (single) and **MJX** (parallel) environments
+- ✅ Supports **MuJoCo** (single) and **MJX/MjWarp** (parallel) environments
 - ✅ Includes **12 humanoid + 4 quadruped environments**, with **4 biomechanical human models**
 - ✅ Clean, single-file **JAX algorithms**: PPO, GAIL, AMP, DeepMimic
 - ✅ **22,000+ motion capture datasets** (AMASS, LAFAN1, native)
@@ -50,7 +48,7 @@ Key Advantages
 - ✅ **Gymnasium interface**
 - ✅ Built-in **domain and terrain randomization**
 - ✅ **Modular design**: easily swap components (observations, rewards, terminal handlers, etc.)
-- ✅ Comprehensive [documentation](https://loco-mujoco.readthedocs.io/)
+- ✅ Comprehensive `documentation <https://loco-mujoco.readthedocs.io/>`__
 
 .. toctree::
    :caption: Documentation
@@ -71,6 +69,7 @@ Key Advantages
    source/tutorials/customizing_environments.rst
    source/tutorials/creating_new_environments.rst
    source/tutorials/trajectory_interface.rst
+   source/tutorials/rendering.rst
 
 
 

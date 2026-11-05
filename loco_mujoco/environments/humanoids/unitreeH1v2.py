@@ -17,7 +17,7 @@ class UnitreeH1v2(BaseRobotHumanoid):
     Mujoco environment of the Unitree H1.5 robot.
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ============================= ================ ==================================== ============================== ===
     Index in Obs Name                          ObservationType  Min                                  Max                            Dim
@@ -112,7 +112,7 @@ class UnitreeH1v2(BaseRobotHumanoid):
     ============ ============================= ================ ==================================== ============================== ===
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **PDControl**
 

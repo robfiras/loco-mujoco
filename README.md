@@ -2,7 +2,7 @@
   <img width="70%" src="https://github.com/robfiras/loco-mujoco/assets/69359729/bd2a219e-ddfd-4355-8024-d9af921fb92a">
 </p>
 
-![continous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
+![continuous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
 [![Documentation Status](https://readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Join our Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white)](https://discord.gg/gEqR3xCVdn)
@@ -61,11 +61,11 @@ cd loco-mujoco
 pip install -e . 
 ```
 
-By default, both will install the CPU-version of Jax. If you want to use Jax on the GPU, you need to install the following:
+By default, this installs the CPU version of JAX. If you want to use JAX on the GPU, you need to install the following:
 
 ```bash
 pip install jax["cuda12"]
-````
+```
 
 > [!NOTE]
 > If you want to run the **MyoSkeleton** environment, you need to additionally run
@@ -75,8 +75,8 @@ pip install jax["cuda12"]
 ### Datasets
 
 LocoMuJoCo provides three sources of motion capture (mocap) data for humanoid environments: default (provided by us), LAFAN1, and AMASS. The first two datasets
-are available on the [LocoMujoCo HuggingFace dataset repository](https://huggingface.co/datasets/robfiras/loco-mujoco-datasets)
-and will downloaded and cached automatically for you. AMASS needs to be downloaded and installed separately due to
+are available on the [LocoMuJoCo HuggingFace dataset repository](https://huggingface.co/datasets/robfiras/loco-mujoco-datasets)
+and will be downloaded and cached automatically for you. AMASS needs to be downloaded and installed separately due to
 their licensing. See [here](loco_mujoco/smpl) for more information about the installation.
 
 This is how you can visualize the datasets:
@@ -86,7 +86,7 @@ from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf, Defa
 
 
 # # example --> you can add as many datasets as you want in the lists!
-env = ImitationFactory.make("UnitreeH1",
+env, traj = ImitationFactory.make("UnitreeH1",
                             default_dataset_conf=DefaultDatasetConf(["squat"]),
                             lafan1_dataset_conf=LAFAN1DatasetConf(["dance2_subject4", "walk1_subject1"]),
                             # if SMPL and AMASS are installed, you can use the following:
@@ -108,7 +108,7 @@ loco-mujoco-set-all-caches --path <path to cache>
 For instance, you could run:
 ```bash
 loco-mujoco-set-all-caches --path "$HOME/.loco-mujoco-caches"
-````
+```
 
 ---
 
@@ -140,7 +140,7 @@ mjx_env = Mjx(
 ```python
 from loco_mujoco import ImitationFactory
 
-env = ImitationFactory.make(
+env, traj = ImitationFactory.make(
     "MjxUnitreeG1",
     default_dataset_conf=dict(task="stepinplace1"),
     use_mjwarp=True,

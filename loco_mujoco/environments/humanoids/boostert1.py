@@ -18,7 +18,7 @@ class BoosterT1(BaseRobotHumanoid):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ======================= ================ ==================================== ============================== ===
     Index in Obs Name                    ObservationType  Min                                  Max                            Dim
@@ -121,7 +121,7 @@ class BoosterT1(BaseRobotHumanoid):
     ============ ======================= ================ ==================================== ============================== ===
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **PDControl**
 

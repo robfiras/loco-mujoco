@@ -647,7 +647,7 @@ class Mjx(Mujoco):
     def mjx_render_usd(self, state, env_idx: int = 0, **exporter_params) -> None:
         """Append one environment from a batched MJX state to a USD stage.
 
-        USD is finalized by :meth:`stop_usd` (or :meth:`stop`). Only one
+        USD is finalized by ``stop_usd`` (or ``stop``). Only one
         selected environment is exported because MuJoCo's USD exporter owns a
         single model namespace; use ``env_idx`` to choose it.
 

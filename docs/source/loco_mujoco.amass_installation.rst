@@ -8,6 +8,10 @@ This includes specifying storage paths for the AMASS dataset and SMPL-H models a
 
 Follow the instructions below to complete the setup.
 
+.. note::
+
+   This currently works only with **editable installations**.
+
 Additional Dependencies
 -----------------------
 
@@ -50,7 +54,7 @@ Example using the home directory:
    mkdir $HOME/smpl
    loco-mujoco-set-smpl-model-path --path $HOME/smpl
 
-To set the path for converted AMASS datasets (optional if `loco-mujoco-set-all-caches` was used):
+To set the path for converted AMASS datasets (optional if ``loco-mujoco-set-all-caches`` was used):
 
 .. code-block:: bash
 
@@ -79,21 +83,22 @@ Example:
   - **Extended SMPL+H model** (body model)
   - **Models & Code** (hand models)
 
-- Extract and place in the appropriate directory (e.g., ``$HOME/smpl``).
+- Extract and place in the appropriate directory (e.g., ``$HOME/smpl``). The conversion below expects
+  ``smplh/neutral/model.npz``, ``mano_v1_2/models/MANO_LEFT.pkl``, and ``mano_v1_2/models/MANO_RIGHT.pkl`` in this directory.
 
 Generating the SMPL-H Model
 ---------------------------
 
-To combine the body and hand models into a single `SMPLH_NEUTRAL.PKL` file, use one of the methods below.
+To combine the body and hand models into a single ``SMPLH_NEUTRAL.pkl`` file, use one of the methods below.
 
 Automatic Method (Recommended; Requires Anaconda)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To resolve dependency issues, use the provided automated script (`install_smplh.sh`).
+To resolve dependency issues, use the provided automated script (``loco_mujoco/smpl/install_smplh.sh``).
 It creates a Conda environment to isolate the build.
 
 1. Ensure `Anaconda <https://www.anaconda.com/>`_ is installed.
-2. Copy and paste the `install_smplh.sh` script from the repository.
+2. Copy the ``install_smplh.sh`` script to a location of your choice.
 3. Run the script:
 
 .. code-block:: bash
@@ -105,7 +110,7 @@ This will:
 
 - Create a Python 3.10 Conda environment
 - Install dependencies
-- Generate `SMPLH_NEUTRAL.PKL` in `/path/to/smpl/models`
+- Generate ``SMPLH_NEUTRAL.pkl`` in your SMPL model directory
 - Clean up the temporary environment
 
 Manual Method (Without Conda)
@@ -134,7 +139,7 @@ If you do not use Conda, follow this method (only supports **Python 3.10**):
 .. code-block:: bash
 
    cd path/to/loco-mujoco
-   python loco_mujoco/smpl/generate_smplh_model.py --smpl-conf-file loco_mujoco/smpl/conf_paths.yaml
+   python loco_mujoco/smpl/generate_smplh_model.py --smpl-conf-file loco_mujoco/LOCOMUJOCO_VARIABLES.yaml
 
 4. Deactivate the environment:
 
@@ -153,5 +158,5 @@ To test your SMPL model setup, run the provided example:
 
 .. warning::
 
-   This script assumes that you have downloaded the `DanceDB` dataset.
+   This script assumes that you have downloaded the ``DanceDB`` dataset.
    You can test other datasets by modifying the script to specify a different dataset file.

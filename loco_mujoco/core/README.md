@@ -10,7 +10,6 @@ Here is a simple example to run a Mujoco-CPU environment:
 import jax
 import numpy as np
 from loco_mujoco.core import Mujoco, ObservationType
-from loco_mujoco import PATH_TO_MODELS
 
 # specify what observation you would like to retrieve from the xml
 # --> checkout ObservationType to see what observations are supported by default
@@ -19,13 +18,13 @@ observation_spec = [ObservationType.JointPos("name_obs_1", "knee_angle_l"),
                     ObservationType.SiteRot("name_obs_3", "left_knee_mimic")]   # --> concatenate more if needed
 
 # specify the name of the actuators of the xml
-action_spec = ["l_arm_shy_actuator", "hip_adduction_l_actuator"]    # --> use more motors if needed
+action_spec = ["hip_flexion_l_actuator", "hip_adduction_l_actuator"]    # --> use more motors if needed
 
 # unitree_h1 xml for example
-h1_model_path = PATH_TO_MODELS / "unitree_h1/h1.xml"
+h1_model_path = Mujoco.get_model_path("unitree_h1/h1.xml")
 
 # define a simple Mujoco environment (CPU)
-env = Mujoco(spec=str(h1_model_path),
+env = Mujoco(spec=h1_model_path,
              actuation_spec=action_spec,
              observation_spec=observation_spec,
              horizon=1000,
@@ -47,14 +46,13 @@ while True:
     env.reset(_k)
 ```
 
-Similarily, we can run a Mujoco-Mjx environment:
+Similarly, we can run a Mujoco-Mjx environment:
 ```python
 import time
 import jax
 import mujoco
 from mujoco import MjSpec
-from loco_mujoco.core import Mjx, ObservationType
-from loco_mujoco import PATH_TO_MODELS
+from loco_mujoco.core import Mjx, Mujoco, ObservationType
 
 
 def _modify_spec_for_mjx(spec: MjSpec):
@@ -91,11 +89,11 @@ def _modify_spec_for_mjx(spec: MjSpec):
     front_foot_attr = dict(type=mujoco.mjtGeom.mjGEOM_CAPSULE, quat=[1.0, 1.0, 0.0, 0.0], pos=[0.15, 0.0, -0.054],
                            size=[0.02, 0.025, 0.0], rgba=[1.0, 1.0, 1.0, 0.2], contype=0, conaffinity=0)
 
-    r_foot_b = spec.find_body("right_ankle_link")
+    r_foot_b = spec.body("right_ankle_link")
     r_foot_b.add_geom(name="right_foot1", **back_foot_attr)
     r_foot_b.add_geom(name="right_foot2", **front_foot_attr)
 
-    l_foot_b = spec.find_body("left_ankle_link")
+    l_foot_b = spec.body("left_ankle_link")
     l_foot_b.add_geom(name="left_foot1", **back_foot_attr)
     l_foot_b.add_geom(name="left_foot2", **front_foot_attr)
 
@@ -120,30 +118,31 @@ observation_spec = [ObservationType.JointPos("name_obs_1", "knee_angle_l"),
                     ObservationType.SiteRot("name_obs_3", "left_knee_mimic")]   # --> concatenate more if needed
 
 # specify the name of the actuators of the xml
-action_spec = ["l_arm_shy_actuator", "hip_adduction_l_actuator"]    # --> use more motors if needed
+action_spec = ["hip_flexion_l_actuator", "hip_adduction_l_actuator"]    # --> use more motors if needed
 
 
 # H1 model path
-h1_model_path = PATH_TO_MODELS / "unitree_h1/h1.xml"
+h1_model_path = Mujoco.get_model_path("unitree_h1/h1.xml")
 
 # load MjSpec
-spec = MjSpec.from_file(str(h1_model_path))
+spec = MjSpec.from_file(h1_model_path)
 
 # --- the sharp bit ---> modify the spec for mjx
 spec = _modify_spec_for_mjx(spec)
 
 # define a simple Mjx environment
+n_envs = 100
 mjx_env = Mjx(spec=spec,
               actuation_spec=action_spec,
               observation_spec=observation_spec,
               horizon=1000,
               gamma=0.99,
-              n_envs=100)
+              n_envs=n_envs)
 
 action_dim = mjx_env.info.action_space.shape[0]
 
 key = jax.random.key(0)
-keys = jax.random.split(key, mjx_env.info.n_envs + 1)
+keys = jax.random.split(key, n_envs + 1)
 key, env_keys = keys[0], keys[1:]
 
 # jit and vmap all functions needed
@@ -160,14 +159,14 @@ LOGGING_FREQUENCY = 100000
 i = 0
 while i < 100000:
 
-    keys = jax.random.split(key, mjx_env.info.n_envs + 1)
+    keys = jax.random.split(key, n_envs + 1)
     key, action_keys = keys[0], keys[1:]
     action = rng_sample_uni_action(action_keys)
     state = rng_step(state, action)
 
     mjx_env.mjx_render(state)   # INFO: For speed check, comment this out and set n_envs to ~4000
 
-    step += mjx_env.info.n_envs
+    step += n_envs
     if step % LOGGING_FREQUENCY == 0:
         current_time = time.time()
         print(f"{int(LOGGING_FREQUENCY / (current_time - previous_time))} steps per second.")
@@ -178,9 +177,9 @@ while i < 100000:
 Note that the Mjx environment can do everything the Mujoco environment can do, even running the simulation on CPU. Hence, 
 we can still do a CPU rollout!
 
-When using a Mjx environment, the `mjx_step` and `mjx_reset` functions are a jitted functions that run the simulation
-on the GPU, while the `step` and `reset` functions are running the simulation on the CPU. It is important
-to note that `mjx_step` does asyhronous resetting of each environment simiar to vector environments of Gymansium and 
+When using a Mjx environment, the `mjx_step` and `mjx_reset` functions are jitted functions that run the simulation
+on the GPU, while the `step` and `reset` functions run the simulation on the CPU. It is important
+to note that `mjx_step` does asynchronous resetting of each environment, similar to the vector environments of Gymnasium and
 stable-baselines3. `mjx_reset` resets all the environments at once.
 
 ## Rendering in the browser with viser
@@ -191,7 +190,7 @@ opening a local window. This is useful over SSH and on machines without a displa
 the optional dependencies:
 
 ```bash
-pip install loco-mujoco[viser]
+pip install -e ".[viser]"
 ```
 
 The methods are drop-in replacements and accept the same viewer parameters:

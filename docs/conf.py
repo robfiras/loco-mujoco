@@ -28,6 +28,7 @@ add_module_names = False
 autodoc_member_order = 'groupwise'
 source_suffix = [".rst", ".md"]
 napoleon_google_docstring = True
+napoleon_use_ivar = True
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -42,7 +43,6 @@ html_theme_options = {
     'collapse_navigation': False,
     'sticky_navigation': True,
     'logo_only': True,
-    'display_version': False,
 }
 
 html_logo = "https://github.com/robfiras/loco-mujoco/assets/69359729/bd2a219e-ddfd-4355-8024-d9af921fb92a"
