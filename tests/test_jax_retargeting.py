@@ -8,8 +8,8 @@ import pytest
 from loco_mujoco.retargeting import (Calibration, compile_forward_kinematics,
                                      compile_mjx_forward_kinematics, global_transforms, load_bvh,
                                      make_solver, pad_clips, retract, site_targets)
-from loco_mujoco.retargeting.solver import rotation_error
-from loco_mujoco.retargeting.soma import WORLD_FROM_BVH, _rotation_between, limb_dof_damping
+from loco_mujoco.retargeting.solver import SolverConfig, rotation_error
+from loco_mujoco.retargeting.soma import WORLD_FROM_BVH, _rotation_between, limb_dof_damping, limit_dofs
 
 XML = """
 <mujoco>
@@ -155,6 +155,30 @@ def test_solver_recovers_reachable_targets(model):
     np.testing.assert_allclose(final_pos, pos, atol=1e-3)
 
 
+def test_solver_moves_other_joints_when_a_limit_stops_one():
+    model = mujoco.MjModel.from_xml_string("""
+    <mujoco><worldbody><body name="root"><freejoint/><geom size="0.1"/><site name="root"/>
+      <body name="link"><joint name="hinge" axis="0 1 0"/><geom size="0.1"/>
+        <site name="tip" pos="0.5 0 0"/>
+      </body>
+    </body></worldbody></mujoco>""")
+    fk = compile_forward_kinematics(model, [0, 1])
+    limit = 0.2
+    angle = 1.0
+    target_pos = jnp.asarray([[0.0, 0.0, 0.0], [0.5 * np.cos(angle), 0.0, -0.5 * np.sin(angle)]], jnp.float32)
+    target_rot = jnp.tile(jnp.eye(3, dtype=jnp.float32), (2, 1, 1))
+    start = jnp.asarray([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]], jnp.float32)
+
+    def tip_error(limit_passes):
+        solve = make_solver(fk, model.nv, -limit * np.ones(1), limit * np.ones(1), np.array([1.0, 10.0]),
+                            np.zeros(2), SolverConfig(iterations=1, init_iterations=1, limit_passes=limit_passes))
+        out = solve(start, target_pos[None, None], target_rot[None, None])[0]
+        assert abs(float(out[0, 7])) <= limit + 1e-6
+        return float(jnp.linalg.norm(fk(out[0])[0][1] - target_pos[1]))
+
+    assert tip_error(3) < 0.2 * tip_error(1)
+
+
 @pytest.mark.parametrize("angle", [0.0, 1e-5, 0.5, 2.0, 3.1, 3.14159, np.pi])
 def test_rotation_error_is_finite_with_finite_jacobian(angle):
     c, s = np.cos(angle), np.sin(angle)
@@ -175,7 +199,7 @@ def test_rotation_error_is_the_rotation_vector():
     np.testing.assert_allclose(rotation_error(jnp.eye(3)[None], rot)[0], [0, 0, angle], atol=1e-5)
 
 
-def test_limb_dof_damping_leaves_elbows_undamped():
+def _two_arm_model():
     arm = """
     <body name="{0}_upper" pos="0 0 0">
       <joint name="{0}_a" axis="1 0 0"/><joint name="{0}_b" axis="0 1 0"/><geom size="0.1"/>
@@ -186,10 +210,22 @@ def test_limb_dof_damping_leaves_elbows_undamped():
         </body>
       </body>
     </body>"""
-    model = mujoco.MjModel.from_xml_string(f"""
+    return mujoco.MjModel.from_xml_string(f"""
     <mujoco><worldbody><body name="torso"><freejoint/><geom size="0.1"/>
       <site name="upper_body_mimic"/>{arm.format("left")}{arm.format("right")}
     </body></worldbody></mujoco>""")
+
+
+def test_limit_dofs_leaves_out_only_the_elbows():
+    model = _two_arm_model()
+    mask = limit_dofs(model)
+    for j in range(1, model.njnt):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, j)
+        assert mask[model.jnt_dofadr[j]] == (not name.endswith("_c"))
+
+
+def test_limb_dof_damping_leaves_elbows_undamped():
+    model = _two_arm_model()
     damping = limb_dof_damping(model, 10.0, 1.0)
 
     def dof(name):

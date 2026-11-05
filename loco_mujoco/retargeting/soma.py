@@ -187,6 +187,21 @@ def foot_contact_points(
     return bodies, points, float(lowest)
 
 
+def _site_body(model: mujoco.MjModel, name: str) -> int:
+    return int(model.site_bodyid[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)])
+
+
+def _dofs_between(model: mujoco.MjModel, lower: int, upper: int) -> List[int]:
+    """Degrees of freedom on the path from a body up to, but excluding, one of its ancestors."""
+    dofs = []
+    body = lower
+    while body not in (upper, 0):
+        first = model.body_dofadr[body]
+        dofs += list(range(first, first + model.body_dofnum[body]))
+        body = int(model.body_parentid[body])
+    return dofs
+
+
 def limb_dof_damping(
     model: mujoco.MjModel,
     shoulder_damping: float = 10.0,
@@ -207,25 +222,33 @@ def limb_dof_damping(
         The damping of each degree of freedom, shape (nv,).
 
     """
-    def site_body(name):
-        return int(model.site_bodyid[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)])
-
-    def dofs_between(lower, upper):
-        dofs = []
-        body = lower
-        while body not in (upper, 0):
-            first = model.body_dofadr[body]
-            dofs += list(range(first, first + model.body_dofnum[body]))
-            body = int(model.body_parentid[body])
-        return dofs
-
     damping = np.zeros(model.nv)
-    torso = site_body("upper_body_mimic")
+    torso = _site_body(model, "upper_body_mimic")
     for side in ("left", "right"):
-        elbow, hand = site_body(f"{side}_elbow_mimic"), site_body(f"{side}_hand_mimic")
-        damping[dofs_between(int(model.body_parentid[elbow]), torso)] = shoulder_damping
-        damping[dofs_between(hand, elbow)] = wrist_damping
+        elbow, hand = _site_body(model, f"{side}_elbow_mimic"), _site_body(model, f"{side}_hand_mimic")
+        damping[_dofs_between(model, int(model.body_parentid[elbow]), torso)] = shoulder_damping
+        damping[_dofs_between(model, hand, elbow)] = wrist_damping
     return damping
+
+
+def limit_dofs(model: mujoco.MjModel) -> np.ndarray:
+    """Mask of the degrees of freedom whose limits the solver should handle inside its solve.
+
+    This covers everything except the elbows: an arm pinned at its limit with a straight elbow has
+    no direction left to fold towards a target close to the body, and would stay there.
+
+    Args:
+        model: The MuJoCo model.
+
+    Returns:
+        The mask, shape (nv,).
+
+    """
+    mask = np.ones(model.nv, dtype=bool)
+    for side in ("left", "right"):
+        elbow = _site_body(model, f"{side}_elbow_mimic")
+        mask[_dofs_between(model, elbow, int(model.body_parentid[elbow]))] = False
+    return mask
 
 
 def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:

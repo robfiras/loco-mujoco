@@ -18,6 +18,7 @@ class SolverConfig(NamedTuple):
         floor_margin: Height above the floor below which the floor residual becomes active.
         log_rotation: Use the rotation vector as rotation error, which keeps pulling at large
             errors, instead of its sine.
+        limit_passes: Solves per step for the active set of joints stopped by their limits.
 
     """
     iterations: int = 4
@@ -26,6 +27,7 @@ class SolverConfig(NamedTuple):
     floor_weight: float = 50.0
     floor_margin: float = 0.0
     log_rotation: bool = True
+    limit_passes: int = 3
 
 
 def rotation_error(target: jax.Array, rot: jax.Array, log: bool = True) -> jax.Array:
@@ -64,6 +66,7 @@ def make_solver(
     rot_weights: np.ndarray,
     config: SolverConfig = SolverConfig(),
     dof_damping: Optional[np.ndarray] = None,
+    limit_dofs: Optional[np.ndarray] = None,
 ) -> Callable[[jax.Array, jax.Array, jax.Array], jax.Array]:
     """Create a function retargeting a batch of clips.
 
@@ -77,6 +80,8 @@ def make_solver(
         config: Solver settings.
         dof_damping: Additional damping per degree of freedom, shape (nv,). Keeps joints near
             singularities from jumping to another solution.
+        limit_dofs: Mask of the degrees of freedom whose limits are handled inside the solve,
+            shape (nv,), all by default. All others are only clipped after each step.
 
     Returns:
         A jitted function mapping initial configurations (B, nq), target site positions
@@ -87,6 +92,7 @@ def make_solver(
     rot_w = jnp.asarray(rot_weights)[:, None]
     lower, upper = jnp.asarray(joint_lower), jnp.asarray(joint_upper)
     damping = config.damping + (jnp.zeros(nv) if dof_damping is None else jnp.asarray(dof_damping))
+    limited = jnp.ones(nv - 6, bool) if limit_dofs is None else jnp.asarray(limit_dofs, bool)[6:]
 
     def residual(qpos, target_pos, target_rot):
         pos, rot, points = forward_kinematics(qpos)
@@ -105,7 +111,26 @@ def make_solver(
         r = local_residual(zero)
         jac = jax.jacfwd(local_residual)(zero)
         hessian = jac.T @ jac + jnp.diag(damping.astype(qpos.dtype))
-        delta = -jax.scipy.linalg.cho_solve(jax.scipy.linalg.cho_factor(hessian), jac.T @ r)
+        gradient = jac.T @ r
+        room_low, room_high = lower - qpos[7:], upper - qpos[7:]
+
+        # a joint stopped by its limit must be taken out of the solve, otherwise all other joints
+        # keep compensating for a motion that the limit never lets happen
+        def solve_free(pinned, pinned_delta):
+            free = 1.0 - pinned
+            reduced = hessian * free[:, None] * free[None, :] + jnp.diag(pinned)
+            rhs = -free * (gradient + hessian @ pinned_delta)
+            return jax.scipy.linalg.cho_solve(jax.scipy.linalg.cho_factor(reduced), rhs) + pinned_delta
+
+        pinned = jnp.zeros(nv, qpos.dtype)
+        pinned_delta = jnp.zeros(nv, qpos.dtype)
+        delta = solve_free(pinned, pinned_delta)
+        for _ in range(config.limit_passes - 1):
+            clipped = jnp.clip(delta[6:], room_low, room_high)
+            over = (clipped != delta[6:]) & limited
+            pinned = pinned.at[6:].max(over.astype(qpos.dtype))
+            pinned_delta = pinned_delta.at[6:].set(jnp.where(over, clipped, pinned_delta[6:]))
+            delta = solve_free(pinned, pinned_delta)
         delta = jnp.where(jnp.isfinite(delta).all(), delta, jnp.zeros_like(delta))
         qpos = retract(qpos, delta)
         return qpos.at[7:].set(jnp.clip(qpos[7:], lower, upper))
