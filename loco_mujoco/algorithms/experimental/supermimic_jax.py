@@ -223,24 +223,24 @@ def uses_domain_randomization(env):
     return not isinstance(env._domain_randomizer, NoDomainRandomization)
 
 
-def context_from_carry(carry, enabled):
-    """Flatten the per-episode randomizer and control-function states into one vector."""
+def context_from_carry(carry, enabled, index=None):
+    """Flatten the per-episode randomizer and control-function states into one vector, or its entries ``index``."""
     if not enabled:
         return jnp.zeros((0,))
     leaves = jax.tree.leaves((carry.domain_randomizer_state, carry.control_func_state))
     leaves = [jnp.ravel(jnp.asarray(x)) for x in leaves]
     leaves = [x.astype(jnp.float32) for x in leaves if jnp.issubdtype(x.dtype, jnp.floating)]
-    return jnp.concatenate(leaves) if leaves else jnp.zeros((0,))
+    xi = jnp.concatenate(leaves) if leaves else jnp.zeros((0,))
+    return xi if index is None else xi[jnp.array(index, dtype=int)]
 
 
-def context_dim(env):
+def context_index(env, n_samples=32):
+    """Entries of the context that differ between episodes: the others tell the networks nothing."""
     if not uses_domain_randomization(env):
-        return 0
-    key = jax.random.PRNGKey(0)
-    carry = SimpleNamespace(
-        domain_randomizer_state=env._domain_randomizer.init_state(env, key, env._model, env._data, jnp),
-        control_func_state=env._control_func.init_state(env, key, env._model, env._data, jnp))
-    return int(context_from_carry(carry, True).shape[0])
+        return []
+    states = jax.vmap(env.mjx_reset, axis_name=VECENV_AXIS_NAME)(jax.random.split(jax.random.PRNGKey(0), n_samples))
+    xi = jax.vmap(lambda c: context_from_carry(c, True))(states.additional_carry)
+    return np.flatnonzero(np.asarray(jnp.std(xi, axis=0)) > 1e-6).tolist()
 
 
 # ---------------------------------------------------------------------------
@@ -725,7 +725,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             exp.n_joints = int(nj)
             exp.nq = int(env._model.nq)
             exp.nv = int(env._model.nv)
-            exp.xi_dim = context_dim(env)
+            exp.xi_index = context_index(env)
+            exp.xi_dim = len(exp.xi_index)
             exp.term_obs_dim = obs_dim if term_obs_ind is None else int(term_obs_ind.size)
             exp.dt = float(env.dt)
             exp.num_iterations = int(float(exp.total_timesteps) // int(exp.num_envs))
@@ -789,7 +790,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             agent_state = cls.init_agent_state(env, agent_conf, _rng)
 
         term_obs = (lambda o: o) if term_obs_ind is None else (lambda o: o[..., term_obs_ind])  # noqa: E731
-        xi_of = lambda carry: context_from_carry(carry, use_xi)  # noqa: E731
+        xi_index = list(exp.xi_index) if use_xi else None
+        xi_of = lambda carry: context_from_carry(carry, use_xi, xi_index)  # noqa: E731
 
         def actor_apply(params, obs):
             return actor_net.apply({"params": params}, obs)
