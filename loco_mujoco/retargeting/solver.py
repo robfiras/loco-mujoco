@@ -1,4 +1,4 @@
-from typing import Callable, NamedTuple, Tuple
+from typing import Callable, NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -16,6 +16,8 @@ class SolverConfig(NamedTuple):
         damping: Levenberg-Marquardt damping, also acts as temporal smoothing.
         floor_weight: Weight of the one-sided floor penetration residual.
         floor_margin: Height above the floor below which the floor residual becomes active.
+        log_rotation: Use the rotation vector as rotation error, which keeps pulling at large
+            errors, instead of its sine.
 
     """
     iterations: int = 4
@@ -23,14 +25,30 @@ class SolverConfig(NamedTuple):
     damping: float = 1e-2
     floor_weight: float = 50.0
     floor_margin: float = 0.0
+    log_rotation: bool = True
 
 
-def rotation_error(target: jax.Array, rot: jax.Array) -> jax.Array:
-    """Smooth rotation error between stacks of rotation matrices, shape (S, 3)."""
+def rotation_error(target: jax.Array, rot: jax.Array, log: bool = True) -> jax.Array:
+    """Rotation error between stacks of rotation matrices, shape (S, 3).
+
+    Args:
+        target: Target rotation matrices, shape (S, 3, 3).
+        rot: Rotation matrices, shape (S, 3, 3).
+        log: Return the rotation vector instead of its sine.
+
+    Returns:
+        The rotation errors.
+
+    """
     rel = jnp.einsum("nji,njk->nik", target, rot)
-    return 0.5 * jnp.stack([rel[:, 2, 1] - rel[:, 1, 2],
+    sine = 0.5 * jnp.stack([rel[:, 2, 1] - rel[:, 1, 2],
                             rel[:, 0, 2] - rel[:, 2, 0],
                             rel[:, 1, 0] - rel[:, 0, 1]], axis=-1)
+    if not log:
+        return sine
+    norm = jnp.sqrt(jnp.sum(sine ** 2, axis=-1, keepdims=True) + 1e-12)
+    cosine = 0.5 * (jnp.trace(rel, axis1=-2, axis2=-1)[:, None] - 1.0)
+    return sine * jnp.arctan2(norm, cosine) / norm
 
 
 def make_solver(
@@ -41,6 +59,7 @@ def make_solver(
     pos_weights: np.ndarray,
     rot_weights: np.ndarray,
     config: SolverConfig = SolverConfig(),
+    dof_damping: Optional[np.ndarray] = None,
 ) -> Callable[[jax.Array, jax.Array, jax.Array], jax.Array]:
     """Create a function retargeting a batch of clips.
 
@@ -52,6 +71,8 @@ def make_solver(
         pos_weights: Position weight of each site, shape (S,).
         rot_weights: Rotation weight of each site, shape (S,).
         config: Solver settings.
+        dof_damping: Additional damping per degree of freedom, shape (nv,). Keeps joints near
+            singularities from jumping to another solution.
 
     Returns:
         A jitted function mapping initial configurations (B, nq), target site positions
@@ -61,12 +82,13 @@ def make_solver(
     pos_w = jnp.asarray(pos_weights)[:, None]
     rot_w = jnp.asarray(rot_weights)[:, None]
     lower, upper = jnp.asarray(joint_lower), jnp.asarray(joint_upper)
+    damping = config.damping + (jnp.zeros(nv) if dof_damping is None else jnp.asarray(dof_damping))
 
     def residual(qpos, target_pos, target_rot):
         pos, rot, points = forward_kinematics(qpos)
         floor = config.floor_weight * jax.nn.relu(config.floor_margin - points[:, 2])
         return jnp.concatenate([(pos_w * (pos - target_pos)).ravel(),
-                                (rot_w * rotation_error(target_rot, rot)).ravel(),
+                                (rot_w * rotation_error(target_rot, rot, config.log_rotation)).ravel(),
                                 floor])
 
     def step(qpos, target):
@@ -78,7 +100,7 @@ def make_solver(
         zero = jnp.zeros(nv, qpos.dtype)
         r = local_residual(zero)
         jac = jax.jacfwd(local_residual)(zero)
-        hessian = jac.T @ jac + config.damping * jnp.eye(nv, dtype=qpos.dtype)
+        hessian = jac.T @ jac + jnp.diag(damping.astype(qpos.dtype))
         delta = -jax.scipy.linalg.cho_solve(jax.scipy.linalg.cho_factor(hessian), jac.T @ r)
         qpos = retract(qpos, delta)
         return qpos.at[7:].set(jnp.clip(qpos[7:], lower, upper))
