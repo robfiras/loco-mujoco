@@ -46,9 +46,13 @@ def rotation_error(target: jax.Array, rot: jax.Array, log: bool = True) -> jax.A
                             rel[:, 1, 0] - rel[:, 0, 1]], axis=-1)
     if not log:
         return sine
-    norm = jnp.sqrt(jnp.sum(sine ** 2, axis=-1, keepdims=True) + 1e-12)
+    squared = jnp.sum(sine ** 2, axis=-1, keepdims=True)
+    small = squared < 1e-8
+    norm = jnp.sqrt(jnp.where(small, 1.0, squared))
     cosine = 0.5 * (jnp.trace(rel, axis1=-2, axis2=-1)[:, None] - 1.0)
-    return sine * jnp.arctan2(norm, cosine) / norm
+    # the gain diverges towards 180 degrees, bound it to keep the Jacobian usable in float32
+    divisor = jnp.where(cosine < 0.0, jnp.maximum(norm, 0.05), norm)
+    return sine * jnp.where(small, 1.0, jnp.arctan2(norm, cosine) / divisor)
 
 
 def make_solver(
@@ -102,6 +106,7 @@ def make_solver(
         jac = jax.jacfwd(local_residual)(zero)
         hessian = jac.T @ jac + jnp.diag(damping.astype(qpos.dtype))
         delta = -jax.scipy.linalg.cho_solve(jax.scipy.linalg.cho_factor(hessian), jac.T @ r)
+        delta = jnp.where(jnp.isfinite(delta).all(), delta, jnp.zeros_like(delta))
         qpos = retract(qpos, delta)
         return qpos.at[7:].set(jnp.clip(qpos[7:], lower, upper))
 

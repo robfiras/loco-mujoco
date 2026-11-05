@@ -187,6 +187,47 @@ def foot_contact_points(
     return bodies, points, float(lowest)
 
 
+def limb_dof_damping(
+    model: mujoco.MjModel,
+    shoulder_damping: float = 10.0,
+    wrist_damping: float = 1.0,
+) -> np.ndarray:
+    """Damping per degree of freedom for the shoulders and wrists of a robot.
+
+    The joints are found from the kinematic tree between the mimic sites, since joint names differ
+    between robots.
+
+    Args:
+        model: The MuJoCo model.
+        shoulder_damping: Damping of all joints between the torso and the elbows, excluding the
+            elbows themselves.
+        wrist_damping: Damping of all joints between the elbows and the hands.
+
+    Returns:
+        The damping of each degree of freedom, shape (nv,).
+
+    """
+    def site_body(name):
+        return int(model.site_bodyid[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)])
+
+    def dofs_between(lower, upper):
+        dofs = []
+        body = lower
+        while body not in (upper, 0):
+            first = model.body_dofadr[body]
+            dofs += list(range(first, first + model.body_dofnum[body]))
+            body = int(model.body_parentid[body])
+        return dofs
+
+    damping = np.zeros(model.nv)
+    torso = site_body("upper_body_mimic")
+    for side in ("left", "right"):
+        elbow, hand = site_body(f"{side}_elbow_mimic"), site_body(f"{side}_hand_mimic")
+        damping[dofs_between(int(model.body_parentid[elbow]), torso)] = shoulder_damping
+        damping[dofs_between(hand, elbow)] = wrist_damping
+    return damping
+
+
 def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Smallest rotation taking unit vector a onto unit vector b."""
     axis = np.cross(a, b)

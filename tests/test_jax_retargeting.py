@@ -8,7 +8,8 @@ import pytest
 from loco_mujoco.retargeting import (Calibration, compile_forward_kinematics,
                                      compile_mjx_forward_kinematics, global_transforms, load_bvh,
                                      make_solver, pad_clips, retract, site_targets)
-from loco_mujoco.retargeting.soma import WORLD_FROM_BVH, _rotation_between
+from loco_mujoco.retargeting.solver import rotation_error
+from loco_mujoco.retargeting.soma import WORLD_FROM_BVH, _rotation_between, limb_dof_damping
 
 XML = """
 <mujoco>
@@ -152,6 +153,53 @@ def test_solver_recovers_reachable_targets(model):
 
     final_pos, _, _ = jax.vmap(fk)(out)
     np.testing.assert_allclose(final_pos, pos, atol=1e-3)
+
+
+@pytest.mark.parametrize("angle", [0.0, 1e-5, 0.5, 2.0, 3.1, 3.14159, np.pi])
+def test_rotation_error_is_finite_with_finite_jacobian(angle):
+    c, s = np.cos(angle), np.sin(angle)
+    rot = jnp.asarray([[[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]], jnp.float32)
+    target = jnp.eye(3, dtype=jnp.float32)[None]
+
+    assert np.isfinite(rotation_error(target, rot)).all()
+    jac = jax.jacfwd(lambda r: rotation_error(target, r))(rot)
+    assert np.isfinite(jac).all()
+    assert np.abs(jac).max() < 1e3
+
+
+def test_rotation_error_is_the_rotation_vector():
+    angle = 2.0
+    c, s = np.cos(angle), np.sin(angle)
+    rot = jnp.asarray([[[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]], jnp.float32)
+    # the gain bound only applies very close to 180 degrees
+    np.testing.assert_allclose(rotation_error(jnp.eye(3)[None], rot)[0], [0, 0, angle], atol=1e-5)
+
+
+def test_limb_dof_damping_leaves_elbows_undamped():
+    arm = """
+    <body name="{0}_upper" pos="0 0 0">
+      <joint name="{0}_a" axis="1 0 0"/><joint name="{0}_b" axis="0 1 0"/><geom size="0.1"/>
+      <body name="{0}_fore" pos="0 0 -0.3">
+        <joint name="{0}_c" axis="0 1 0"/><geom size="0.1"/><site name="{0}_elbow_mimic"/>
+        <body name="{0}_hand" pos="0 0 -0.3">
+          <joint name="{0}_d" axis="1 0 0"/><geom size="0.1"/><site name="{0}_hand_mimic"/>
+        </body>
+      </body>
+    </body>"""
+    model = mujoco.MjModel.from_xml_string(f"""
+    <mujoco><worldbody><body name="torso"><freejoint/><geom size="0.1"/>
+      <site name="upper_body_mimic"/>{arm.format("left")}{arm.format("right")}
+    </body></worldbody></mujoco>""")
+    damping = limb_dof_damping(model, 10.0, 1.0)
+
+    def dof(name):
+        return model.jnt_dofadr[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)]
+
+    np.testing.assert_array_equal(damping[:6], 0.0)
+    for side in ("left", "right"):
+        assert damping[dof(f"{side}_a")] == 10.0 and damping[dof(f"{side}_b")] == 10.0
+        assert damping[dof(f"{side}_c")] == 0.0
+        assert damping[dof(f"{side}_d")] == 1.0
 
 
 def test_load_bvh(tmp_path):
