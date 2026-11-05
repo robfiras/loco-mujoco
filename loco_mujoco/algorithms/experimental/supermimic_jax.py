@@ -586,6 +586,7 @@ class SuperMimicAgentState(AgentStateBase):
     start_buffer: Any = None
     env_state: Any = None
     episode_stats: Any = None
+    bin_resets: Any = None
 
     def serialize(self):
         return {"actor_state": flax.serialization.to_state_dict(self.actor_state),
@@ -611,12 +612,95 @@ class SuperMimicAgentState(AgentStateBase):
             iteration=jnp.asarray(d.get("iteration", 0), dtype=jnp.int32))
 
 
+class BinResets:
+    """
+    Chooses episode starts by the time bin of the dataset they fall in: uniformly, towards bins with low returns,
+    and, with share ``fail_share``, one bin before recent failures. The share fades with the failures themselves.
+    """
+
+    def __init__(self, split_points, n_samples, bin_frames, max_return, fail_share):
+        """
+        Args:
+            split_points (jnp.ndarray): Start of each clip, then the end of the last one. Padded with -1.
+            n_samples (int): Static upper bound of the number of frames.
+            bin_frames (int): Frames per bin.
+            max_return (float): Scale of the discounted returns.
+            fail_share (float): Share of the resets sent before failures.
+        """
+        n_clips = split_points.shape[0] - 1
+        self.n_bins = n_samples // bin_frames + n_clips
+        self.bin_frames, self.max_return, self.fail_share = bin_frames, max_return, fail_share
+        lengths = jnp.maximum(split_points[1:] - split_points[:-1], 0)
+        lengths = jnp.where(split_points[1:] >= 0, lengths, 0)
+        self.clip_len = lengths
+        self.first_bin = jnp.concatenate((jnp.zeros(1, dtype=int), jnp.cumsum(-(-lengths // bin_frames))))
+        bins = jnp.arange(self.n_bins)
+        self.bin_clip = jnp.clip(jnp.searchsorted(self.first_bin, bins, side="right") - 1, 0, n_clips - 1)
+        self.valid = bins < self.first_bin[-1]
+        self.prev_bin = jnp.where(bins > self.first_bin[self.bin_clip], bins - 1, bins)
+
+    def init_state(self):
+        w = self.valid / jnp.sum(self.valid)
+        return BinResetState(ret=jnp.zeros(self.n_bins), avg_focus=w, fail=jnp.zeros(self.n_bins))
+
+    def bin_of(self, traj_no, step):
+        return self.first_bin[traj_no] + step // self.bin_frames
+
+    def probs(self, state):
+        n = jnp.sum(self.valid)
+        logits = jnp.where(self.valid, -25.0 * state.ret / self.max_return, -jnp.inf)
+        focus = jax.nn.softmax(logits)
+        p = 0.5 * self.valid / n + 0.4 * focus + 0.1 * state.avg_focus / jnp.sum(state.avg_focus)
+        fail = jnp.zeros_like(state.fail).at[self.prev_bin].add(state.fail * self.valid)
+        total = jnp.sum(fail)
+        share = self.fail_share * jnp.minimum(total, 1.0)  # no failures left: back to the base distribution
+        return (1 - share) * p + share * fail / jnp.maximum(total, 1e-6), focus
+
+    def sample(self, state, rng, n):
+        """Returns the clips, frames and bins of n episode starts."""
+        p, _ = self.probs(state)
+        rng_bin, rng_frame = jax.random.split(rng)
+        cdf = jnp.cumsum(p)
+        bins = jnp.searchsorted(cdf, jax.random.uniform(rng_bin, (n,)) * cdf[-1])
+        bins = jnp.minimum(bins, jnp.sum(self.valid) - 1)
+        clip = self.bin_clip[bins]
+        start = (bins - self.first_bin[clip]) * self.bin_frames
+        end = jnp.minimum(start + self.bin_frames, self.clip_len[clip] - 1)  # at least one step before the clip ends
+        span = jnp.maximum(end - start, 1)
+        return clip, start + jax.random.randint(rng_frame, (n,), 0, 1 << 30) % span, bins
+
+    def update(self, state, done, term, start_bin, end_bin, disc_ret):
+        """Updates the bins with the episodes that ended, given their start and end bins and discounted returns."""
+        w = done.astype(jnp.float32)
+
+        def ema(stat, bins, x, old):
+            count = jnp.zeros_like(stat).at[bins].add(w)
+            mean = jnp.zeros_like(stat).at[bins].add(x * w) / jnp.maximum(count, 1.0)
+            return jnp.where(count > 0, old * stat + (1 - old) * mean, stat)
+
+        any_done = jnp.any(done)
+        _, focus = self.probs(state)
+        return state.replace(
+            ret=ema(state.ret, start_bin, disc_ret, 0.8),
+            avg_focus=jnp.where(any_done, 0.999 * state.avg_focus + 0.001 * focus, state.avg_focus),
+            fail=ema(jnp.where(any_done, 0.999 * state.fail, state.fail), end_bin, term.astype(jnp.float32), 0.9))
+
+
+@struct.dataclass
+class BinResetState:
+    ret: jnp.ndarray  # discounted return of the episodes starting in each bin
+    avg_focus: jnp.ndarray  # running average of the return-based focus
+    fail: jnp.ndarray  # termination rate of the episodes ending in each bin
+
+
 @struct.dataclass
 class EpisodeStats:
     ret: jnp.ndarray
     length: jnp.ndarray
     last_ret: jnp.ndarray
     last_length: jnp.ndarray
+    disc_ret: jnp.ndarray
+    start_bin: jnp.ndarray
 
 
 # ---------------------------------------------------------------------------
@@ -728,6 +812,10 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         v_env_step = jax.vmap(_env_step, axis_name=VECENV_AXIS_NAME)
         v_reset = jax.vmap(lambda k: env.mjx_reset(k, traj), axis_name=VECENV_AXIS_NAME)
 
+        use_bin_resets = bool(getattr(exp, "bin_resets", False))
+        bins = BinResets(traj.data.split_points, traj.data.qpos.shape[0], max(1, round(float(exp.bin_seconds) / env.dt)),
+                         float(exp.max_step_reward) / (1 - gamma), float(exp.fail_reset)) if use_bin_resets else None
+
         # ----- run state -----
         if agent_state.env_state is None:
             rng, _rng = jax.random.split(rng)
@@ -740,7 +828,12 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 window_buffer=WindowBuffer.create(int(exp.buffer_len), n_envs, int(exp.nq), int(exp.nv),
                                                   int(exp.action_dim), int(exp.xi_dim), int(exp.term_obs_dim)),
                 start_buffer=StartBuffer.create(int(exp.start_buffer_len), env_state),
-                episode_stats=EpisodeStats(*(jnp.zeros(n_envs) for _ in range(4))))
+                episode_stats=EpisodeStats(*(jnp.zeros(n_envs) for _ in range(5)), jnp.zeros(n_envs, dtype=int)),
+                bin_resets=bins.init_state() if use_bin_resets else None)
+            if use_bin_resets:
+                ts = env_state.additional_carry.traj_state
+                agent_state = agent_state.replace(episode_stats=agent_state.episode_stats.replace(
+                    start_bin=bins.bin_of(ts.traj_no, ts.subtraj_step_no)))
 
         xi_mean = agent_state.xi_mean
         # Dimensions that do not vary across envs (not randomised) are mapped to 0.
@@ -923,6 +1016,13 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             start_ok = state_is_valid(st.data.qpos, st.data.qvel, max_abs_qvel) & \
                 jnp.all(jnp.isfinite(st.observation), axis=-1)
             start_buffer = agent_state.start_buffer.add(st, start_ok)
+            next_bin = None
+            if use_bin_resets:
+                rng, rng_b = jax.random.split(rng)
+                next_clip, next_frame, next_bin = bins.sample(agent_state.bin_resets, rng_b, n_envs)
+                carry = st.additional_carry
+                st = st.replace(additional_carry=carry.replace(traj_state=carry.traj_state.replace(
+                    next_traj_no=next_clip, next_subtraj_step_no=next_frame)))
             nstate, reset_state = v_env_step(st, action)
             next_obs_t = term_obs(nstate.observation)
             transition_ok = (start_ok & state_is_valid(nstate.data.qpos, nstate.data.qvel, max_abs_qvel)
@@ -934,11 +1034,21 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 next_term_obs=next_obs_t, absorbing=nstate.absorbing.astype(jnp.float32), done=nstate.done)
             es = agent_state.episode_stats
             ret, length = es.ret + nstate.reward, es.length + 1
+            disc_ret = es.disc_ret + gamma ** es.length * nstate.reward
+            bin_resets, start_bin = agent_state.bin_resets, es.start_bin
+            if use_bin_resets:
+                # truncated episodes bootstrap with their mean reward
+                boot = jnp.where(nstate.absorbing, 0.0, gamma ** length * (ret / length) / (1 - gamma))
+                ts = nstate.additional_carry.traj_state
+                bin_resets = bins.update(bin_resets, nstate.done, nstate.absorbing, es.start_bin,
+                                         bins.bin_of(ts.traj_no, ts.subtraj_step_no), disc_ret + boot)
+                start_bin = jnp.where(nstate.done, next_bin, es.start_bin)
             es = EpisodeStats(ret=jnp.where(nstate.done, 0.0, ret), length=jnp.where(nstate.done, 0.0, length),
                               last_ret=jnp.where(nstate.done, ret, es.last_ret),
-                              last_length=jnp.where(nstate.done, length, es.last_length))
+                              last_length=jnp.where(nstate.done, length, es.last_length),
+                              disc_ret=jnp.where(nstate.done, 0.0, disc_ret), start_bin=start_bin)
             agent_state = agent_state.replace(env_state=reset_state, start_buffer=start_buffer,
-                                              window_buffer=window_buffer, episode_stats=es)
+                                              window_buffer=window_buffer, episode_stats=es, bin_resets=bin_resets)
 
             # Warm-up waits for the window buffer, which starts empty in every new process.
             ready = window_buffer.count >= min(warmup + 1, int(exp.buffer_len))

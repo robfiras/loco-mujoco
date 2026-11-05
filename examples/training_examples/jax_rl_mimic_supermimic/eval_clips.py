@@ -29,6 +29,7 @@ with open_dict(exp):
     exp.env_params.horizon = 10 ** 8
     exp.env_params.pop("domain_randomization_type", None)
     exp.env_params.pop("domain_randomization_params", None)
+    exp.env_params.pop("init_state_params", None)
 env, traj = TaskFactory.get_factory_cls(exp.task_factory.name).make(**exp.env_params, **exp.task_factory.params)
 names = list(exp.task_factory.params.lafan1_dataset_conf.dataset_name)
 agent_conf, state = SuperMimicJax.load_agent(run / ckpt)

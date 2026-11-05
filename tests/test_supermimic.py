@@ -13,7 +13,7 @@ from omegaconf import OmegaConf, open_dict
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms.experimental import SuperMimicJax
 from loco_mujoco.core.mujoco_base import Mujoco
-from loco_mujoco.algorithms.experimental.supermimic_jax import (WorldModelSpec, WindowBuffer, state_is_valid,
+from loco_mujoco.algorithms.experimental.supermimic_jax import (BinResets, WorldModelSpec, WindowBuffer, state_is_valid,
                                                                  skip_gradient_spikes, _quat_mul, _quat_from_rotvec,
                                                                  _rotvec_from_quat)
 
@@ -240,6 +240,87 @@ def test_modify_contact_spec():
     pairs = {tuple(sorted((int(c.geom1), int(c.geom2)))) for c in data.contact[:data.ncon]}
     floor = model.geom("floor").id
     assert pairs and all(floor in p for p in pairs)
+
+
+def test_bin_resets():
+    # two clips of 25 and 10 frames, padded, in bins of 10 frames
+    bins = BinResets(jnp.array([0, 25, 35, -1]), 40, 10, 10.0, 0.3)
+    assert int(jnp.sum(bins.valid)) == 4
+    assert [int(bins.bin_of(c, f)) for c, f in ((0, 0), (0, 24), (1, 0), (1, 9))] == [0, 2, 3, 3]
+    assert [int(b) for b in bins.prev_bin[:4]] == [0, 0, 1, 3]
+
+    state = bins.init_state()
+    p, _ = bins.probs(state)
+    np.testing.assert_allclose(np.asarray(p[:4]), 0.25, rtol=1e-5)
+    assert float(jnp.sum(p[4:])) == 0.0
+
+    # failures in bin 2 send resets to the bin before it, and the share fades with them
+    failed = state.replace(fail=state.fail.at[2].set(1.0))
+    assert float(bins.probs(failed)[0][1] - p[1]) == pytest.approx(0.3 * 0.75, rel=1e-5)
+    faded = state.replace(fail=state.fail.at[2].set(0.1))
+    assert float(bins.probs(faded)[0][1] - p[1]) == pytest.approx(0.03 * 0.75, rel=1e-5)
+
+    clip, frame, b = bins.sample(failed, jax.random.PRNGKey(0), 4000)
+    assert np.all(np.asarray(frame) < np.asarray(bins.clip_len)[np.asarray(clip)] - 0)
+    assert np.all(np.asarray(bins.bin_of(clip, frame)) == np.asarray(b))
+    assert 0.40 < float(jnp.mean(b == 1)) < 0.55 and int(jnp.max(b)) == 3
+
+    done = jnp.array([True, True, False])
+    new = bins.update(state, done, jnp.array([True, False, True]), jnp.array([0, 0, 3]), jnp.array([1, 2, 3]),
+                      jnp.array([5.0, 3.0, 100.0]))
+    assert float(new.ret[0]) == pytest.approx(0.2 * 4.0) and float(new.ret[3]) == 0.0
+    assert float(new.fail[1]) == pytest.approx(0.1) and float(new.fail[2]) == 0.0 and float(new.fail[3]) == 0.0
+
+
+def test_chosen_reset_and_noise(supermimic_config):
+    config = OmegaConf.create(OmegaConf.to_container(supermimic_config, resolve=True))
+    with open_dict(config.experiment.env_params):
+        config.experiment.env_params.init_state_params = dict(root_pos_noise=[0.05, 0.05, 0.01], joint_pos_noise=0.1)
+    env, traj = _make(config)
+
+    def reset_at(key):
+        s = env.mjx_reset(key, traj)
+        carry = s.additional_carry
+        s = s.replace(additional_carry=carry.replace(traj_state=carry.traj_state.replace(
+            next_traj_no=jnp.array(0), next_subtraj_step_no=jnp.array(7))))
+        return env._mjx_reset_in_step(s, traj)
+
+    state = jax.jit(jax.vmap(reset_at))(jax.random.split(jax.random.PRNGKey(1), 16))
+    ts = state.additional_carry.traj_state
+    assert np.all(np.asarray(ts.subtraj_step_no) == 7) and np.all(np.asarray(ts.next_traj_no) == -1)
+    ref = traj.data.get(0, 7, jnp)
+    diff = np.abs(np.asarray(state.data.qpos[:, 7:] - ref.qpos[7:]))
+    assert diff.max() <= 0.1 + 1e-5 and diff.std() > 0.01
+    z = np.abs(np.asarray(state.data.qpos[:, 2] - ref.qpos[2]))
+    assert 0 < z.max() <= 0.01 + 1e-5
+
+
+def test_refresh_kinematics(supermimic_config):
+    config = OmegaConf.create(OmegaConf.to_container(supermimic_config, resolve=True))
+    with open_dict(config.experiment.env_params):
+        config.experiment.env_params.refresh_kinematics = True
+    env, traj = _make(config)
+    state = env.mjx_reset(jax.random.PRNGKey(0), traj)
+    state = jax.jit(lambda s: env.mjx_step(s, jnp.zeros(env.info.action_space.shape), traj, auto_reset=False))(state)
+    fresh = _kinematics(env.sys, state.data.replace(xpos=state.data.xpos * 0.0))
+    np.testing.assert_allclose(np.asarray(state.data.xpos), np.asarray(fresh.xpos), atol=1e-5)
+
+
+@pytest.mark.parametrize("fail_reset", (0.0, 0.3))
+def test_SuperMimic_bin_resets_train(supermimic_config, fail_reset):
+    config = OmegaConf.create(OmegaConf.to_container(supermimic_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.bin_resets = True
+        config.experiment.bin_seconds = 0.2
+        config.experiment.max_step_reward = 1.0
+        config.experiment.fail_reset = fail_reset
+    env, traj = _make(config)
+    agent_conf = SuperMimicJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = SuperMimicJax.init_agent_state(env, agent_conf, rng)
+    out = jax.jit(SuperMimicJax.build_train_fn(env, agent_conf))(rng, agent_state, traj)
+    assert int(out["training_metrics"].num_updates[-1]) > 0
+    assert np.all(np.isfinite(np.asarray(out["agent_state"].bin_resets.ret)))
 
 
 def test_handler_absorbing_prob_replaces_learned_head(supermimic_config):

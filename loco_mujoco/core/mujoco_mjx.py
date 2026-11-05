@@ -66,6 +66,8 @@ class Mjx(Mujoco):
             ``naconmax`` argument to set the upper bound for the number of contacts
             across all worlds, rather than the ``nconmax`` argument from MuJoCo Warp.
         njmax (int): maximum number of constraints to allocate for warp across all worlds.
+        refresh_kinematics (bool): If True, derived quantities like body poses are recomputed after each control
+            step. Otherwise they lag qpos and qvel by one simulation step.
         **kwargs: Additional arguments to pass to the Mujoco base class.
 
     """
@@ -75,6 +77,7 @@ class Mjx(Mujoco):
                  nconmax=None,
                  naconmax=None,
                  njmax=None,
+                 refresh_kinematics=False,
                  **kwargs):
 
         # call base mujoco env
@@ -85,6 +88,7 @@ class Mjx(Mujoco):
 
         # time put model and data
         self._use_mjwarp = use_mjwarp
+        self._refresh_kinematics = refresh_kinematics
         if self._use_mjwarp:
             import warnings
             import time
@@ -244,6 +248,8 @@ class Mjx(Mujoco):
         # run inner loop
         if physics_fn is None:
             data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
+            if self._refresh_kinematics:
+                data = mjx.forward(sys, data)
         else:
             data, carry = physics_fn(sys, data, carry, action)
 

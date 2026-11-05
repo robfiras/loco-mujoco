@@ -14,6 +14,9 @@ class TrajState:
     traj_no: int
     subtraj_step_no: int
     subtraj_step_no_init: int
+    # If non-negative, the start of the next episode: set by algorithms that choose their own resets.
+    next_traj_no: int = -1
+    next_subtraj_step_no: int = -1
 
 
 class TrajectoryHandler(StatefulObject):
@@ -265,10 +268,14 @@ class TrajectoryHandler(StatefulObject):
             idx = [0, 0]
 
         new_traj_no, new_subtraj_step_no = idx
+        chosen = carry.traj_state.next_traj_no >= 0
+        new_traj_no = backend.where(chosen, carry.traj_state.next_traj_no, new_traj_no)
+        new_subtraj_step_no = backend.where(chosen, carry.traj_state.next_subtraj_step_no, new_subtraj_step_no)
         new_subtraj_step_no_init = new_subtraj_step_no
+        no_choice = new_traj_no * 0 - 1
 
         return data, carry.replace(key=key, traj_state=TrajState(new_traj_no, new_subtraj_step_no,
-                                                                 new_subtraj_step_no_init))
+                                                                 new_subtraj_step_no_init, no_choice, no_choice))
 
     def update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
 
