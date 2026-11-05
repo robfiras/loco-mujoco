@@ -1018,11 +1018,7 @@ class TrajectoryData(SingleData):
         new_split_points = []
         curr_n_samples = 0
         for i, data in enumerate(traj_datas):
-            split_points = data.split_points
-            if backend == jnp:
-                split_points = split_points.at[:].add(curr_n_samples)
-            else:
-                split_points = split_points + curr_n_samples
+            split_points = data.split_points + curr_n_samples
             curr_n_samples = split_points[-1]
             new_split_points.append(split_points[:-1])
 

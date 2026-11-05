@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from types import ModuleType
 import atexit
 
@@ -185,13 +185,23 @@ class Mjx(Mujoco):
 
         return state.replace(data=data, observation=obs, additional_carry=carry)
 
-    def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None) -> MjxState:
+    def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None,
+                 auto_reset: bool = True, physics_fn: Optional[Callable] = None) -> MjxState:
         """
 
         Args:
             state (MjxState): Current state of the environment.
             action (jax.Array): Action to take in the environment.
             traj (Trajectory, optional): Trajectory to use. Falls back to self._traj if not provided.
+            auto_reset (bool): If True (default), a state that is done is reset before it is returned.
+                With False the terminal state itself is returned, so the caller can read its qpos/qvel
+                and reset it with ``_mjx_reset_in_step`` afterwards.
+            physics_fn (Callable, optional): Replaces the simulation (the control function and the
+                ``mjx.step`` substeps) with ``physics_fn(sys, data, carry, action) -> (data, carry)``,
+                where ``action`` is the action as passed to this function. Everything around the
+                simulation (pre/post step, observation, reward, absorbing) still runs, so a learned
+                dynamics model can reuse the environment's own observation and reward functions. The
+                returned data must have its kinematic quantities (xpos, site_xpos, cvel, ...) up to date.
 
         Returns:
             MjxState: The next state of the environment.
@@ -232,7 +242,10 @@ class Mjx(Mujoco):
             return _data, _carry
 
         # run inner loop
-        data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
+        if physics_fn is None:
+            data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
+        else:
+            data, carry = physics_fn(sys, data, carry, action)
 
         # modify data *after* step if needed (does nothing by default)
         data, carry = self._mjx_simulation_post_step(self._model, data, carry, traj)
@@ -265,10 +278,11 @@ class Mjx(Mujoco):
                               absorbing=absorbing, done=done, info=cur_info, additional_carry=carry)
 
         # reset state if done (capture traj via closure so lax.cond operand stays as state only)
-        state = jax.lax.cond(state.done,
-                             lambda s: self._mjx_reset_in_step(s, traj),
-                             lambda s: s,
-                             state)
+        if auto_reset:
+            state = jax.lax.cond(state.done,
+                                 lambda s: self._mjx_reset_in_step(s, traj),
+                                 lambda s: s,
+                                 state)
 
         return state
 
@@ -375,6 +389,26 @@ class Mjx(Mujoco):
             bool: True if the state is absorbing, False otherwise.
         """
         return self._terminal_state_handler.mjx_is_absorbing(self, obs, info, data, carry, traj)
+
+    def _mjx_absorbing_prob(self, obs: jnp.ndarray,
+                            info: Dict,
+                            data: Data,
+                            carry: MjxAdditionalCarry,
+                            traj: Optional[Trajectory] = None) -> Optional[jnp.ndarray]:
+        """
+        Smooth probability that the current state is absorbing.
+
+        Args:
+            obs (jnp.ndarray): Current observation.
+            info (Dict): Information dictionary.
+            data (Data): Mujoco data structure.
+            carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
+
+        Returns:
+            Optional[jnp.ndarray]: The probability, or None if the terminal state handler has no smooth version.
+        """
+        return self._terminal_state_handler.mjx_absorbing_prob(self, obs, info, data, carry, traj)
 
     def _mjx_is_done(self, obs: jnp.ndarray,
                      absorbing: bool,

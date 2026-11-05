@@ -1,0 +1,119 @@
+defaults:
+  - override hydra/job_logging: default
+  - override hydra/launcher: basic
+
+wandb:
+  project: "deepmimic_supermimic"
+
+experiment:
+  task_factory:
+    name: ImitationFactory
+    params:
+      lafan1_dataset_conf:
+        dataset_name:
+          - walk1_subject5
+  env_params:
+    env_name: MjxUnitreeG1
+    headless: True
+    horizon: 1000
+    use_mjwarp: False   # with True the real steps use warp and imagination a JAX copy of the model
+    goal_type: GoalTrajMimic
+    goal_params:
+      visualize_goal: true
+    control_type: ${control_config.torque_control.control_type}
+    control_params: ${control_config.torque_control.control_params}
+    reward_type: MimicReward
+    reward_params:
+      qpos_w_sum: 0.4
+      qvel_w_sum: 0.2
+      rpos_w_sum: 0.5
+      rquat_w_sum: 0.3
+      rvel_w_sum: 0.1
+      sites_for_mimic:
+        - upper_body_mimic
+        - left_hand_mimic
+        - left_foot_mimic
+        - right_hand_mimic
+        - right_foot_mimic
+    # Paper termination: relative to the current reference frame, so it also works with motions on the
+    # ground. The default handler uses the range of the whole dataset, which fall-and-get-up clips widen
+    # until lying on the floor never terminates.
+    terminal_state_type: RootTrackingTerminalStateHandler
+    terminal_state_params:
+      max_height_error: 0.25
+      max_tilt_error: 0.8
+    # With a randomizer the per-episode randomizer/control states become the world model's and
+    # the critic's context xi; without one xi is empty.
+    # domain_randomization_type: DefaultRandomizer
+    # domain_randomization_params:
+    #   randomize_geom_friction_tangential: true
+    #   add_joint_pos_noise: true
+
+  # ---- observation routing (default: full observation for all three) ----
+  # actor_obs_group: <name>
+  # critic_obs_group: <name>
+  # termination_obs_group: <name>   # must contain the reference/goal for mimic terminations
+
+  # ---- policy / critic (paper Table A.4/A.5) ----
+  hidden_layers: [2048, 1024, 512, 256]
+  critic_hidden_layers: [256, 128]
+  activation: silu
+  lr_actor: 2e-4
+  lr_critic: 2e-4
+  actor_max_grad_norm: 1.0
+  actor_max_grad_value: 0.1
+  actor_grad_spike_factor: 10.0     # skip updates above 10x the running gradient norm; 0 disables
+  critic_max_grad_norm: 1.0
+  critic_epochs: 5
+  critic_minibatches: 4
+
+  # ---- world model (paper Eq. 1, Table A.4/A.5) ----
+  wm_hidden_layers: [2048, 2048, 2048]
+  wm_term_hidden_layers: [64, 64]
+  wm_activation: silu
+  lr_wm: 2e-4
+  wm_max_grad_norm: 1.0
+  wm_window: 8
+  wm_batch_size: 2048
+  wm_batches_per_update: 10
+  wm_term_loss_weight: 1.0
+  # [root_z, rot6d, lin_vel_h, ang_vel_b, joint_pos, joint_vel]  (features are divided by these)
+  wm_in_scale: [1.0, 1.0, 1.0, 2.0, 1.0, 5.0]
+  # [dv_h, dw_b, dqd, dp_h, dth_b, dq]  (network output is multiplied by these)
+  wm_out_scale: [0.3, 0.5, 2.0, 0.01, 0.02, 0.02]
+  # [root pos m, root rotvec rad, root lin vel m/s, root ang vel rad/s, joint pos rad, joint vel rad/s]
+  wm_err_scale: [0.05, 0.1, 0.5, 1.0, 0.1, 2.0]
+
+  # ---- imagination (paper Eq. 2/3) ----
+  imag_horizon: 32
+  imag_batch_size: 4096
+  remat: true          # recompute each imagined step in the backward pass (saves memory)
+  gamma: 0.99
+  gae_lambda: 0.95
+
+  # ---- schedule (paper Algorithm A.1) ----
+  num_envs: 4096
+  total_timesteps: 1.31e9          # 320k env steps x 4096 envs
+  updates_per_env_step: 0.4        # UTD
+  warmup_steps: 40
+  lr_final_ratio: 0.03
+  lr_decay_fraction: 0.78
+  action_noise_std: 0.1
+  max_abs_qvel: 100.0              # states beyond this (or non-finite) count as simulator blow-ups and are skipped
+  buffer_len: 1000                # world-model windows: buffer_len x num_envs transitions
+  start_buffer_len: 16             # imagination starts: the last start_buffer_len env steps
+  log_every: 50
+  n_seeds: 1
+  vmap_across_seeds: true
+  debug: false
+  validation:
+    active: false
+    num_steps: 100
+    num_envs: 100
+    num: 1
+
+# Define control subconfigs
+control_config:
+  torque_control:
+    control_type: DefaultControl
+    control_params:

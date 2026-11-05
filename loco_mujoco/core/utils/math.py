@@ -355,6 +355,53 @@ def transform_motion(vel, new_pos, old_pos, rot_mat_new2old, backend, flg_local=
     return xvel
 
 
+def rotvec_from_matrix_jax(mat):
+    """
+    Rotation vectors of rotation matrices (..., 3, 3), angle in [0, pi], with the same values as
+    ``jax.scipy``'s ``Rotation.from_matrix(mat).as_rotvec()`` but finite gradients everywhere.
+
+    ``from_matrix`` evaluates all four branches of Shepperd's method and selects one with ``where``;
+    the unselected branches take the square root of non-positive numbers, and their NaN gradients
+    survive the selection (0 * NaN = NaN), poisoning every gradient that passes through. Here every
+    branch's square root is clamped, and the rotation angle uses a smoothed norm.
+
+    Args:
+        mat (jnp.ndarray): Rotation matrices of shape (..., 3, 3).
+
+    Returns:
+        jnp.ndarray: Rotation vectors of shape (..., 3).
+    """
+    m = mat
+    m00, m01, m02 = m[..., 0, 0], m[..., 0, 1], m[..., 0, 2]
+    m10, m11, m12 = m[..., 1, 0], m[..., 1, 1], m[..., 1, 2]
+    m20, m21, m22 = m[..., 2, 0], m[..., 2, 1], m[..., 2, 2]
+    trace = m00 + m11 + m22
+
+    def _half_sqrt(x):
+        return 0.5 * jnp.sqrt(jnp.maximum(x, 1e-12))
+
+    # each candidate is (w, x, y, z), built around the largest of w, x, y, z
+    sw = _half_sqrt(1.0 + trace)
+    qw = jnp.stack([sw, (m21 - m12) / (4 * sw), (m02 - m20) / (4 * sw), (m10 - m01) / (4 * sw)], axis=-1)
+    sx = _half_sqrt(1.0 + m00 - m11 - m22)
+    qx = jnp.stack([(m21 - m12) / (4 * sx), sx, (m01 + m10) / (4 * sx), (m02 + m20) / (4 * sx)], axis=-1)
+    sy = _half_sqrt(1.0 - m00 + m11 - m22)
+    qy = jnp.stack([(m02 - m20) / (4 * sy), (m01 + m10) / (4 * sy), sy, (m12 + m21) / (4 * sy)], axis=-1)
+    sz = _half_sqrt(1.0 - m00 - m11 + m22)
+    qz = jnp.stack([(m10 - m01) / (4 * sz), (m02 + m20) / (4 * sz), (m12 + m21) / (4 * sz), sz], axis=-1)
+
+    choice = jnp.argmax(jnp.stack([trace, m00, m11, m22], axis=-1), axis=-1)
+    quat = jnp.stack([qw, qx, qy, qz], axis=-2)
+    quat = jnp.take_along_axis(quat, choice[..., None, None], axis=-2)[..., 0, :]
+    quat = quat / jnp.linalg.norm(quat, axis=-1, keepdims=True)
+    quat = jnp.where(quat[..., :1] < 0.0, -quat, quat)
+
+    vec = quat[..., 1:]
+    vec_norm = jnp.sqrt(jnp.sum(vec * vec, axis=-1, keepdims=True) + 1e-12)
+    angle = 2.0 * jnp.arctan2(vec_norm, quat[..., :1])
+    return vec * (angle / vec_norm)
+
+
 def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_rootid, backend,
                                       main_site_id=0):
     """
@@ -390,7 +437,7 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
     main_site_xpos_traj = site_xpos_traj[main_site_id]
     site_xpos_traj = backend.delete(site_xpos_traj, main_site_id, axis=0)
     site_rpos = calc_rel_positions(site_xpos_traj, main_site_xpos_traj, backend)
-    site_rangles = R.from_matrix(rel_rot_mat).as_rotvec()
+    site_rangles = R.from_matrix(rel_rot_mat).as_rotvec() if backend == np else rotvec_from_matrix_jax(rel_rot_mat)
     site_rvel = calculate_relative_velocity_in_local_frame(main_site_xvel, site_xvel, main_site_xmat_traj,
                                                            rel_rot_mat, backend)
 
