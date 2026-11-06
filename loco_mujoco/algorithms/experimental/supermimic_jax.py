@@ -841,7 +841,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             xi_mean=jnp.zeros(xi_dim), xi_std=jnp.ones(xi_dim),
             xi_initialized=jnp.array(False), num_updates=jnp.array(0, dtype=jnp.int32),
             iteration=jnp.array(0, dtype=jnp.int32),
-            actor_ema=actor_params if float(getattr(exp, "policy_ema", 0.0)) > 0 else None,
+            actor_ema=jax.tree.map(jnp.copy, actor_params) if float(getattr(exp, "policy_ema", 0.0)) > 0 else None,
             lr_decay_start=jnp.array(-1, dtype=jnp.int32))
 
     # ---------- training ------------------------------------------------
@@ -870,6 +870,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         action_noise = float(exp.action_noise_std)
         max_abs_qvel = float(getattr(exp, "max_abs_qvel", 100.0))
         remat = bool(getattr(exp, "remat", True))
+        remat_keep_dots = bool(getattr(exp, "remat_keep_dots", False))
         policy_ema = float(getattr(exp, "policy_ema", 0.0))
         start_stride = int(getattr(exp, "start_buffer_stride", 1))
         # Policy learning rate x lr_mult, ramping to x1 over lr_decay_len updates once the training return
@@ -1021,7 +1022,9 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 return nc, out
 
             if remat:
-                step = jax.checkpoint(step)
+                # keeps the network matmuls, so the backward pass only recomputes the env functions
+                step = jax.checkpoint(step, policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable
+                                      if remat_keep_dots else None)
             ones = jnp.ones(start.qpos.shape[0])
             c0 = (start.qpos, start.qvel, start.observation, start.info, carry0, ones, ones)
             cH, ro = jax.lax.scan(step, c0, None, horizon)

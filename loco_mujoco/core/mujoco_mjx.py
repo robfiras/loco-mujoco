@@ -72,6 +72,9 @@ class Mjx(Mujoco):
 
     """
 
+    _KINEMATIC_FIELDS = ("xpos", "xquat", "xmat", "xipos", "ximat", "xanchor", "xaxis", "geom_xpos", "geom_xmat",
+                         "site_xpos", "site_xmat", "subtree_com", "cvel", "cdof", "cdof_dot")
+
     def __init__(self,
                  use_mjwarp=False,
                  nconmax=None,
@@ -101,6 +104,8 @@ class Mjx(Mujoco):
             time.sleep(3)
             self.sys = mjx.put_model(self._model, impl='warp')
             self._first_data = mjx.make_data(self._model, impl='warp', nconmax=nconmax, naconmax=naconmax, njmax=njmax)
+            self._kin_sys = mjx.put_model(self._model, impl='jax')
+            self._kin_data = mjx.make_data(self._model, impl='jax')
         else:
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
@@ -249,7 +254,7 @@ class Mjx(Mujoco):
         if physics_fn is None:
             data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
             if self._refresh_kinematics:
-                data = mjx.forward(sys, data)
+                data = self._mjx_refresh_kinematics(sys, data)
         else:
             data, carry = physics_fn(sys, data, carry, action)
 
@@ -291,6 +296,18 @@ class Mjx(Mujoco):
                                  state)
 
         return state
+
+    def _mjx_refresh_kinematics(self, sys: Model, data: Data) -> Data:
+        """
+        Brings the kinematic quantities of data up to the current qpos and qvel. With MjWarp they are
+        computed on a JAX copy of the model, which skips the solver pass of a full forward call.
+
+        """
+        if not self._use_mjwarp:
+            return mjx.forward(sys, data)
+        kin = self._kin_data.replace(qpos=data.qpos, qvel=data.qvel)
+        kin = mjx.com_vel(self._kin_sys, mjx.com_pos(self._kin_sys, mjx.kinematics(self._kin_sys, kin)))
+        return data.replace(**{f: getattr(kin, f) for f in self._KINEMATIC_FIELDS})
 
     def _mjx_create_observation(self, model: Model,
                                 data: Data,
