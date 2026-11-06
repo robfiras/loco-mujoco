@@ -195,6 +195,18 @@ class WorldModelSpec:
         return (jnp.concatenate([p_new, q_new, qj_new], axis=-1),
                 jnp.concatenate([v_new, w_new, qd_new], axis=-1))
 
+    def targets(self, qpos, qvel, qpos_next, qvel_next):
+        """The network output that makes ``integrate`` go from one state to the next."""
+        p, q, qj, v, w, qd = self._split(qpos, qvel)
+        p1, q1, qj1, v1, w1, qd1 = self._split(qpos_next, qvel_next)
+        hq = _heading_quat(q)
+        c_old, c_new = self.dt * (1.0 - self.drift), self.dt * self.drift
+        delta = jnp.concatenate([_quat_rotate_inv(hq, v1 - v), w1 - w, qd1 - qd,
+                                 _quat_rotate_inv(hq, p1 - p - c_old * v - c_new * v1),
+                                 _rotvec_from_quat(_quat_mul(_quat_conj(q), q1)) - c_old * w - c_new * w1,
+                                 qj1 - qj - c_old * qd - c_new * qd1], axis=-1)
+        return delta / self.out_scale
+
     def error(self, qpos_pred, qvel_pred, qpos_true, qvel_true):
         """Normalised error vector [dp, rotvec, dv, dw, dqj, dqd] / err_scale."""
         p1, q1, qj1, v1, w1, qd1 = self._split(qpos_pred, qvel_pred)
@@ -288,8 +300,9 @@ class SuperMimicWorldModelNet(nn.Module):
     def __call__(self, feat, action, xi, term_obs):
         return self.dynamics(feat, action, xi), self.termination(term_obs)
 
-    def dynamics(self, feat, action, xi):
-        return self.dynamics_net(jnp.concatenate([feat, action, xi], axis=-1))
+    def dynamics(self, feat, action, xi, norm=None):
+        x = jnp.concatenate([feat, action, xi], axis=-1)
+        return self.dynamics_net(x if norm is None else norm(x))
 
     def termination(self, term_obs):
         return self.termination_net(term_obs)[..., 0]
@@ -311,6 +324,10 @@ class SuperMimicPolicyNet(nn.Module):
         dec = _MLP(self.dec_hidden_dims, self.action_dim, self.activation, compute_dtype=self.compute_dtype,
                    last_gain=0.01, name="dec")
         return dec(jnp.concatenate([jnp.tanh(z), history], axis=-1))
+
+
+# smallest error scale of the world-model loss, per entry of WorldModelSpec.error: [p, rot, v, w] then [qj, qd]
+WM_ERR_FLOOR = ((3e-3, 5e-3, 2e-2, 5e-2), (3e-3, 5e-2))
 
 
 @struct.dataclass
@@ -335,6 +352,9 @@ class RunningNorm:
                            var=jnp.where(live, (self.var * self.count + v * n + delta ** 2 * self.count * n / total) / total,
                                          self.var),
                            count=jnp.where(live, total, self.count))
+
+    def std(self, eps=1e-4):
+        return jnp.sqrt(self.var + eps ** 2)
 
     def __call__(self, x, index=None, eps=1e-2):
         mean, var = (self.mean, self.var) if index is None else (self.mean[index], self.var[index])
@@ -727,6 +747,7 @@ class SuperMimicAgentState(AgentStateBase):
     actor_norm: Any = None  # RunningNorm of the observations, of the imagined observations for the critic
     critic_norm: Any = None
     obs_history: Any = None  # (n_envs, history_len, history_dim), run state
+    wm_norm: Any = None  # dict of RunningNorm: "input", "output" and "error" of the world model
 
     @property
     def deployed_params(self):
@@ -738,6 +759,7 @@ class SuperMimicAgentState(AgentStateBase):
                 "lr_decay_start": None if self.lr_decay_start is None else np.asarray(self.lr_decay_start),
                 "actor_norm": None if self.actor_norm is None else jax.tree.map(np.asarray, self.actor_norm),
                 "critic_norm": None if self.critic_norm is None else jax.tree.map(np.asarray, self.critic_norm),
+                "wm_norm": None if self.wm_norm is None else jax.tree.map(np.asarray, self.wm_norm),
                 "critic_state": flax.serialization.to_state_dict(self.critic_state),
                 "wm_state": flax.serialization.to_state_dict(self.wm_state),
                 "xi": {"mean": np.asarray(self.xi_mean), "std": np.asarray(self.xi_std),
@@ -761,6 +783,7 @@ class SuperMimicAgentState(AgentStateBase):
             lr_decay_start=None if d.get("lr_decay_start") is None else jnp.asarray(d["lr_decay_start"]),
             actor_norm=None if d.get("actor_norm") is None else jax.tree.map(jnp.asarray, d["actor_norm"]),
             critic_norm=None if d.get("critic_norm") is None else jax.tree.map(jnp.asarray, d["critic_norm"]),
+            wm_norm=None if d.get("wm_norm") is None else jax.tree.map(jnp.asarray, d["wm_norm"]),
             num_updates=jnp.asarray(d["num_updates"]),
             iteration=jnp.asarray(d.get("iteration", 0), dtype=jnp.int32))
 
@@ -923,7 +946,10 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             actor_ema=jax.tree.map(jnp.copy, actor_params) if float(getattr(exp, "policy_ema", 0.0)) > 0 else None,
             lr_decay_start=jnp.array(-1, dtype=jnp.int32),
             actor_norm=RunningNorm.create(obs_dim) if bool(getattr(exp, "obs_norm", False)) else None,
-            critic_norm=RunningNorm.create(obs_dim) if bool(getattr(exp, "obs_norm", False)) else None)
+            critic_norm=RunningNorm.create(obs_dim) if bool(getattr(exp, "obs_norm", False)) else None,
+            wm_norm=dict(input=RunningNorm.create(feat_dim + action_dim + xi_dim),
+                         output=RunningNorm.create(feat_dim - 1), error=RunningNorm.create(feat_dim - 1))
+            if bool(getattr(exp, "wm_running_norm", False)) else None)
 
     # ---------- training ------------------------------------------------
     @classmethod
@@ -952,6 +978,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         max_abs_qvel = float(getattr(exp, "max_abs_qvel", 100.0))
         remat = bool(getattr(exp, "remat", True))
         remat_keep_dots = bool(getattr(exp, "remat_keep_dots", False))
+        analytic_only_truncates = bool(getattr(exp, "imag_soft_termination_only", False))
         policy_ema = float(getattr(exp, "policy_ema", 0.0))
         start_stride = int(getattr(exp, "start_buffer_stride", 1))
         # Policy learning rate x lr_mult, ramping to x1 over lr_decay_len updates once the training return
@@ -983,8 +1010,11 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         def critic_apply(params, obs, xi_n, norm):
             return critic_net.apply({"params": params}, obs if norm is None else norm(obs), xi_n)
 
-        def wm_dynamics(params, feat, action, xi_n):
-            return wm_net.apply({"params": params}, feat, action, xi_n, method=SuperMimicWorldModelNet.dynamics)
+        def wm_dynamics(wm, feat, action, xi_n):
+            params, norm = wm
+            y = wm_net.apply({"params": params}, feat, action, xi_n, None if norm is None else norm["input"],
+                             method=SuperMimicWorldModelNet.dynamics)
+            return y if norm is None else y * norm["output"].std() + norm["output"].mean
 
         def wm_termination(params, obs_t):
             return wm_net.apply({"params": params}, obs_t, method=SuperMimicWorldModelNet.termination)
@@ -1029,14 +1059,19 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         xi_norm = lambda xi: (xi - xi_mean) * xi_inv_std  # noqa: E731
 
         # ----- world-model fitting (Eq. 1) -----
-        def wm_loss_fn(params, batch, mask):
+        err_floor = jnp.concatenate([jnp.full((n,), f) for f, n in zip(
+            WM_ERR_FLOOR[0] + WM_ERR_FLOOR[1], (3, 3, 3, 3, int(exp.n_joints), int(exp.n_joints)))])
+
+        def wm_loss_fn(params, batch, mask, norm):
             xi_n = xi_norm(batch["xi"])
 
             def step(s, j):
                 qpos, qvel = s
-                delta = wm_dynamics(params, spec.features(qpos, qvel), batch["action"][j], xi_n)
+                delta = wm_dynamics((params, norm), spec.features(qpos, qvel), batch["action"][j], xi_n)
                 qpos, qvel = spec.integrate(qpos, qvel, delta)
                 e = spec.error(qpos, qvel, batch["next_qpos"][j], batch["next_qvel"][j])
+                if norm is not None:
+                    e = e * spec.err_scale / jnp.maximum(norm["error"].std(), err_floor)
                 return (qpos, qvel), jnp.sum(e * e, axis=-1)
 
             _, sq = jax.lax.scan(step, (batch["qpos"][0], batch["qvel"][0]), jnp.arange(window))  # (k, n)
@@ -1052,10 +1087,10 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             loss = state_loss + float(exp.wm_term_loss_weight) * term_loss
             return loss, dict(wm_loss=loss, term_bce=term_loss, term_acc=acc, nse_1=nse[0], nse_k=nse[-1])
 
-        def wm_update(wm_state, buf, rng):
+        def wm_update(wm_state, buf, rng, norm):
             def body(st, r):
                 batch, mask = buf.sample_windows(r, wm_batch, window)
-                (_, m), g = jax.value_and_grad(wm_loss_fn, has_aux=True)(st.params, batch, mask)
+                (_, m), g = jax.value_and_grad(wm_loss_fn, has_aux=True)(st.params, batch, mask, norm)
                 return st.apply_gradients(grads=g), m
 
             wm_state, m = jax.lax.scan(body, wm_state, jax.random.split(rng, wm_batches))
@@ -1102,8 +1137,10 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 ns = v_imag_env_step(make_state(qpos, qvel, obs, info, carry), a, wm_params)
                 d_hat = v_absorbing_prob(ns)
                 if d_hat is None:  # the handler has no smooth version
-                    d_hat = jax.nn.sigmoid(wm_termination(wm_params, term_obs(ns.observation)))
-                done = jax.lax.stop_gradient(ns.done.astype(jnp.float32))
+                    d_hat = jax.nn.sigmoid(wm_termination(wm_params[0], term_obs(ns.observation)))
+                # with a smooth termination the survival weight already covers the absorbing states
+                ended = ns.done if analytic_only_truncates is False else ns.done & ~ns.absorbing
+                done = jax.lax.stop_gradient(ended.astype(jnp.float32))
                 out = dict(reward=ns.reward, surv=surv, alive=alive, d_hat=d_hat, done=done,
                            action_norm=jnp.linalg.norm(a, axis=-1),
                            obs=obs, xi=jax.vmap(xi_of)(carry))
@@ -1193,11 +1230,12 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         def one_update(_, c):
             agent_state, rng, _ = c
             rng, rng_w, rng_p = jax.random.split(rng, 3)
-            wm_state, m_wm = wm_update(agent_state.wm_state, agent_state.window_buffer, rng_w)
+            wm_state, m_wm = wm_update(agent_state.wm_state, agent_state.window_buffer, rng_w, agent_state.wm_norm)
             decay_at = agent_state.lr_decay_start
             ramp = jnp.where(decay_at >= 0, jnp.clip((agent_state.num_updates - decay_at) / lr_decay_len, 0.0, 1.0), 0.0)
             actor_state, critic_state, critic_norm, m_pi = policy_update(
-                agent_state.actor_state, agent_state.critic_state, wm_state.params, agent_state.start_buffer, rng_p,
+                agent_state.actor_state, agent_state.critic_state, (wm_state.params, agent_state.wm_norm),
+                agent_state.start_buffer, rng_p,
                 lr_mult + (1.0 - lr_mult) * ramp, agent_state.actor_norm, agent_state.critic_norm)
             if policy_ema > 0:
                 agent_state = agent_state.replace(actor_ema=jax.tree.map(
@@ -1238,6 +1276,18 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 qpos=st.data.qpos, qvel=st.data.qvel, next_qpos=nstate.data.qpos, next_qvel=nstate.data.qvel,
                 action=action, xi=jax.vmap(xi_of)(st.additional_carry),
                 next_term_obs=next_obs_t, absorbing=nstate.absorbing.astype(jnp.float32), done=nstate.done)
+            wm_norm = agent_state.wm_norm
+            if wm_norm is not None:
+                def masked_update(norm, x):
+                    return norm.update(jnp.where(transition_ok[:, None], x, norm.mean))
+
+                wm_in = jnp.concatenate([spec.features(st.data.qpos, st.data.qvel), action,
+                                         xi_norm(jax.vmap(xi_of)(st.additional_carry))], axis=-1)
+                wm_norm = dict(input=masked_update(wm_norm["input"], wm_in),
+                               output=masked_update(wm_norm["output"], spec.targets(
+                                   st.data.qpos, st.data.qvel, nstate.data.qpos, nstate.data.qvel)),
+                               error=masked_update(wm_norm["error"], spec.error(
+                                   nstate.data.qpos, nstate.data.qvel, st.data.qpos, st.data.qvel) * spec.err_scale))
             es = agent_state.episode_stats
             ret, length = es.ret + nstate.reward, es.length + 1
             disc_ret = es.disc_ret + gamma ** es.length * nstate.reward
@@ -1261,7 +1311,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 history = jnp.where(nstate.done[:, None, None], fresh_history(reset_state.observation),
                                     push_history(history, reset_state.observation))
             agent_state = agent_state.replace(env_state=reset_state, start_buffer=start_buffer, lr_decay_start=decay_at,
-                                              actor_norm=actor_norm, obs_history=history,
+                                              actor_norm=actor_norm, obs_history=history, wm_norm=wm_norm,
                                               window_buffer=window_buffer, episode_stats=es, bin_resets=bin_resets)
 
             # Warm-up waits for the window buffer, which starts empty in every new process.

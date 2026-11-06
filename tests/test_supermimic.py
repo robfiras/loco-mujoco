@@ -101,6 +101,15 @@ def _kinematics(sys, data):
     return mjx.com_vel(sys, mjx.com_pos(sys, mjx.kinematics(sys, data)))
 
 
+def test_world_model_targets_invert_integrate():
+    spec = WorldModelSpec(2, 0.02, (1.0,) * 6, (0.5,) * 6, (1.0,) * 6, drift=0.625)
+    rng = jax.random.PRNGKey(3)
+    qpos, qvel = _random_state(rng, 2)
+    delta = 0.1 * jax.random.normal(rng, (qpos.shape[0], spec.delta_dim))
+    qpos1, qvel1 = spec.integrate(qpos, qvel, delta)
+    np.testing.assert_allclose(np.asarray(spec.targets(qpos, qvel, qpos1, qvel1)), np.asarray(delta), atol=1e-4)
+
+
 def test_buffers_skip_diverged_states():
     """A simulator blow-up in one env must not reach world-model batches or imagination starts."""
     T, E, nq, nv, A = 6, 3, 9, 8, 2
@@ -342,7 +351,8 @@ def test_SuperMimic_blink_options_train(supermimic_config, tmp_path):
     with open_dict(config.experiment):
         config.experiment.update(dict(policy_ema=0.9, actor_optimizer="muon", wm_optimizer="muon", policy_lr_mult=4.0,
                                       lr_decay_by=2, lr_decay_len=3, wm_layer_norm=True, wm_drift=0.625,
-                                      start_buffer_stride=2, net_dtype="bfloat16"))
+                                      start_buffer_stride=2, net_dtype="bfloat16", wm_running_norm=True,
+                                      obs_norm=True, imag_soft_termination_only=True))
     env, traj = _make(config)
     agent_conf = SuperMimicJax.init_agent_conf(env, config)
     rng = jax.random.PRNGKey(0)
