@@ -14,8 +14,8 @@ from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms.experimental import SuperMimicJax
 from loco_mujoco.core.mujoco_base import Mujoco
 from loco_mujoco.algorithms.experimental.supermimic_jax import (BinResets, WorldModelSpec, WindowBuffer, state_is_valid,
-                                                                 skip_gradient_spikes, _quat_mul, _quat_from_rotvec,
-                                                                 _rotvec_from_quat)
+                                                                 skip_gradient_spikes, muon_labels, scale_by_muon,
+                                                                 _quat_mul, _quat_from_rotvec, _rotvec_from_quat)
 
 from test_conf import *
 
@@ -321,6 +321,42 @@ def test_SuperMimic_bin_resets_train(supermimic_config, fail_reset):
     out = jax.jit(SuperMimicJax.build_train_fn(env, agent_conf))(rng, agent_state, traj)
     assert int(out["training_metrics"].num_updates[-1]) > 0
     assert np.all(np.isfinite(np.asarray(out["agent_state"].bin_resets.ret)))
+
+
+def test_muon():
+    params = {f"Dense_{i}": {"kernel": jnp.ones((4, 4)), "bias": jnp.ones(4)} for i in range(4)}
+    labels = muon_labels(params)
+    assert [labels[f"Dense_{i}"]["kernel"] for i in range(4)] == ["adam", "muon", "muon", "adam"]
+    assert {labels[f"Dense_{i}"]["bias"] for i in range(4)} == {"adam"}
+    assert muon_labels({"a": params, "b": params}, "a")["b"]["Dense_1"]["kernel"] == "adam"
+
+    g = jax.random.normal(jax.random.PRNGKey(0), (64, 128))
+    tx = scale_by_muon()
+    u, _ = tx.update(g, tx.init(g))
+    # orthogonalised, then scaled to an update RMS of 0.2
+    assert 0.15 < float(jnp.sqrt(jnp.mean(u ** 2))) < 0.25
+
+
+def test_SuperMimic_blink_options_train(supermimic_config, tmp_path):
+    config = OmegaConf.create(OmegaConf.to_container(supermimic_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.update(dict(policy_ema=0.9, actor_optimizer="muon", wm_optimizer="muon", policy_lr_mult=4.0,
+                                      lr_decay_by=2, lr_decay_len=3, wm_layer_norm=True, wm_drift=0.625,
+                                      start_buffer_stride=2, net_dtype="bfloat16"))
+    env, traj = _make(config)
+    agent_conf = SuperMimicJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = SuperMimicJax.init_agent_state(env, agent_conf, rng)
+    out = jax.jit(SuperMimicJax.build_train_fn(env, agent_conf))(rng, agent_state, traj)
+    trained, m = out["agent_state"], out["training_metrics"]
+    assert int(m.num_updates[-1]) > 0 and float(m.mean_actor_grad_norm[-1]) > 0.0
+    assert all(x.dtype == jnp.float32 for x in jax.tree.leaves(trained.actor_state.params))
+    assert not _params_allclose(trained.actor_ema, trained.actor_state.params)
+    assert int(trained.lr_decay_start) >= 0
+
+    _, loaded = SuperMimicJax.load_agent(SuperMimicJax.save_agent(tmp_path, agent_conf, trained))
+    assert _params_allclose(trained.deployed_params, loaded.deployed_params)
+    assert int(loaded.lr_decay_start) == int(trained.lr_decay_start)
 
 
 def test_handler_absorbing_prob_replaces_learned_head(supermimic_config):

@@ -33,7 +33,7 @@ with open_dict(exp):
 env, traj = TaskFactory.get_factory_cls(exp.task_factory.name).make(**exp.env_params, **exp.task_factory.params)
 names = list(exp.task_factory.params.lafan1_dataset_conf.dataset_name)
 agent_conf, state = SuperMimicJax.load_agent(run / ckpt)
-params, net = state.actor_state.params, agent_conf.actor_net
+params, net = state.deployed_params, agent_conf.actor_net
 
 rp = exp.env_params.reward_params
 max_step_reward = float(rp.w_root_pos + rp.w_root_ori + rp.w_body_pos + rp.w_body_ori + rp.w_body_lin_vel

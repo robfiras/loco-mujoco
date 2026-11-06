@@ -88,6 +88,7 @@ experiment:
   imag_horizon: 32
   imag_batch_size: 4096
   remat: true          # recompute each imagined step in the backward pass (saves memory)
+  net_dtype: float32   # matmul dtype of the networks (bfloat16 is faster); parameters stay float32
   gamma: 0.99
   gae_lambda: 0.95
 
