@@ -26,6 +26,7 @@ from loco_mujoco.core.visuals import MjvScene, MujocoViewer, UsdTrajectoryExport
 from loco_mujoco.core.visuals.usd_exporter import USD_EXPORTER_PARAMS
 from loco_mujoco.core.visuals.viser_viewer import VISER_ONLY_VIEWER_PARAMS
 from importlib.resources import files
+from loco_mujoco.core.utils.math import take_columns
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
@@ -938,8 +939,6 @@ class Mujoco:
             for obs_type in ObservationType.list_all_non_stateful()
         ])
 
-        obs_not_stateful = obs_not_stateful[self._obs_indices.concatenated_indices]
-
         obs_stateful = []
         for obs in self.obs_container.list_all_stateful():
             obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
@@ -949,17 +948,19 @@ class Mujoco:
         stateful_obs_ind = self.obs_container.get_all_stateful_indices()
 
         # merge the non-stateful and stateful observations and bring them in the order of the observation spec
+        non_stateful_order = self._obs_indices.concatenated_indices
         if backend == np:
             merged = backend.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=float)
             mask = backend.ones(len(merged), dtype=bool)
             mask[stateful_obs_ind] = False
-            merged[mask] = obs_not_stateful
+            merged[mask] = obs_not_stateful[non_stateful_order]
             merged[stateful_obs_ind] = obs_stateful
         elif backend == jnp:
-            # the order is static: one gather, instead of two scatters that also slow down the gradients
-            non_stateful_ind = np.setdiff1d(np.arange(len(obs_not_stateful) + len(stateful_obs_ind)), stateful_obs_ind)
-            order = np.argsort(np.concatenate([non_stateful_ind, stateful_obs_ind]))
-            merged = jnp.concatenate([obs_not_stateful, obs_stateful])[order]
+            # the order is static: one gather, instead of a gather and two scatters
+            order = np.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=int)
+            order[stateful_obs_ind] = len(obs_not_stateful) + np.arange(len(stateful_obs_ind))
+            order[np.setdiff1d(np.arange(len(order)), stateful_obs_ind)] = non_stateful_order
+            merged = take_columns(jnp.concatenate([obs_not_stateful, obs_stateful]), order)
 
         return merged, carry
 

@@ -446,3 +446,14 @@ def test_traj_future_frames_matches_frame_by_frame():
         expected += [heading_inv @ (qpos[f, :3] - qpos[ref, :3]), _rot6d(heading_inv @ R, np), R.T @ qvel[f, :3],
                      qvel[f, 3:6], qpos[f, 7:], 0.1 * qvel[f, 6:]]
     np.testing.assert_allclose(out, np.concatenate(expected), rtol=1e-6, atol=1e-6)
+
+
+def test_take_columns_gradient():
+    from loco_mujoco.core.utils.math import take_columns
+
+    x = jnp.arange(12.0).reshape(3, 4)
+    ind = np.array([3, 0])
+    w = jnp.array([2.0, 5.0])
+    np.testing.assert_array_equal(take_columns(x, ind), x[:, ind])
+    np.testing.assert_array_equal(jax.grad(lambda y: jnp.sum(take_columns(y, ind) * w))(x),
+                                  jax.grad(lambda y: jnp.sum(y[:, ind] * w))(x))

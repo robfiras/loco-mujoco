@@ -97,11 +97,12 @@ class TrajFutureFrames(_FreeRootGoal):
         qpos, qvel = td.qpos[start + steps], td.qvel[start + steps]
         ref_p, fut_p, fut_v = qpos[0, :3], qpos[1:], qvel[1:]
         heading_inv = _heading_mat(_quat_to_mat(qpos[0, 3:7], backend), backend).T
-        R = _quat_to_mat(fut_p[:, 3:7].T, backend)  # (3, 3, K)
-        R = backend.moveaxis(R, -1, 0)
-        blocks = [(fut_p[:, :3] - ref_p) @ heading_inv.T,
-                  (heading_inv @ R)[:, :, :2].reshape(self._n_future, 6),
-                  (backend.swapaxes(R, 1, 2) @ fut_v[:, :3, None])[..., 0], fut_v[:, 3:6],
+        R = backend.moveaxis(_quat_to_mat(fut_p[:, 3:7].T, backend), -1, 0)  # (K, 3, 3)
+        # written as products and sums: as matmuls these 3x3 blocks become kernels of their own under vmap
+        rel_R = backend.sum(heading_inv[None, :, :, None] * R[:, None, :, :], axis=2)
+        blocks = [backend.sum(heading_inv * (fut_p[:, None, :3] - ref_p), axis=-1),
+                  rel_R[:, :, :2].reshape(self._n_future, 6),
+                  backend.sum(R * fut_v[:, :3, None], axis=1), fut_v[:, 3:6],
                   fut_p[:, 7:], self._joint_vel_scale * fut_v[:, 6:]]
         return backend.concatenate(blocks, axis=1).reshape(-1), carry
 

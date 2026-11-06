@@ -513,3 +513,31 @@ def atleast_3d(tensor, backend):
         tensor = backend.expand_dims(tensor, axis=0)
     
     return tensor
+
+
+def take_columns(x, ind):
+    """
+    Returns ``x[..., ind]`` for static, unique indices. Its gradient is a gather as well: the scatter that JAX would
+    use instead is very slow on batched arrays.
+
+    Args:
+        x (jnp.ndarray): Array to select from.
+        ind (np.ndarray): Indices into the last axis of x.
+
+    Returns:
+        The selected columns of x.
+
+    """
+    ind = np.asarray(ind)
+    inverse = np.full(x.shape[-1], len(ind))  # columns that are not selected read the appended zero
+    inverse[ind] = np.arange(len(ind))
+
+    @jax.custom_vjp
+    def take(x):
+        return x[..., ind]
+
+    def backward(_, g):
+        return (jnp.concatenate([g, jnp.zeros_like(g[..., :1])], axis=-1)[..., inverse],)
+
+    take.defvjp(lambda x: (take(x), None), backward)
+    return take(x)

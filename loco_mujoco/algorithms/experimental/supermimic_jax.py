@@ -49,7 +49,7 @@ import jax.numpy as jnp
 import flax
 import flax.linen as nn
 from flax import struct, traverse_util
-from flax.linen.initializers import constant, orthogonal, zeros
+from flax.linen.initializers import constant, orthogonal, variance_scaling, zeros
 import mujoco
 from mujoco import mjx
 import optax
@@ -60,6 +60,7 @@ from loco_mujoco.algorithms.common.networks import get_activation_fn
 from loco_mujoco.algorithms.experimental.td3_jax import TD3ActorNet
 from loco_mujoco.core import MjxState
 from loco_mujoco.core.domain_randomizer import NoDomainRandomization
+from loco_mujoco.core.utils.math import take_columns
 from loco_mujoco.core.wrappers import SummaryMetrics
 from loco_mujoco.core.wrappers.mjx import BaseWrapper, VECENV_AXIS_NAME
 from loco_mujoco.utils import ValidationSummary
@@ -269,17 +270,31 @@ class _MLP(nn.Module):
     compute_dtype: str = "float32"  # matmul dtype; the parameters and the output stay float32
     layer_norm: bool = False
     last_gain: float = 1.0
+    torch_init: bool = False  # torch.nn.Linear's init: a third of the default variance, uniform biases
 
     @nn.compact
     def __call__(self, x):
         act = get_activation_fn(self.activation)
+
+        def init(fan_in):
+            if not self.torch_init:
+                return {}
+            bound = fan_in ** -0.5
+            return dict(kernel_init=variance_scaling(1 / 3, "fan_in", "uniform"),
+                        bias_init=lambda key, shape, dtype=jnp.float32: jax.random.uniform(key, shape, dtype, -bound, bound))
+
         for dim in self.hidden_layer_dims:
-            x = nn.Dense(dim, dtype=self.compute_dtype)(x)
+            x = nn.Dense(dim, dtype=self.compute_dtype, **init(x.shape[-1]))(x)
             if self.layer_norm:
                 x = nn.LayerNorm(dtype=jnp.float32)(x)
             x = act(x)
-        kernel_init = zeros if self.zero_last else orthogonal(self.last_gain)
-        x = nn.Dense(self.out_dim, kernel_init=kernel_init, bias_init=constant(0.0), dtype=self.compute_dtype)(x)
+        last = dict(kernel_init=zeros if self.zero_last else orthogonal(self.last_gain), bias_init=constant(0.0))
+        if self.torch_init and not self.zero_last:
+            kernel = variance_scaling(self.last_gain ** 2 / 3, "fan_in", "uniform")
+            last = {**init(x.shape[-1]), "kernel_init": kernel}
+            if self.last_gain != 1.0:
+                last["bias_init"] = constant(0.0)
+        x = nn.Dense(self.out_dim, dtype=self.compute_dtype, **last)(x)
         return x.astype(jnp.float32)
 
 
@@ -291,10 +306,12 @@ class SuperMimicWorldModelNet(nn.Module):
     activation: str = "silu"
     compute_dtype: str = "float32"
     layer_norm: bool = False
+    torch_init: bool = False
 
     def setup(self):
         self.dynamics_net = _MLP(self.hidden_layer_dims, self.delta_dim, self.activation, zero_last=True,
-                                 compute_dtype=self.compute_dtype, layer_norm=self.layer_norm)
+                                 compute_dtype=self.compute_dtype, layer_norm=self.layer_norm,
+                                 torch_init=self.torch_init)
         self.termination_net = _MLP(self.term_hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype)
 
     def __call__(self, feat, action, xi, term_obs):
@@ -316,13 +333,14 @@ class SuperMimicPolicyNet(nn.Module):
     latent_dim: int = 32
     activation: str = "elu"
     compute_dtype: str = "float32"
+    torch_init: bool = False
 
     @nn.compact
     def __call__(self, goal, history):
         z = _MLP(self.enc_hidden_dims, self.latent_dim, self.activation, compute_dtype=self.compute_dtype,
-                 name="enc")(goal)
+                 torch_init=self.torch_init, name="enc")(goal)
         dec = _MLP(self.dec_hidden_dims, self.action_dim, self.activation, compute_dtype=self.compute_dtype,
-                   last_gain=0.01, name="dec")
+                   last_gain=0.01, torch_init=self.torch_init, name="dec")
         return dec(jnp.concatenate([jnp.tanh(z), history], axis=-1))
 
 
@@ -367,12 +385,14 @@ class SuperMimicValueNet(nn.Module):
     activation: str = "silu"
     obs_ind: jnp.ndarray = None
     compute_dtype: str = "float32"
+    torch_init: bool = False
 
     @nn.compact
     def __call__(self, obs, xi):
         if self.obs_ind is not None:
             obs = obs[..., self.obs_ind]
-        net = _MLP(self.hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype)
+        net = _MLP(self.hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype,
+                   torch_init=self.torch_init)
         return net(jnp.concatenate([obs, xi], axis=-1))[..., 0]
 
 
@@ -564,6 +584,7 @@ def _build_nets(env, config):
     """Networks and optimisers from the config. Needs ``config.experiment`` to hold the dims."""
     exp = config.experiment
     compute_dtype = str(getattr(exp, "net_dtype", "float32"))
+    torch_init = bool(getattr(exp, "torch_init", False))
     if int(getattr(exp, "history_len", 0)) > 0:
         actor_net = SuperMimicPolicyNet(
             action_dim=int(exp.action_dim),
@@ -571,6 +592,7 @@ def _build_nets(env, config):
             dec_hidden_dims=_tuple(exp.hidden_layers),
             activation=str(exp.activation),
             compute_dtype=compute_dtype,
+            torch_init=torch_init,
         )
     else:
         actor_net = TD3ActorNet(
@@ -587,6 +609,7 @@ def _build_nets(env, config):
         activation=str(exp.activation),
         obs_ind=_obs_ind(env, getattr(exp, "critic_obs_group", None), "critic_obs_group"),
         compute_dtype=compute_dtype,
+        torch_init=torch_init,
     )
     wm_net = SuperMimicWorldModelNet(
         delta_dim=12 + 2 * int(exp.n_joints),
@@ -595,6 +618,7 @@ def _build_nets(env, config):
         activation=str(exp.wm_activation),
         compute_dtype=compute_dtype,
         layer_norm=bool(getattr(exp, "wm_layer_norm", False)),
+        torch_init=torch_init,
     )
 
     # Cosine decay to lr_final_ratio * lr over the first lr_decay_fraction of training (paper A.5).
@@ -1005,14 +1029,14 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         history_len = int(getattr(exp, "history_len", 0))
 
         def push_history(history, obs):
-            return None if history is None else jnp.concatenate([history[:, 1:], obs[:, None, history_ind]], axis=1)
+            return None if history is None else jnp.concatenate([history[:, 1:], take_columns(obs, history_ind)[:, None]], axis=1)
 
         def fresh_history(obs):
             return None if history_ind is None else jnp.repeat(obs[:, None, history_ind], history_len, axis=1)
 
         # The stored rollouts hold the critic's columns only, which it reads several times per update.
         critic_ind, critic_core = critic_net.obs_ind, critic_net.clone(obs_ind=None)
-        critic_obs = (lambda o: o) if critic_ind is None else (lambda o: o[..., critic_ind])  # noqa: E731
+        critic_obs = (lambda o: o) if critic_ind is None else (lambda o: take_columns(o, critic_ind))  # noqa: E731
 
         def critic_apply(params, obs, xi_n, norm):
             return critic_core.apply({"params": params}, obs if norm is None else norm(obs), xi_n)
@@ -1368,7 +1392,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         def act(params, norm, obs, history=None):
             if history_ind is None:
                 return net.apply({"params": params}, obs if norm is None else norm(obs))
-            goal, hist = obs[..., goal_ind], history
+            goal, hist = take_columns(obs, goal_ind), history
             if norm is not None:
                 goal, hist = norm(goal, goal_ind), norm(hist, history_ind)
             return net.apply({"params": params}, goal, hist.reshape(hist.shape[:-2] + (-1,)))
