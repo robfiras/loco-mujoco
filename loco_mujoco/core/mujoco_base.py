@@ -920,7 +920,8 @@ class Mujoco:
                                    data: MjData,
                                    carry: AdditionalCarry,
                                    backend: ModuleType,
-                                   traj: Optional[Trajectory] = None) -> Tuple[np.ndarray, AdditionalCarry]:
+                                   traj: Optional[Trajectory] = None,
+                                   skip: Tuple[str, ...] = ()) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Creates the observation array by concatenating extracted observations from all types.
 
@@ -930,6 +931,7 @@ class Mujoco:
             carry (AdditionalCarry): Additional carry information.
             backend (ModuleType): The numerical backend to use (NumPy or JAX NumPy).
             traj (Trajectory, optional): Trajectory to use.
+            skip (tuple of str, optional): Names of stateful observations to leave at zero, without computing them.
 
         Returns:
             Tuple[np.ndarray, AdditionalCarry]: The observation array and updated carry.
@@ -941,6 +943,9 @@ class Mujoco:
 
         obs_stateful = []
         for obs in self.obs_container.list_all_stateful():
+            if obs.name in skip:
+                obs_stateful.append(backend.zeros(len(obs.obs_ind)))
+                continue
             obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
             obs_stateful.append(obs_s)
 

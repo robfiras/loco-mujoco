@@ -195,7 +195,8 @@ class Mjx(Mujoco):
         return state.replace(data=data, observation=obs, additional_carry=carry)
 
     def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None,
-                 auto_reset: bool = True, physics_fn: Optional[Callable] = None) -> MjxState:
+                 auto_reset: bool = True, physics_fn: Optional[Callable] = None,
+                 skip_obs: Tuple[str, ...] = ()) -> MjxState:
         """
 
         Args:
@@ -211,6 +212,8 @@ class Mjx(Mujoco):
                 simulation (pre/post step, observation, reward, absorbing) still runs, so a learned
                 dynamics model can reuse the environment's own observation and reward functions. The
                 returned data must have its kinematic quantities (xpos, site_xpos, cvel, ...) up to date.
+            skip_obs (tuple of str, optional): Names of stateful observations to leave at zero in the
+                returned observation, for callers that do not read them.
 
         Returns:
             MjxState: The next state of the environment.
@@ -262,7 +265,7 @@ class Mjx(Mujoco):
         data, carry = self._mjx_simulation_post_step(self._model, data, carry, traj)
 
         # create the observation
-        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj)
+        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj, skip_obs)
 
         # modify the observation and the data if needed (does nothing by default)
         cur_obs, data, cur_info, carry = self._mjx_step_finalize(cur_obs, self._model, data, cur_info, carry, traj)
@@ -312,7 +315,8 @@ class Mjx(Mujoco):
     def _mjx_create_observation(self, model: Model,
                                 data: Data,
                                 carry: MjxAdditionalCarry,
-                                traj: Optional[Trajectory] = None) -> jax.Array:
+                                traj: Optional[Trajectory] = None,
+                                skip: Tuple[str, ...] = ()) -> jax.Array:
         """
         Creates the observation for the environment.
 
@@ -321,12 +325,13 @@ class Mjx(Mujoco):
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.
             traj (Trajectory, optional): Trajectory to use.
+            skip (tuple of str, optional): Names of stateful observations to leave at zero.
 
         Returns:
             jax.Array: The observation of the environment.
 
         """
-        return self._create_observation_compat(model, data, carry, jnp, traj)
+        return self._create_observation_compat(model, data, carry, jnp, traj, skip)
 
     def _mjx_reset_info_dictionary(self, obs: jnp.ndarray,
                                    data: Data,

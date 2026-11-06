@@ -921,6 +921,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         exp = config.experiment
         term_group = getattr(exp, "termination_obs_group", None)
         term_obs_ind = _obs_ind(env, term_group, "termination_obs_group")
+        if not bool(getattr(exp, "wm_term_head", True)):  # the buffer then keeps one unused column
+            term_obs_ind = jnp.zeros(1, dtype=jnp.int32)
         obs_dim = int(env.info.observation_space.shape[0])
         with open_dict(config.experiment):
             exp.obs_dim = obs_dim
@@ -1096,6 +1098,9 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         err_floor = jnp.concatenate([jnp.full((n,), f) for f, n in zip(
             WM_ERR_FLOOR[0] + WM_ERR_FLOOR[1], (3, 3, 3, 3, int(exp.n_joints), int(exp.n_joints)))])
 
+        # without the head, the terminal state handler must provide a smooth termination for imagination
+        term_head = bool(getattr(exp, "wm_term_head", True))
+
         def wm_loss_fn(params, batch, mask, norm):
             xi_n = xi_norm(batch["xi"])
 
@@ -1108,14 +1113,17 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                     e = e * spec.err_scale / jnp.maximum(norm["error"].std(), err_floor)
                 return (qpos, qvel), jnp.sum(e * e, axis=-1)
 
-            _, sq = jax.lax.scan(step, (batch["qpos"][0], batch["qvel"][0]), jnp.arange(window))  # (k, n)
+            _, sq = jax.lax.scan(step, (batch["qpos"][0], batch["qvel"][0]), jnp.arange(window),  # (k, n)
+                                 unroll=window if bool(getattr(exp, "wm_unroll", False)) else 1)
             w = mask.astype(jnp.float32)
             w_sum = jnp.maximum(jnp.sum(w), 1.0)
             state_loss = jnp.sum(jnp.mean(sq, axis=0) * w) / w_sum
-            logits = wm_termination(params, batch["next_term_obs"])  # (k, n)
-            bce = optax.sigmoid_binary_cross_entropy(logits, batch["absorbing"])
-            term_loss = jnp.sum(jnp.mean(bce, axis=0) * w) / w_sum
-            acc = jnp.sum(jnp.mean((logits > 0) == (batch["absorbing"] > 0.5), axis=0) * w) / w_sum
+            term_loss, acc = jnp.zeros(()), jnp.zeros(())
+            if term_head:
+                logits = wm_termination(params, batch["next_term_obs"])  # (k, n)
+                bce = optax.sigmoid_binary_cross_entropy(logits, batch["absorbing"])
+                term_loss = jnp.sum(jnp.mean(bce, axis=0) * w) / w_sum
+                acc = jnp.sum(jnp.mean((logits > 0) == (batch["absorbing"] > 0.5), axis=0) * w) / w_sum
             # mean normalised squared error per dimension, at each step of the window
             nse = jnp.sum(sq * w[None], axis=1) / w_sum / spec.delta_dim
             loss = state_loss + float(exp.wm_term_loss_weight) * term_loss
@@ -1140,19 +1148,29 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         # needs observations and rewards that only read the fields FlatKinematics updates
         flat_kin = FlatKinematics(env._model) if bool(getattr(exp, "flat_kinematics", False)) else None
 
+        def imag_kinematics(sys, data):
+            if flat_kin is not None:
+                return flat_kin(data)
+            sys = kin_sys if use_warp else sys
+            return mjx.com_vel(sys, mjx.com_pos(sys, mjx.kinematics(sys, data)))
+
+        # imag_lean: the rollout computes only what the policy reads, and the critic inputs come afterwards.
+        # Needs a smooth termination, and rewards that do not read the previous observation.
+        lean = bool(getattr(exp, "imag_lean", False))
+        assert not lean or (analytic_only_truncates and agent_conf.history_ind is not None)
+        goal_ind, net_actor = agent_conf.goal_ind, agent_conf.actor_net
+        skip_obs = ()
+        if lean:
+            read = set(np.asarray(goal_ind).tolist()) | set(np.asarray(agent_conf.history_ind).tolist())
+            skip_obs = tuple(o.name for o in env.obs_container.list_all_stateful()
+                             if not read & set(np.asarray(o.obs_ind).tolist()))
+
         def imag_env_step(state, action, wm_params):
             def physics(sys, data, carry, a):
-                sys = kin_sys if use_warp else sys
                 delta = wm_dynamics(wm_params, spec.features(data.qpos, data.qvel), a, xi_norm(xi_of(carry)))
                 qpos, qvel = spec.integrate(data.qpos, data.qvel, delta)
-                data = data.replace(qpos=qpos, qvel=qvel)
-                if flat_kin is not None:
-                    return flat_kin(data), carry
-                data = mjx.kinematics(sys, data)
-                data = mjx.com_pos(sys, data)
-                data = mjx.com_vel(sys, data)
-                return data, carry
-            return env.mjx_step(state, action, traj, auto_reset=False, physics_fn=physics)
+                return imag_kinematics(sys, data.replace(qpos=qpos, qvel=qvel)), carry
+            return env.mjx_step(state, action, traj, auto_reset=False, physics_fn=physics, skip_obs=skip_obs)
 
         v_imag_env_step = jax.vmap(imag_env_step, in_axes=(0, 0, None))
         v_absorbing_prob = jax.vmap(lambda s: env._mjx_absorbing_prob(s.observation, s.info, s.data,
@@ -1165,6 +1183,58 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             ts = st.additional_carry.traj_state
             points = traj.data.split_points
             return ts.subtraj_step_no + horizon < points[ts.traj_no + 1] - points[ts.traj_no]
+
+        def critic_inputs(qpos, qvel, carry):
+            """The critic's observation columns of a batch of imagined states, without observation noise."""
+            def one(qp, qv, c):
+                data = imag_kinematics(env.sys, first_data.replace(qpos=qp, qvel=qv))
+                return env._mjx_create_observation(kin_sys if use_warp else env.sys, data, c, traj)[0]
+            return critic_obs(jax.vmap(one)(qpos, qvel, carry))
+
+        def imagine_lean(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
+            """``imagine`` for imag_lean: the critic inputs of the rollout are left to ``with_critic_inputs``."""
+            n = start.qpos.shape[0]
+            carry0 = start.carry.replace(key=jax.random.split(rng, n),
+                                         cur_step_in_episode=jnp.ones_like(start.carry.cur_step_in_episode))
+            data_template = jax.vmap(lambda qp, qv: first_data.replace(qpos=qp, qvel=qv))(start.qpos, start.qvel)
+            no_obs = jnp.zeros_like(start.observation)
+
+            def step(c, _):
+                qpos, qvel, goal, history, info, carry, surv = c
+                hist = actor_norm(history, agent_conf.history_ind)
+                a = net_actor.apply({"params": actor_params}, actor_norm(goal, goal_ind),
+                                    hist.reshape(hist.shape[:-2] + (-1,)))
+                ns = v_imag_env_step(MjxState(data=data_template.replace(qpos=qpos, qvel=qvel), observation=no_obs,
+                                              reward=jnp.zeros(n), absorbing=jnp.zeros(n, dtype=bool),
+                                              done=jnp.zeros(n, dtype=bool), info=info, additional_carry=carry),
+                                     a, wm_params)
+                d_hat = v_absorbing_prob(ns)
+                out = dict(reward=ns.reward, surv=surv, d_hat=d_hat, action_norm=jnp.linalg.norm(a, axis=-1),
+                           state=jax.lax.stop_gradient((ns.data.qpos, ns.data.qvel, ns.additional_carry)))
+                return (ns.data.qpos, ns.data.qvel, take_columns(ns.observation, goal_ind),
+                        push_history(history, ns.observation), ns.info, ns.additional_carry,
+                        surv * (1.0 - d_hat)), out
+
+            if remat:
+                step = jax.checkpoint(step, policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable
+                                      if remat_keep_dots else None)
+            ones = jnp.ones(n)
+            c0 = (start.qpos, start.qvel, take_columns(start.observation, goal_ind), start.history, start.info,
+                  carry0, ones)
+            cH, ro = jax.lax.scan(step, c0, None, horizon)
+            xi_H = jax.vmap(xi_of)(cH[5])
+            obs_H = critic_inputs(cH[0], cH[1], cH[5])
+            v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
+            ro.update(alive=jnp.ones_like(ro["surv"]), done=jnp.zeros_like(ro["surv"]),
+                      start=jax.lax.stop_gradient((start.qpos, start.qvel, carry0)))
+            return ro, (obs_H, xi_H, cH[6], ones, v_H)
+
+        def with_critic_inputs(ro):
+            """Adds the critic inputs of steps 0 .. H-1 to a rollout of ``imagine_lean``."""
+            ro = dict(ro)
+            start, states = ro.pop("start"), ro.pop("state")
+            qpos, qvel, carry = jax.tree.map(lambda s, x: jnp.concatenate([s[None], x[:-1]]), start, states)
+            return dict(ro, obs=jax.vmap(critic_inputs)(qpos, qvel, carry), xi=jax.vmap(jax.vmap(xi_of))(carry))
 
         def imagine(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
             """H-step rollout; returns per-step tensors (H, B) and the critic inputs (H+1, B, .)."""
@@ -1185,6 +1255,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 ns = v_imag_env_step(make_state(qpos, qvel, obs, info, carry), a, wm_params)
                 d_hat = v_absorbing_prob(ns)
                 if d_hat is None:  # the handler has no smooth version
+                    assert term_head
                     d_hat = jax.nn.sigmoid(wm_termination(wm_params[0], term_obs(ns.observation)))
                 # with a smooth termination the survival weight already covers the absorbing states
                 ended = ns.done if analytic_only_truncates is False else ns.done & ~ns.absorbing
@@ -1211,8 +1282,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             return ro, (obs_H, xi_H, surv_H, alive_H, v_H)
 
         def actor_loss_fn(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
-            ro, (obs_H, xi_H, surv_H, alive_H, v_H) = imagine(actor_params, wm_params, critic_params, start, rng,
-                                                              actor_norm, critic_norm)
+            ro, (obs_H, xi_H, surv_H, alive_H, v_H) = (imagine_lean if lean else imagine)(
+                actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm)
             disc = gamma ** jnp.arange(horizon)
             J = jnp.sum(disc[:, None] * ro["surv"] * ro["alive"] * ro["reward"], axis=0)
             J = J + gamma ** horizon * surv_H * alive_H * v_H
@@ -1267,10 +1338,13 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             actor_state = actor_state.replace(params=jax.tree.map(lambda o, n: o + mult * (n - o), old_params,
                                                                   actor_state.params))
             ro = jax.lax.stop_gradient(ro)
+            if lean:
+                ro = with_critic_inputs(ro)
             if critic_norm is not None:
                 critic_norm = critic_norm.update(ro["obs"])
-            critic_state, critic_loss = critic_update(critic_state, ro, jax.lax.stop_gradient(obs_H),
-                                                      jax.lax.stop_gradient(xi_H), alive_H, rng_c, critic_norm)
+            with jax.named_scope("critic_update"):
+                critic_state, critic_loss = critic_update(critic_state, ro, jax.lax.stop_gradient(obs_H),
+                                                          jax.lax.stop_gradient(xi_H), alive_H, rng_c, critic_norm)
             m = dict(imag_return=jnp.mean(jnp.sum(ro["surv"] * ro["alive"] * ro["reward"], axis=0)),
                      imag_survival=jnp.mean(ro["surv"][-1]), imag_alive=jnp.mean(ro["alive"][-1]),
                      critic_loss=critic_loss, actor_grad_norm=optax.global_norm(g),
@@ -1280,13 +1354,15 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         def one_update(_, c):
             agent_state, rng, _ = c
             rng, rng_w, rng_p = jax.random.split(rng, 3)
-            wm_state, m_wm = wm_update(agent_state.wm_state, agent_state.window_buffer, rng_w, agent_state.wm_norm)
+            with jax.named_scope("wm_update"):
+                wm_state, m_wm = wm_update(agent_state.wm_state, agent_state.window_buffer, rng_w, agent_state.wm_norm)
             decay_at = agent_state.lr_decay_start
             ramp = jnp.where(decay_at >= 0, jnp.clip((agent_state.num_updates - decay_at) / lr_decay_len, 0.0, 1.0), 0.0)
-            actor_state, critic_state, critic_norm, m_pi = policy_update(
-                agent_state.actor_state, agent_state.critic_state, (wm_state.params, agent_state.wm_norm),
-                agent_state.start_buffer, rng_p,
-                lr_mult + (1.0 - lr_mult) * ramp, agent_state.actor_norm, agent_state.critic_norm)
+            with jax.named_scope("policy_update"):
+                actor_state, critic_state, critic_norm, m_pi = policy_update(
+                    agent_state.actor_state, agent_state.critic_state, (wm_state.params, agent_state.wm_norm),
+                    agent_state.start_buffer, rng_p,
+                    lr_mult + (1.0 - lr_mult) * ramp, agent_state.actor_norm, agent_state.critic_norm)
             if policy_ema > 0:
                 agent_state = agent_state.replace(actor_ema=jax.tree.map(
                     lambda e, p: policy_ema * e + (1.0 - policy_ema) * p, agent_state.actor_ema, actor_state.params))
@@ -1318,10 +1394,11 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 carry = st.additional_carry
                 st = st.replace(additional_carry=carry.replace(traj_state=carry.traj_state.replace(
                     next_traj_no=next_clip, next_subtraj_step_no=next_frame)))
-            nstate, reset_state = v_env_step(st, action)
+            with jax.named_scope("real_step"):
+                nstate, reset_state = v_env_step(st, action)
             next_obs_t = term_obs(nstate.observation)
             transition_ok = (start_ok & state_is_valid(nstate.data.qpos, nstate.data.qvel, max_abs_qvel)
-                             & jnp.all(jnp.isfinite(action), axis=-1) & jnp.all(jnp.isfinite(next_obs_t), axis=-1))
+                             & jnp.all(jnp.isfinite(action), axis=-1) & jnp.all(jnp.isfinite(nstate.observation), axis=-1))
             window_buffer = agent_state.window_buffer.add(
                 transition_ok,
                 qpos=st.data.qpos, qvel=st.data.qvel, next_qpos=nstate.data.qpos, next_qvel=nstate.data.qvel,
