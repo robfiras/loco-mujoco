@@ -75,7 +75,7 @@ zeros = jnp.zeros(len(names))
 history0 = None if history_ind is None else jnp.repeat(
     env_state.observation[:, None, history_ind], int(exp.history_len), axis=1)
 c = (env_state, history0, zeros, zeros.astype(int), jnp.ones(len(names), dtype=bool), jnp.zeros(len(names), dtype=bool))
-while bool(c[3].any()):
+while bool(c[4].any()):
     c = rollout(c)
 _, _, ret, steps, _, failed = jax.tree.map(np.asarray, c)
 norm = ret / (np.asarray(n_steps) * max_step_reward)
