@@ -978,6 +978,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         max_abs_qvel = float(getattr(exp, "max_abs_qvel", 100.0))
         remat = bool(getattr(exp, "remat", True))
         remat_keep_dots = bool(getattr(exp, "remat_keep_dots", False))
+        actor_loss_sum = bool(getattr(exp, "actor_loss_sum", False))
         analytic_only_truncates = bool(getattr(exp, "imag_soft_termination_only", False))
         policy_ema = float(getattr(exp, "policy_ema", 0.0))
         start_stride = int(getattr(exp, "start_buffer_stride", 1))
@@ -1167,7 +1168,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             disc = gamma ** jnp.arange(horizon)
             J = jnp.sum(disc[:, None] * ro["surv"] * ro["alive"] * ro["reward"], axis=0)
             J = J + gamma ** horizon * surv_H * alive_H * v_H
-            loss = -jnp.mean(J) / horizon
+            loss = -jnp.mean(J) / (1.0 if actor_loss_sum else horizon)
             return loss, (ro, obs_H, xi_H, alive_H)
 
         def critic_update(critic_state, ro, obs_H, xi_H, alive_H, rng, norm):

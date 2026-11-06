@@ -113,3 +113,40 @@ class RootOriRelTraj(_FreeRootGoal):
         ref = traj.data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
         R, R_ref = _quat_to_mat(data.qpos[3:7], backend), _quat_to_mat(ref.qpos[3:7], backend)
         return _rot6d(R.T @ R_ref, backend), carry
+
+
+class TrackingError(_FreeRootGoal):
+    """
+    Robot-to-reference errors for a critic: joint positions, body positions with the reference moved to the robot's
+    xy and heading, in the robot's heading frame, and the root position in the same frame.
+
+    Args:
+        body_names (list): Tracked bodies. Defaults to the env's ``tracked_body_names``.
+
+    """
+
+    def __init__(self, body_names=None, **kwargs):
+        super().__init__(**kwargs)
+        self._body_names = body_names
+        self._body_ids = None
+
+    def _obs_dim(self, model):
+        return model.nv - 6 + 3 * len(self._body_ids) + 3
+
+    def _init_from_mj(self, env, model, data, current_obs_size):
+        names = self._body_names or env._get_all_info_properties()["tracked_body_names"]
+        self._body_ids = np.array([mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, n) for n in names])
+        super()._init_from_mj(env, model, data, current_obs_size)
+
+    def get_obs_and_update_state(self, env: Any, model: Any, data: Any, carry: Any, backend: ModuleType,
+                                 traj: Any = None):
+        ref = traj.data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
+        p, p_ref = data.qpos[:3], ref.qpos[:3]
+        R, R_ref = _quat_to_mat(data.qpos[3:7], backend), _quat_to_mat(ref.qpos[3:7], backend)
+        heading_inv = _heading_mat(R, backend).T
+        yaw = _heading_mat(R @ R_ref.T, backend)
+        anchor = backend.concatenate([p[:2], p_ref[2:3]])
+        ref_bodies = anchor + (ref.xpos[self._body_ids] - p_ref) @ yaw.T
+        body_error = (ref_bodies - data.xpos[self._body_ids]) @ heading_inv.T
+        return backend.concatenate([ref.qpos[7:] - data.qpos[7:], backend.ravel(body_error),
+                                    heading_inv @ (p_ref - p)]), carry
