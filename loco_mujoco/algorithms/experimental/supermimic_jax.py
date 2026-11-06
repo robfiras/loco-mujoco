@@ -504,8 +504,10 @@ class StartBuffer:
                             ptr=(self.ptr + step) % length, count=jnp.minimum(self.count + step, length))
 
     def sample(self, rng, n):
-        logits = jnp.where(self.valid.reshape(-1), 0.0, -jnp.inf)
-        idx = jax.random.categorical(rng, logits, shape=(n,))
+        # uniform over the valid entries; categorical would draw n noise values per buffer entry
+        rank = jnp.cumsum(self.valid.reshape(-1))
+        idx = jnp.searchsorted(rank, jax.random.randint(rng, (n,), 0, jnp.maximum(rank[-1], 1)), side="right")
+        idx = jnp.minimum(idx, rank.shape[0] - 1)
         n_envs = self.valid.shape[1]
         return jax.tree.map(lambda x: x[idx // n_envs, idx % n_envs], self.states)
 
