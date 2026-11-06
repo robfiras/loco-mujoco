@@ -33,7 +33,7 @@ with open_dict(exp):
 env, traj = TaskFactory.get_factory_cls(exp.task_factory.name).make(**exp.env_params, **exp.task_factory.params)
 names = list(exp.task_factory.params.lafan1_dataset_conf.dataset_name)
 agent_conf, state = SuperMimicJax.load_agent(run / ckpt)
-params, net = state.deployed_params, agent_conf.actor_net
+params, policy, history_ind = state.deployed_params, SuperMimicJax.policy_fn(agent_conf), agent_conf.history_ind
 
 rp = exp.env_params.reward_params
 max_step_reward = float(rp.w_root_pos + rp.w_root_ori + rp.w_body_pos + rp.w_body_ori + rp.w_body_lin_vel
@@ -49,31 +49,35 @@ def reset(key, clip):
     return env.mjx_reset(key, traj)
 
 
-state = jax.vmap(reset, axis_name="vecenv")(jax.random.split(jax.random.PRNGKey(0), len(names)), jnp.arange(len(names)))
-ts = state.additional_carry.traj_state
+env_state = jax.vmap(reset, axis_name="vecenv")(jax.random.split(jax.random.PRNGKey(0), len(names)), jnp.arange(len(names)))
+ts = env_state.additional_carry.traj_state
 assert np.array_equal(np.asarray(ts.traj_no), np.arange(len(names))) and not np.asarray(ts.subtraj_step_no).any()
 ref_q = jax.vmap(lambda c: traj.data.get(c, 0, jnp).qpos[7:])(jnp.arange(len(names)))
-assert float(jnp.max(jnp.abs(state.data.qpos[:, 7:] - ref_q))) < 1e-4
+assert float(jnp.max(jnp.abs(env_state.data.qpos[:, 7:] - ref_q))) < 1e-4
 vstep = jax.vmap(lambda s, a: env.mjx_step(s, a, traj, auto_reset=False), axis_name="vecenv")
 
 
 @jax.jit
 def rollout(c):
     def step(c, _):
-        s, ret, steps, alive, failed = c
-        n = vstep(s, net.apply({"params": params}, s.observation))
+        s, history, ret, steps, alive, failed = c
+        n = vstep(s, policy(params, state.actor_norm, s.observation, history))
+        if history is not None:
+            history = jnp.concatenate([history[:, 1:], n.observation[:, None, history_ind]], axis=1)
         ret = ret + jnp.where(alive, n.reward, 0.0)
         steps = steps + alive
         failed = failed | (alive & n.absorbing)
-        return (n, ret, steps, alive & ~n.absorbing & (steps < n_steps), failed), None
+        return (n, history, ret, steps, alive & ~n.absorbing & (steps < n_steps), failed), None
     return jax.lax.scan(step, c, None, 500)[0]
 
 
 zeros = jnp.zeros(len(names))
-c = (state, zeros, zeros.astype(int), jnp.ones(len(names), dtype=bool), jnp.zeros(len(names), dtype=bool))
+history0 = None if history_ind is None else jnp.repeat(
+    env_state.observation[:, None, history_ind], int(exp.history_len), axis=1)
+c = (env_state, history0, zeros, zeros.astype(int), jnp.ones(len(names), dtype=bool), jnp.zeros(len(names), dtype=bool))
 while bool(c[3].any()):
     c = rollout(c)
-_, ret, steps, _, failed = jax.tree.map(np.asarray, c)
+_, _, ret, steps, _, failed = jax.tree.map(np.asarray, c)
 norm = ret / (np.asarray(n_steps) * max_step_reward)
 per_clip = {n: dict(norm_return=round(float(r), 4), steps=int(s), of=int(t), failed=bool(f))
             for n, r, s, t, f in zip(names, norm, steps, np.asarray(n_steps), failed)}
