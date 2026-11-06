@@ -1156,11 +1156,20 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         v_absorbing_prob = jax.vmap(lambda s: env._mjx_absorbing_prob(s.observation, s.info, s.data,
                                                                       s.additional_carry, traj))
 
+        def has_horizon_left(st):
+            """Whether a full imagined rollout fits before the end of the clip."""
+            if traj is None:
+                return jnp.ones(st.done.shape, dtype=bool)
+            ts = st.additional_carry.traj_state
+            points = traj.data.split_points
+            return ts.subtraj_step_no + horizon < points[ts.traj_no + 1] - points[ts.traj_no]
+
         def imagine(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
             """H-step rollout; returns per-step tensors (H, B) and the critic inputs (H+1, B, .)."""
             keys = jax.random.split(rng, start.qpos.shape[0])
             # fresh keys, so replayed start states do not repeat the env's noise samples
-            carry0 = start.carry.replace(key=keys)
+            # and the episode time limit is not part of the imagined MDP: the critic cannot see it
+            carry0 = start.carry.replace(key=keys, cur_step_in_episode=jnp.ones_like(start.carry.cur_step_in_episode))
             data_template = jax.vmap(lambda qp, qv: first_data.replace(qpos=qp, qvel=qv))(start.qpos, start.qvel)
 
             def make_state(qpos, qvel, obs, info, carry):
@@ -1298,7 +1307,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             action = action + action_noise * jax.random.normal(rng_a, action.shape)
             start_ok = state_is_valid(st.data.qpos, st.data.qvel, max_abs_qvel) & \
                 jnp.all(jnp.isfinite(st.observation), axis=-1)
-            start_buffer = agent_state.start_buffer.add(st, start_ok, (it + 1) % start_stride == 0, history)
+            start_buffer = agent_state.start_buffer.add(st, start_ok & has_horizon_left(st),
+                                                        (it + 1) % start_stride == 0, history)
             next_bin = None
             if use_bin_resets:
                 rng, rng_b = jax.random.split(rng)
