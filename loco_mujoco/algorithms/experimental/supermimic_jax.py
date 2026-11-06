@@ -60,6 +60,7 @@ from loco_mujoco.algorithms.common.networks import get_activation_fn
 from loco_mujoco.algorithms.experimental.td3_jax import TD3ActorNet
 from loco_mujoco.core import MjxState
 from loco_mujoco.core.domain_randomizer import NoDomainRandomization
+from loco_mujoco.core.utils.flat_kinematics import FlatKinematics
 from loco_mujoco.core.utils.math import take_columns
 from loco_mujoco.core.wrappers import SummaryMetrics
 from loco_mujoco.core.wrappers.mjx import BaseWrapper, VECENV_AXIS_NAME
@@ -1134,12 +1135,17 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         kin_sys = mjx.put_model(env._model, impl="jax") if use_warp else None
         first_data = mjx.make_data(env._model, impl="jax") if use_warp else env._first_data
 
+        # needs observations and rewards that only read the fields FlatKinematics updates
+        flat_kin = FlatKinematics(env._model) if bool(getattr(exp, "flat_kinematics", False)) else None
+
         def imag_env_step(state, action, wm_params):
             def physics(sys, data, carry, a):
                 sys = kin_sys if use_warp else sys
                 delta = wm_dynamics(wm_params, spec.features(data.qpos, data.qvel), a, xi_norm(xi_of(carry)))
                 qpos, qvel = spec.integrate(data.qpos, data.qvel, delta)
                 data = data.replace(qpos=qpos, qvel=qvel)
+                if flat_kin is not None:
+                    return flat_kin(data), carry
                 data = mjx.kinematics(sys, data)
                 data = mjx.com_pos(sys, data)
                 data = mjx.com_vel(sys, data)

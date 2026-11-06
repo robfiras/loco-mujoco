@@ -457,3 +457,30 @@ def test_take_columns_gradient():
     np.testing.assert_array_equal(take_columns(x, ind), x[:, ind])
     np.testing.assert_array_equal(jax.grad(lambda y: jnp.sum(take_columns(y, ind) * w))(x),
                                   jax.grad(lambda y: jnp.sum(y[:, ind] * w))(x))
+
+
+def test_flat_kinematics_matches_mjx():
+    from mujoco import mjx
+    from loco_mujoco.core.utils.flat_kinematics import FlatKinematics
+
+    xml = """
+    <mujoco><worldbody><body name="root" pos="0 0 1"><freejoint/><geom size=".1" mass="3"/>
+      <site name="s0" pos=".1 0 .2" quat="1 1 0 0"/>
+      <body name="a" pos=".2 .1 0" quat=".9 .1 .2 .3"><joint type="hinge" axis="0 1 0" pos="0 0 .05"/><geom size=".1" mass="2" pos=".1 0 0"/>
+        <body name="fixed" pos="0 .2 0" quat=".8 0 .6 0"><geom size=".05" mass="1"/>
+          <body name="b" pos=".1 0 0"><joint type="hinge" axis="1 0 0" ref=".3"/><geom size=".1" mass="1"/>
+            <site name="s1" pos="0 .1 0"/></body></body></body>
+      <body name="c" pos="-.2 0 0"><joint type="hinge" axis="0 0 1"/><geom size=".1" mass="1.5"/></body>
+    </body></worldbody></mujoco>"""
+    model = mujoco.MjModel.from_xml_string(xml)
+    sys = mjx.put_model(model, impl="jax")
+    rng = np.random.default_rng(0)
+    quat = rng.normal(size=4)
+    data = mjx.make_data(model, impl="jax").replace(
+        qpos=jnp.array(np.concatenate([rng.normal(size=3), quat / np.linalg.norm(quat), rng.normal(size=3)])),
+        qvel=jnp.array(rng.normal(size=model.nv)))
+    ref = mjx.com_vel(sys, mjx.com_pos(sys, mjx.kinematics(sys, data)))
+    out = FlatKinematics(model)(data)
+    for name in ("xpos", "xquat", "xmat", "site_xpos", "site_xmat", "cvel"):
+        np.testing.assert_allclose(getattr(out, name), getattr(ref, name), atol=2e-5, err_msg=name)
+    np.testing.assert_allclose(out.subtree_com[1], ref.subtree_com[1], atol=2e-5)
