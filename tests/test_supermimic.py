@@ -418,3 +418,31 @@ def test_SuperMimic_train_save_load(supermimic_config, domain_randomization, tmp
     assert _params_allclose(trained.critic_state.params, loaded.critic_state.params)
     assert _params_allclose(trained.wm_state.params, loaded.wm_state.params)
     np.testing.assert_allclose(np.asarray(trained.xi_std), np.asarray(loaded.xi_std))
+
+
+def test_traj_future_frames_matches_frame_by_frame():
+    from types import SimpleNamespace
+    from loco_mujoco.core.observations.goals_future import TrajFutureFrames, _heading_mat, _quat_to_mat, _rot6d
+
+    rng = np.random.default_rng(0)
+    n_future, nj, T = 4, 3, 12
+    quat = rng.normal(size=(T, 4))
+    quat /= np.linalg.norm(quat, axis=1, keepdims=True)
+    qpos = np.concatenate([rng.normal(size=(T, 3)), quat, rng.normal(size=(T, nj))], axis=1)
+    qvel = rng.normal(size=(T, 6 + nj))
+    obs = TrajFutureFrames(n_future=n_future, joint_vel_scale=0.1)
+    obs._dim = n_future * (15 + 2 * nj)
+    td = SimpleNamespace(qpos=qpos, qvel=qvel, split_points=np.array([0, 5, T]))
+    step = 4  # two frames before the end of the second clip, so the last frames repeat
+    carry = SimpleNamespace(traj_state=SimpleNamespace(traj_no=1, subtraj_step_no=step))
+    out, _ = obs.get_obs_and_update_state(None, None, None, carry, np, SimpleNamespace(data=td))
+
+    ref = 5 + step
+    heading_inv = _heading_mat(_quat_to_mat(qpos[ref, 3:7], np), np).T
+    expected = []
+    for k in range(1, n_future + 1):
+        f = min(ref + k, T - 1)
+        R = _quat_to_mat(qpos[f, 3:7], np)
+        expected += [heading_inv @ (qpos[f, :3] - qpos[ref, :3]), _rot6d(heading_inv @ R, np), R.T @ qvel[f, :3],
+                     qvel[f, 3:6], qpos[f, 7:], 0.1 * qvel[f, 6:]]
+    np.testing.assert_allclose(out, np.concatenate(expected), rtol=1e-6, atol=1e-6)

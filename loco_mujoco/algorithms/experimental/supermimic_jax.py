@@ -946,7 +946,9 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             actor_ema=jax.tree.map(jnp.copy, actor_params) if float(getattr(exp, "policy_ema", 0.0)) > 0 else None,
             lr_decay_start=jnp.array(-1, dtype=jnp.int32),
             actor_norm=RunningNorm.create(obs_dim) if bool(getattr(exp, "obs_norm", False)) else None,
-            critic_norm=RunningNorm.create(obs_dim) if bool(getattr(exp, "obs_norm", False)) else None,
+            critic_norm=RunningNorm.create(obs_dim if agent_conf.critic_net.obs_ind is None
+                                           else agent_conf.critic_net.obs_ind.size)
+            if bool(getattr(exp, "obs_norm", False)) else None,
             wm_norm=dict(input=RunningNorm.create(feat_dim + action_dim + xi_dim),
                          output=RunningNorm.create(feat_dim - 1), error=RunningNorm.create(feat_dim - 1))
             if bool(getattr(exp, "wm_running_norm", False)) else None)
@@ -1008,8 +1010,12 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         def fresh_history(obs):
             return None if history_ind is None else jnp.repeat(obs[:, None, history_ind], history_len, axis=1)
 
+        # The stored rollouts hold the critic's columns only, which it reads several times per update.
+        critic_ind, critic_core = critic_net.obs_ind, critic_net.clone(obs_ind=None)
+        critic_obs = (lambda o: o) if critic_ind is None else (lambda o: o[..., critic_ind])  # noqa: E731
+
         def critic_apply(params, obs, xi_n, norm):
-            return critic_net.apply({"params": params}, obs if norm is None else norm(obs), xi_n)
+            return critic_core.apply({"params": params}, obs if norm is None else norm(obs), xi_n)
 
         def wm_dynamics(wm, feat, action, xi_n):
             params, norm = wm
@@ -1144,7 +1150,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 done = jax.lax.stop_gradient(ended.astype(jnp.float32))
                 out = dict(reward=ns.reward, surv=surv, alive=alive, d_hat=d_hat, done=done,
                            action_norm=jnp.linalg.norm(a, axis=-1),
-                           obs=obs, xi=jax.vmap(xi_of)(carry))
+                           obs=critic_obs(obs), xi=jax.vmap(xi_of)(carry))
                 nc = (ns.data.qpos, ns.data.qvel, ns.observation, push_history(history, ns.observation), ns.info,
                       ns.additional_carry,
                       surv * (1.0 - d_hat), alive * (1.0 - done))
@@ -1159,6 +1165,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             cH, ro = jax.lax.scan(step, c0, None, horizon)
             obs_H, carry_H, surv_H, alive_H = cH[2], cH[5], cH[6], cH[7]
             xi_H = jax.vmap(xi_of)(carry_H)
+            obs_H = critic_obs(obs_H)
             v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
             return ro, (obs_H, xi_H, surv_H, alive_H, v_H)
 
@@ -1173,8 +1180,9 @@ class SuperMimicJax(JaxRLAlgorithmBase):
 
         def critic_update(critic_state, ro, obs_H, xi_H, alive_H, rng, norm):
             obs_all = jnp.concatenate([ro["obs"], obs_H[None]], axis=0)  # (H+1, B, O)
+            obs_all = (obs_all if norm is None else norm(obs_all)).astype(critic_net.compute_dtype)
             xi_all = xi_norm(jnp.concatenate([ro["xi"], xi_H[None]], axis=0))
-            values = critic_apply(critic_state.params, obs_all, xi_all, norm)  # (H+1, B)
+            values = critic_apply(critic_state.params, obs_all, xi_all, None)  # (H+1, B)
             cont = (1.0 - ro["d_hat"]) * (1.0 - ro["done"])  # continuation into s_{t+1}
 
             def back(R, t):
@@ -1192,7 +1200,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             mb = n // critic_mb
 
             def loss_fn(params, idx):
-                err = critic_apply(params, X_obs[idx], X_xi[idx], norm) - Y[idx]
+                err = critic_apply(params, X_obs[idx], X_xi[idx], None) - Y[idx]
                 return jnp.sum(W[idx] * err ** 2) / jnp.maximum(jnp.sum(W[idx]), 1.0)
 
             def epoch(st, r):

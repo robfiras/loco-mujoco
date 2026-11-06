@@ -90,16 +90,20 @@ class TrajFutureFrames(_FreeRootGoal):
     def get_obs_and_update_state(self, env: Any, model: Any, data: Any, carry: Any, backend: ModuleType,
                                  traj: Any = None):
         ts, td = carry.traj_state, traj.data
-        ref = td.get(ts.traj_no, ts.subtraj_step_no, backend)
-        heading_inv = _heading_mat(_quat_to_mat(ref.qpos[3:7], backend), backend).T
-        last = td.split_points[ts.traj_no + 1] - td.split_points[ts.traj_no] - 1
-        blocks = []
-        for k in range(1, self._n_future + 1):
-            fut = td.get(ts.traj_no, backend.minimum(ts.subtraj_step_no + k, last), backend)
-            R = _quat_to_mat(fut.qpos[3:7], backend)
-            blocks += [heading_inv @ (fut.qpos[:3] - ref.qpos[:3]), _rot6d(heading_inv @ R, backend),
-                       R.T @ fut.qvel[:3], fut.qvel[3:6], fut.qpos[7:], self._joint_vel_scale * fut.qvel[6:]]
-        return backend.concatenate(blocks), carry
+        start = td.split_points[ts.traj_no]
+        last = td.split_points[ts.traj_no + 1] - start - 1
+        # all frames in one gather, this runs in every imagined step
+        steps = backend.minimum(ts.subtraj_step_no + backend.arange(self._n_future + 1), last)
+        qpos, qvel = td.qpos[start + steps], td.qvel[start + steps]
+        ref_p, fut_p, fut_v = qpos[0, :3], qpos[1:], qvel[1:]
+        heading_inv = _heading_mat(_quat_to_mat(qpos[0, 3:7], backend), backend).T
+        R = _quat_to_mat(fut_p[:, 3:7].T, backend)  # (3, 3, K)
+        R = backend.moveaxis(R, -1, 0)
+        blocks = [(fut_p[:, :3] - ref_p) @ heading_inv.T,
+                  (heading_inv @ R)[:, :, :2].reshape(self._n_future, 6),
+                  (backend.swapaxes(R, 1, 2) @ fut_v[:, :3, None])[..., 0], fut_v[:, 3:6],
+                  fut_p[:, 7:], self._joint_vel_scale * fut_v[:, 6:]]
+        return backend.concatenate(blocks, axis=1).reshape(-1), carry
 
 
 class RootOriRelTraj(_FreeRootGoal):

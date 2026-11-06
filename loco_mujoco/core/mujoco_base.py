@@ -949,18 +949,17 @@ class Mujoco:
         stateful_obs_ind = self.obs_container.get_all_stateful_indices()
 
         # merge the non-stateful and stateful observations and bring them in the order of the observation spec
-        merged = backend.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=float)
-        mask = backend.ones(len(merged), dtype=bool)
-
         if backend == np:
+            merged = backend.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=float)
+            mask = backend.ones(len(merged), dtype=bool)
             mask[stateful_obs_ind] = False
             merged[mask] = obs_not_stateful
             merged[stateful_obs_ind] = obs_stateful
         elif backend == jnp:
-            mask = mask.at[stateful_obs_ind].set(False)
-            indices = jnp.where(mask, size=len(obs_not_stateful))[0]  # Convert boolean mask to indices
-            merged = merged.at[indices].set(obs_not_stateful)
-            merged = merged.at[stateful_obs_ind].set(obs_stateful)
+            # the order is static: one gather, instead of two scatters that also slow down the gradients
+            non_stateful_ind = np.setdiff1d(np.arange(len(obs_not_stateful) + len(stateful_obs_ind)), stateful_obs_ind)
+            order = np.argsort(np.concatenate([non_stateful_ind, stateful_obs_ind]))
+            merged = jnp.concatenate([obs_not_stateful, obs_stateful])[order]
 
         return merged, carry
 
