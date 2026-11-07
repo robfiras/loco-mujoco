@@ -538,6 +538,43 @@ class SuperMimicSummaryMetrics(SummaryMetrics):
     num_updates: int = 0
 
 
+class _Packed:
+    """Packs the leaves of a pytree into one flat array per dtype, and back.
+
+    A scan whose carry and outputs are packed writes one or two arrays per step instead of one per leaf. XLA cannot
+    put these per-step writes into CUDA graphs, so each of them is a separate kernel launch.
+    """
+
+    def __init__(self, tree):
+        leaves, self.treedef = jax.tree.flatten(tree)
+        self.shapes = [tuple(l.shape) for l in leaves]
+        self.groups, self.rest = {}, []
+        for i, l in enumerate(leaves):
+            if jax.dtypes.issubdtype(l.dtype, jax.dtypes.extended):  # typed PRNG keys cannot be concatenated
+                self.rest.append(i)
+            else:
+                self.groups.setdefault(jnp.dtype(l.dtype), []).append(i)
+
+    def pack(self, tree):
+        leaves = jax.tree.leaves(tree)
+        flat = tuple(jnp.concatenate([leaves[i].reshape(-1) for i in idx]) for idx in self.groups.values())
+        return flat, tuple(leaves[i] for i in self.rest)
+
+    def unpack(self, packed, lead=()):
+        """``lead``: the leading axes a scan stacked onto the packed arrays."""
+        flat, rest = packed
+        leaves = [None] * len(self.shapes)
+        for f, idx in zip(flat, self.groups.values()):
+            off = 0
+            for i in idx:
+                size = int(np.prod(self.shapes[i], dtype=np.int64))
+                leaves[i] = f[..., off:off + size].reshape(tuple(lead) + self.shapes[i])
+                off += size
+        for l, i in zip(rest, self.rest):
+            leaves[i] = l
+        return jax.tree.unflatten(self.treedef, leaves)
+
+
 def _tuple(x):
     return tuple(x if isinstance(x, (list, tuple, ListConfig)) else ast.literal_eval(x))
 
@@ -1016,6 +1053,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         max_abs_qvel = float(getattr(exp, "max_abs_qvel", 100.0))
         remat = bool(getattr(exp, "remat", True))
         remat_keep_dots = bool(getattr(exp, "remat_keep_dots", False))
+        # imag_pack: the imagined rollout carries and stacks one array per dtype instead of one per leaf
+        imag_pack = bool(getattr(exp, "imag_pack", False))
         actor_loss_sum = bool(getattr(exp, "actor_loss_sum", False))
         analytic_only_truncates = bool(getattr(exp, "imag_soft_termination_only", False))
         policy_ema = float(getattr(exp, "policy_ema", 0.0))
@@ -1202,6 +1241,27 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 return env._mjx_create_observation(kin_sys if use_warp else env.sys, data, c, traj)[0]
             return critic_obs(jax.vmap(one)(qpos, qvel, carry))
 
+        def imag_scan(step, c0):
+            """``horizon`` steps of ``step``, rematerialized in the backward pass if ``remat``."""
+            def wrap(f):
+                if not remat:
+                    return f
+                # keeps the network matmuls, so the backward pass only recomputes the env functions
+                return jax.checkpoint(f, policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable
+                                      if remat_keep_dots else None)
+
+            if not imag_pack:
+                return jax.lax.scan(wrap(step), c0, None, horizon)
+            c_shape, o_shape = jax.eval_shape(step, c0, None)
+            pc, po = _Packed(c_shape), _Packed(o_shape)
+
+            def packed_step(c, _):
+                c, o = step(pc.unpack(c), None)
+                return pc.pack(c), po.pack(o)
+
+            cH, ro = jax.lax.scan(wrap(packed_step), pc.pack(c0), None, horizon)
+            return pc.unpack(cH), po.unpack(ro, (horizon,))
+
         def imagine_lean(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
             """``imagine`` for imag_lean: the critic inputs of the rollout are left to ``with_critic_inputs``."""
             n = start.qpos.shape[0]
@@ -1226,13 +1286,10 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                         push_history(history, ns.observation), ns.info, ns.additional_carry,
                         surv * (1.0 - d_hat)), out
 
-            if remat:
-                step = jax.checkpoint(step, policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable
-                                      if remat_keep_dots else None)
             ones = jnp.ones(n)
             c0 = (start.qpos, start.qvel, take_columns(start.observation, goal_ind), start.history, start.info,
                   carry0, ones)
-            cH, ro = jax.lax.scan(step, c0, None, horizon)
+            cH, ro = imag_scan(step, c0)
             xi_H = jax.vmap(xi_of)(cH[5])
             obs_H = critic_inputs(cH[0], cH[1], cH[5])
             v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
@@ -1279,13 +1336,9 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                       surv * (1.0 - d_hat), alive * (1.0 - done))
                 return nc, out
 
-            if remat:
-                # keeps the network matmuls, so the backward pass only recomputes the env functions
-                step = jax.checkpoint(step, policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable
-                                      if remat_keep_dots else None)
             ones = jnp.ones(start.qpos.shape[0])
             c0 = (start.qpos, start.qvel, start.observation, start.history, start.info, carry0, ones, ones)
-            cH, ro = jax.lax.scan(step, c0, None, horizon)
+            cH, ro = imag_scan(step, c0)
             obs_H, carry_H, surv_H, alive_H = cH[2], cH[5], cH[6], cH[7]
             xi_H = jax.vmap(xi_of)(carry_H)
             obs_H = critic_obs(obs_H)

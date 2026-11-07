@@ -15,7 +15,7 @@ from loco_mujoco.algorithms.experimental import SuperMimicJax
 from loco_mujoco.core.mujoco_base import Mujoco
 from loco_mujoco.algorithms.experimental.supermimic_jax import (BinResets, WorldModelSpec, WindowBuffer, state_is_valid,
                                                                  skip_gradient_spikes, muon_labels, scale_by_muon,
-                                                                 _quat_mul, _quat_from_rotvec, _rotvec_from_quat)
+                                                                 _quat_mul, _quat_from_rotvec, _rotvec_from_quat, _Packed)
 
 from test_conf import *
 
@@ -95,6 +95,34 @@ def test_skip_gradient_spikes():
     for _ in range(300):
         updates, state = step(100.0 * ordinary, state)
     assert np.all(np.asarray(updates) != 0.0)
+
+
+def test_packed_scan_matches_plain_scan():
+    """Packing the carry and outputs of a scan changes neither its values nor its gradients."""
+    c0 = dict(x=jnp.arange(6.0).reshape(2, 3), n=jnp.array([1, 2], jnp.int32), ok=jnp.array([True, False]),
+              key=jax.random.split(jax.random.key(0), 2), empty=jnp.zeros((2, 0)), none=None)
+
+    def step(w, c):
+        x = jnp.tanh(c["x"] * w) + c["n"][:, None]
+        return dict(c, x=x, n=c["n"] + 1, ok=~c["ok"]), dict(x=x, s=jnp.sum(x, -1), n=c["n"], none=None)
+
+    def run(w, pack):
+        if not pack:
+            return jax.lax.scan(lambda c, _: step(w, c), c0, None, 4)
+        c_shape, o_shape = jax.eval_shape(lambda c: step(w, c), c0)
+        pc, po = _Packed(c_shape), _Packed(o_shape)
+        cH, ro = jax.lax.scan(lambda c, _: (lambda r: (pc.pack(r[0]), po.pack(r[1])))(step(w, pc.unpack(c))),
+                              pc.pack(c0), None, 4)
+        return pc.unpack(cH), po.unpack(ro, (4,))
+
+    for a, b in zip(jax.tree.leaves(run(0.3, False)), jax.tree.leaves(run(0.3, True))):
+        assert a.shape == b.shape and a.dtype == b.dtype
+        if jax.dtypes.issubdtype(a.dtype, jax.dtypes.extended):
+            a, b = jax.random.key_data(a), jax.random.key_data(b)
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-6)
+    loss = lambda w, pack: jnp.sum(run(w, pack)[1]["s"] ** 2)  # noqa: E731
+    np.testing.assert_allclose(jax.grad(loss)(0.3, True), jax.grad(loss)(0.3, False), rtol=1e-5)
+    assert len(_Packed(c0).pack(c0)[0]) == 3  # float, int and bool arrays; the typed keys stay separate
 
 
 def _kinematics(sys, data):
