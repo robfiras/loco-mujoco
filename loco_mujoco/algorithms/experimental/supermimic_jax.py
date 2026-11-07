@@ -984,7 +984,14 @@ class SuperMimicJax(JaxRLAlgorithmBase):
 
     # ---------- training ------------------------------------------------
     @classmethod
-    def _train_fn(cls, rng, env, agent_conf, agent_state=None, traj=None, mh=None):
+    def build_init_fn(cls, env, agent_conf):
+        """``init(rng, agent_state, traj)`` fills the run state, so that calling the train function in chunks
+        compiles it once instead of a second time for the filled state."""
+        return lambda rng_key, agent_state, traj: cls._train_fn(rng_key, env, agent_conf, agent_state, traj=traj,
+                                                                init_only=True)
+
+    @classmethod
+    def _train_fn(cls, rng, env, agent_conf, agent_state=None, traj=None, mh=None, init_only=False):
         exp = agent_conf.config.experiment
         if isinstance(env, BaseWrapper):
             env = env.unwrapped()
@@ -1088,6 +1095,10 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 ts = env_state.additional_carry.traj_state
                 agent_state = agent_state.replace(episode_stats=agent_state.episode_stats.replace(
                     start_bin=bins.bin_of(ts.traj_no, ts.subtraj_step_no)))
+        # weak types differ between the input and output state, which would force a recompile per chunk
+        strong_types = lambda tree: jax.tree.map(lambda x: jnp.asarray(x, jnp.asarray(x).dtype), tree)  # noqa: E731
+        if init_only:
+            return strong_types(agent_state)
 
         xi_mean = agent_state.xi_mean
         # Dimensions that do not vary across envs (not randomised) are mapped to 0.
@@ -1475,7 +1486,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         (agent_state, _, _), training_metrics = jax.lax.scan(logged, (agent_state, _rng, last_m0),
                                                              jnp.arange(num_outer))
         agent_state = agent_state.replace(iteration=start + num_outer * log_every)
-        return {"agent_state": agent_state, "training_metrics": training_metrics,
+        return {"agent_state": strong_types(agent_state), "training_metrics": training_metrics,
                 "validation_metrics": ValidationSummary()}
 
     @classmethod
