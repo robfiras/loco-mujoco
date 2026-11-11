@@ -13,7 +13,8 @@ class SolverConfig(NamedTuple):
     Attributes:
         iterations: Solver steps per frame, warm started from the previous frame.
         init_iterations: Solver steps on the first frame of a clip.
-        damping: Levenberg-Marquardt damping, also acts as temporal smoothing.
+        damping: Levenberg-Marquardt damping, also acts as temporal smoothing. Too little lets
+            near redundant joints, such as a many jointed spine, jump between frames.
         floor_weight: Weight of the one-sided floor penetration residual.
         floor_margin: Height above the floor below which the floor residual becomes active.
         log_rotation: Use the rotation vector as rotation error, which keeps pulling at large
@@ -23,7 +24,7 @@ class SolverConfig(NamedTuple):
     """
     iterations: int = 4
     init_iterations: int = 100
-    damping: float = 1e-2
+    damping: float = 1.0
     floor_weight: float = 50.0
     floor_margin: float = 0.0
     log_rotation: bool = True

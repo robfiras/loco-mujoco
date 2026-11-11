@@ -147,7 +147,8 @@ def test_solver_recovers_reachable_targets(model):
     q = jnp.asarray(q, jnp.float32)
     pos, rot, _ = jax.vmap(fk)(q)
 
-    solve = make_solver(fk, model.nv, -2 * np.ones(3), 2 * np.ones(3), np.ones(2), np.ones(2))
+    solve = make_solver(fk, model.nv, -2 * np.ones(3), 2 * np.ones(3), np.ones(2), np.ones(2),
+                        SolverConfig(damping=1e-2))
     start = q[0].at[7:].add(0.05)
     out = solve(start[None], pos[None], rot[None])[0]
 
