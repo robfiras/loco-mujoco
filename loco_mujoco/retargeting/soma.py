@@ -57,6 +57,18 @@ SITE_CHAIN = (
 )
 
 
+# mimic site -> SOMA joints that reach the floor with it, and the height below which they touch it
+SOMA_CONTACTS = {
+    "left_foot_mimic": (("LeftFoot", 0.11), ("LeftToeBase", 0.04)),
+    "right_foot_mimic": (("RightFoot", 0.11), ("RightToeBase", 0.04)),
+    "left_hand_mimic": (("LeftHand", 0.10),),
+    "right_hand_mimic": (("RightHand", 0.10),),
+    "left_knee_mimic": (("LeftShin", 0.12),),
+    "right_knee_mimic": (("RightShin", 0.12),),
+    "pelvis_mimic": (("Hips", 0.15),),
+}
+
+
 class Calibration(NamedTuple):
     """Mapping from SOMA joint poses to robot site targets, computed once per robot.
 
@@ -185,6 +197,168 @@ def foot_contact_points(
         bodies += [body] * 4
         points += list(sole)
     return bodies, points, float(lowest)
+
+
+def _geom_points(model: mujoco.MjModel, geom: int) -> np.ndarray:
+    """Points on the surface of a geom in the geom's frame."""
+    if model.geom_type[geom] == mujoco.mjtGeom.mjGEOM_MESH:
+        mesh = model.geom_dataid[geom]
+        first = model.mesh_vertadr[mesh]
+        return model.mesh_vert[first:first + model.mesh_vertnum[mesh]].astype(np.float64)
+    center, half = model.geom_aabb[geom, :3], model.geom_aabb[geom, 3:]
+    signs = np.array([[x, y, z] for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1) if x or y or z], float)
+    if model.geom_type[geom] != mujoco.mjtGeom.mjGEOM_BOX:
+        signs /= np.linalg.norm(signs, axis=1, keepdims=True)
+    return center + signs * half
+
+
+def body_contact_points(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    sites: Sequence[str],
+) -> Tuple[List[int], List[np.ndarray], List[List[int]]]:
+    """Find points on the visible surface of the bodies carrying the given sites.
+
+    Each body gets the extreme points of its geoms along 14 directions. Hands and feet include
+    their descendants, such as fingers and toes, held rigid in the pose of the given data.
+
+    Args:
+        model: The MuJoCo model.
+        data: Data holding a pose, with kinematics computed.
+        sites: Names of the sites.
+
+    Returns:
+        Body id of each point, position of each point in its body frame, and the indices of the
+        points of each site.
+
+    """
+    directions = np.array([[x, y, z] for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1)
+                           if abs(x) + abs(y) + abs(z) in (1, 3)], float)
+    bodies, points, groups = [], [], []
+    for site in sites:
+        body = _site_body(model, site)
+        members = {body}
+        if "hand" in site or "foot" in site:
+            for child in range(body + 1, model.nbody):
+                if model.body_parentid[child] in members:
+                    members.add(child)
+        surface = [data.geom_xpos[g] + _geom_points(model, g) @ data.geom_xmat[g].reshape(3, 3).T
+                   for g in range(model.ngeom) if model.geom_bodyid[g] in members and model.geom_group[g] < 3]
+        if not surface:
+            groups.append([])
+            continue
+        local = (np.concatenate(surface) - data.xpos[body]) @ data.xmat[body].reshape(3, 3)
+        extreme = np.unique((local @ directions.T).argmax(axis=0))
+        groups.append(list(range(len(points), len(points) + len(extreme))))
+        bodies += [body] * len(extreme)
+        points += list(local[extreme])
+    return bodies, points, groups
+
+
+def contact_joints(skeleton: BVHSkeleton, sites: Sequence[str]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Look up the SOMA joints that show when the given sites touch the floor.
+
+    Args:
+        skeleton: The SOMA skeleton.
+        sites: Names of the sites, keys of SOMA_CONTACTS.
+
+    Returns:
+        The joints (J,), their contact heights (J,) and the mask of each site's joints (G, J).
+
+    """
+    entries = [(i, name, height) for i, site in enumerate(sites) for name, height in SOMA_CONTACTS[site]]
+    joints = np.array([skeleton.index(name) for _, name, _ in entries])
+    heights = np.array([height for _, _, height in entries])
+    owner = np.array([i for i, _, _ in entries])
+    return joints, heights, owner[None, :] == np.arange(len(sites))[:, None]
+
+
+def detect_contacts(
+    joint_pos: jax.Array,
+    heights: jax.Array,
+    groups: jax.Array,
+    fps: float,
+    max_speed: float = 0.5,
+) -> jax.Array:
+    """Find the frames of a clip in which the human touches the floor.
+
+    Args:
+        joint_pos: Joint positions in the human's own size, shape (T, J, 3).
+        heights: Contact height of each joint, shape (J,).
+        groups: Mask of the joints of each body, shape (G, J).
+        fps: Frame rate of the clip.
+        max_speed: Fastest motion in m/s that still counts as resting on the floor.
+
+    Returns:
+        The contact state of each body, shape (T, G).
+
+    """
+    velocity = jnp.diff(joint_pos, axis=0, prepend=joint_pos[:1]) * fps
+    touching = (joint_pos[..., 2] < heights) & (jnp.linalg.norm(velocity, axis=-1) < max_speed)
+    contact = (touching.astype(jnp.float32) @ jnp.asarray(groups, jnp.float32).T) > 0
+    # majority of three frames, removes single frame flicker
+    padded = jnp.pad(contact.astype(jnp.int32), ((1, 1), (0, 0)), mode="edge")
+    return padded[:-2] + padded[1:-1] + padded[2:] >= 2
+
+
+def _nearest_contact(touching: jax.Array, blend: int) -> Tuple[jax.Array, jax.Array]:
+    """Nearest frame in contact of each frame, and a weight fading out with the distance to it."""
+    frames = jnp.arange(touching.shape[0])
+    far = 2 * touching.shape[0] + blend + 1
+    before = jax.lax.cummax(jnp.where(touching, frames, -far))
+    after = jax.lax.cummin(jnp.where(touching, frames, far), reverse=True)
+    nearest = jnp.where(frames - before <= after - frames, before, after)
+    weight = jnp.clip(1.0 - jnp.abs(frames - nearest) / (blend + 1), 0.0, 1.0)
+    return jnp.clip(nearest, 0, touching.shape[0] - 1), weight
+
+
+def soften_contacts(contact: jax.Array, blend: int = 8) -> jax.Array:
+    """Fade contacts in and out in the frames around them, so that they do not snap the robot.
+
+    Args:
+        contact: The contact state of each body, shape (T, G).
+        blend: Frames before and after each contact over which it fades.
+
+    Returns:
+        The contact weights, 1 during contact, shape (T, G).
+
+    """
+    return jax.vmap(lambda touching: _nearest_contact(touching, blend)[1], in_axes=1, out_axes=1)(contact)
+
+
+def hold_contacts(
+    target_pos: jax.Array,
+    contact: jax.Array,
+    site_ids: Sequence[int],
+    blend: int = 8,
+) -> jax.Array:
+    """Hold the horizontal targets of bodies in contact at their mean over each contact.
+
+    Args:
+        target_pos: Target site positions of a clip, shape (T, S, 3).
+        contact: The contact state of each body, shape (T, G).
+        site_ids: Site of each body, shape (G,).
+        blend: Frames before and after each contact over which the hold fades.
+
+    Returns:
+        The target positions.
+
+    """
+    frames = target_pos.shape[0]
+
+    def hold(xy, touching):
+        starts = touching & ~jnp.concatenate([jnp.zeros(1, bool), touching[:-1]])
+        segment = jnp.cumsum(starts)
+        weight = touching.astype(xy.dtype)
+        total = jax.ops.segment_sum(xy * weight[:, None], segment, frames + 1)
+        count = jax.ops.segment_sum(weight, segment, frames + 1)
+        offset = weight[:, None] * ((total / jnp.maximum(count, 1.0)[:, None])[segment] - xy)
+        nearest, fade = _nearest_contact(touching, blend)
+        return xy + fade[:, None] * offset[nearest]
+
+    site_ids = jnp.asarray(site_ids)
+    held = jax.vmap(hold, in_axes=(1, 1), out_axes=1)(target_pos[:, site_ids, :2], contact)
+    return target_pos.at[:, site_ids, :2].set(held)
 
 
 def _site_body(model: mujoco.MjModel, name: str) -> int:

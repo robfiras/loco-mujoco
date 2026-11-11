@@ -1,4 +1,4 @@
-from typing import Callable, NamedTuple, Optional, Tuple
+from typing import Callable, NamedTuple, Optional, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -17,6 +17,9 @@ class SolverConfig(NamedTuple):
             near redundant joints, such as a many jointed spine, jump between frames.
         floor_weight: Weight of the one-sided floor penetration residual.
         floor_margin: Height above the floor below which the floor residual becomes active.
+        contact_weight: Weight pulling the lowest point of a body in contact onto the floor.
+        contact_softness: Height differences over which points count as equally low. Without it,
+            the solve flickers between the points of a body resting on the floor.
         log_rotation: Use the rotation vector as rotation error, which keeps pulling at large
             errors, instead of its sine.
         limit_passes: Solves per step for the active set of joints stopped by their limits.
@@ -27,6 +30,8 @@ class SolverConfig(NamedTuple):
     damping: float = 1.0
     floor_weight: float = 50.0
     floor_margin: float = 0.0
+    contact_weight: float = 30.0
+    contact_softness: float = 0.01
     log_rotation: bool = True
     limit_passes: int = 3
 
@@ -58,6 +63,11 @@ def rotation_error(target: jax.Array, rot: jax.Array, log: bool = True) -> jax.A
     return sine * jnp.where(small, 1.0, jnp.arctan2(norm, cosine) / divisor)
 
 
+def soft_min(values: jax.Array, softness: float) -> jax.Array:
+    """Mean of values weighted towards the lowest, never below the minimum."""
+    return values @ jax.nn.softmax(-values / softness) if softness > 0.0 else values.min()
+
+
 def make_solver(
     forward_kinematics: Callable,
     nv: int,
@@ -68,7 +78,8 @@ def make_solver(
     config: SolverConfig = SolverConfig(),
     dof_damping: Optional[np.ndarray] = None,
     limit_dofs: Optional[np.ndarray] = None,
-) -> Callable[[jax.Array, jax.Array, jax.Array], jax.Array]:
+    contact_groups: Sequence[Sequence[int]] = (),
+) -> Callable[..., jax.Array]:
     """Create a function retargeting a batch of clips.
 
     Args:
@@ -83,10 +94,12 @@ def make_solver(
             singularities from jumping to another solution.
         limit_dofs: Mask of the degrees of freedom whose limits are handled inside the solve,
             shape (nv,), all by default. All others are only clipped after each step.
+        contact_groups: Indices of the contact points of each body that can touch the floor.
 
     Returns:
         A jitted function mapping initial configurations (B, nq), target site positions
-        (B, T, S, 3) and target site rotations (B, T, S, 3, 3) to configurations (B, T, nq).
+        (B, T, S, 3), target site rotations (B, T, S, 3, 3) and, with contact groups, the contact
+        state of each group (B, T, G) to configurations (B, T, nq).
 
     """
     pos_w = jnp.asarray(pos_weights)[:, None]
@@ -95,18 +108,18 @@ def make_solver(
     damping = config.damping + (jnp.zeros(nv) if dof_damping is None else jnp.asarray(dof_damping))
     limited = jnp.ones(nv - 6, bool) if limit_dofs is None else jnp.asarray(limit_dofs, bool)[6:]
 
-    def residual(qpos, target_pos, target_rot):
+    def residual(qpos, target_pos, target_rot, contact):
         pos, rot, points = forward_kinematics(qpos)
         floor = config.floor_weight * jax.nn.relu(config.floor_margin - points[:, 2])
+        lowest = jnp.stack([soft_min(points[jnp.asarray(group), 2], config.contact_softness)
+                            for group in contact_groups]) if contact_groups else jnp.zeros(0, qpos.dtype)
         return jnp.concatenate([(pos_w * (pos - target_pos)).ravel(),
                                 (rot_w * rotation_error(target_rot, rot, config.log_rotation)).ravel(),
-                                floor])
+                                floor, config.contact_weight * contact * lowest])
 
     def step(qpos, target):
-        target_pos, target_rot = target
-
         def local_residual(delta):
-            return residual(retract(qpos, delta), target_pos, target_rot)
+            return residual(retract(qpos, delta), *target)
 
         zero = jnp.zeros(nv, qpos.dtype)
         r = local_residual(zero)
@@ -141,12 +154,20 @@ def make_solver(
             qpos = step(qpos, target)
         return qpos, qpos
 
-    def clip(qpos, target_pos, target_rot):
-        first = (target_pos[0], target_rot[0])
+    def clip(qpos, target_pos, target_rot, contact):
+        target = (target_pos, target_rot, contact)
+        first = jax.tree.map(lambda x: x[0], target)
         qpos = jax.lax.fori_loop(0, config.init_iterations, lambda _, q: step(q, first), qpos)
-        return jax.lax.scan(frame, qpos, (target_pos, target_rot))[1]
+        return jax.lax.scan(frame, qpos, target)[1]
 
-    return jax.jit(jax.vmap(clip))
+    solve = jax.jit(jax.vmap(clip))
+
+    def solve_clips(qpos, target_pos, target_rot, contact=None):
+        if contact is None:
+            contact = jnp.zeros(target_pos.shape[:2] + (len(contact_groups),), target_pos.dtype)
+        return solve(qpos, target_pos, target_rot, contact.astype(target_pos.dtype))
+
+    return solve_clips
 
 
 def pad_clips(arrays: Tuple[np.ndarray, ...], length: int) -> np.ndarray:

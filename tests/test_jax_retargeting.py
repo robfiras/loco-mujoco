@@ -5,10 +5,11 @@ import mujoco
 import numpy as np
 import pytest
 
-from loco_mujoco.retargeting import (Calibration, compile_forward_kinematics,
-                                     compile_mjx_forward_kinematics, global_transforms, load_bvh,
-                                     make_solver, pad_clips, retract, site_targets)
-from loco_mujoco.retargeting.solver import SolverConfig, rotation_error
+from loco_mujoco.retargeting import (Calibration, body_contact_points, compile_forward_kinematics,
+                                     compile_mjx_forward_kinematics, detect_contacts, global_transforms,
+                                     hold_contacts, load_bvh, make_solver, pad_clips, retract, site_targets,
+                                     soften_contacts)
+from loco_mujoco.retargeting.solver import SolverConfig, rotation_error, soft_min
 from loco_mujoco.retargeting.soma import WORLD_FROM_BVH, _rotation_between, limb_dof_damping, limit_dofs
 
 XML = """
@@ -237,6 +238,100 @@ def test_limb_dof_damping_leaves_elbows_undamped():
         assert damping[dof(f"{side}_a")] == 10.0 and damping[dof(f"{side}_b")] == 10.0
         assert damping[dof(f"{side}_c")] == 0.0
         assert damping[dof(f"{side}_d")] == 1.0
+
+
+def test_soft_min_stays_between_minimum_and_mean():
+    values = jnp.asarray([0.0, 0.0, 0.0, 0.5])
+    assert soft_min(values, 0.0) == 0.0
+    assert abs(float(soft_min(values, 0.01))) < 1e-6
+    close = jnp.asarray([0.0, 0.01])
+    assert 0.0 < float(soft_min(close, 0.01)) < 0.005
+
+
+def test_body_contact_points_lie_on_the_surface_and_include_fingers():
+    model = mujoco.MjModel.from_xml_string("""
+    <mujoco><worldbody><body name="arm"><freejoint/><geom type="box" size="0.1 0.2 0.3"/>
+      <site name="pelvis_mimic"/>
+      <body name="hand" pos="1 0 0" euler="0 0 90"><joint axis="0 1 0"/><geom type="box" size="0.1 0.1 0.1"/>
+        <site name="left_hand_mimic"/>
+        <body name="finger" pos="0.5 0 0"><joint axis="0 1 0"/><geom type="box" size="0.1 0.1 0.1"/></body>
+      </body>
+    </body></worldbody></mujoco>""")
+    data = mujoco.MjData(model)
+    mujoco.mj_kinematics(model, data)
+    bodies, points, groups = body_contact_points(model, data, ["pelvis_mimic", "left_hand_mimic"])
+
+    pelvis = np.array([points[i] for i in groups[0]])
+    np.testing.assert_allclose(np.abs(pelvis), np.tile([0.1, 0.2, 0.3], (len(pelvis), 1)), atol=1e-6)
+    hand = np.array([points[i] for i in groups[1]])
+    assert hand[:, 0].max() == pytest.approx(0.6)
+    assert {bodies[i] for i in groups[1]} == {2}
+
+
+def test_detect_contacts_needs_low_and_slow():
+    frames = 30
+    height = np.full(frames, 0.05)
+    height[10:20] = 0.5
+    x = np.zeros(frames)
+    x[25:] = np.arange(5) * 0.1
+    joint_pos = jnp.asarray(np.stack([x, 0 * x, height], axis=1)[:, None], jnp.float32)
+    contact = np.asarray(detect_contacts(joint_pos, jnp.asarray([0.1]), jnp.asarray([[True]]), 30.0))[:, 0]
+    assert contact[:9].all() and contact[21:25].all()
+    assert not contact[11:20].any() and not contact[27:].any()
+
+
+def test_detect_contacts_ignores_single_frames():
+    height = np.full(12, 0.5)
+    height[5] = 0.0
+    joint_pos = jnp.asarray(np.stack([0 * height, 0 * height, height], axis=1)[:, None], jnp.float32)
+    assert not np.asarray(detect_contacts(joint_pos, jnp.asarray([0.1]), jnp.asarray([[True]]), 30.0)).any()
+
+
+def test_soften_contacts_keeps_contacts_whole_and_fades_around_them():
+    contact = np.zeros((12, 1), bool)
+    contact[4:7] = True
+    weight = np.asarray(soften_contacts(jnp.asarray(contact), blend=1))[:, 0]
+    np.testing.assert_allclose(weight[3:8], [0.5, 1.0, 1.0, 1.0, 0.5])
+    assert not weight[:3].any() and not weight[8:].any()
+
+
+def test_soften_contacts_without_any_contact():
+    assert not np.asarray(soften_contacts(jnp.zeros((5, 1), bool))).any()
+
+
+def test_hold_contacts_holds_each_contact_at_its_mean():
+    frames = 20
+    target = np.zeros((frames, 2, 3), np.float32)
+    target[:, 0, 0] = np.arange(frames)
+    target[:, 0, 2] = 0.3
+    target[:, 1, 0] = 7.0
+    contact = np.zeros((frames, 1), bool)
+    contact[2:5] = True
+    contact[10:14] = True
+    held = np.asarray(hold_contacts(jnp.asarray(target), jnp.asarray(contact), [0], blend=1))
+
+    np.testing.assert_allclose(held[2:5, 0, 0], 3.0)
+    np.testing.assert_allclose(held[10:14, 0, 0], 11.5)
+    np.testing.assert_allclose(held[7, 0, 0], 7.0)
+    np.testing.assert_allclose(held[:, 0, 2], 0.3)
+    np.testing.assert_array_equal(held[:, 1], target[:, 1])
+
+
+def test_solver_pulls_a_body_in_contact_onto_the_floor():
+    model = mujoco.MjModel.from_xml_string("""
+    <mujoco><worldbody><body name="root"><freejoint/><geom size="0.1"/><site name="root"/>
+    </body></worldbody></mujoco>""")
+    fk = compile_forward_kinematics(model, [0], [1], [np.zeros(3)])
+    target_pos = jnp.tile(jnp.asarray([0.0, 0.0, 0.1]), (4, 1, 1))
+    target_rot = jnp.tile(jnp.eye(3), (4, 1, 1, 1))
+    start = jnp.asarray([[0.0, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0]])
+    solve = make_solver(fk, model.nv, np.zeros(0), np.zeros(0), np.ones(1), np.ones(1),
+                        SolverConfig(damping=1e-3), contact_groups=[[0]])
+
+    free = solve(start, target_pos[None], target_rot[None])
+    held = solve(start, target_pos[None], target_rot[None], jnp.ones((1, 4, 1)))
+    assert float(free[0, -1, 2]) == pytest.approx(0.1, abs=1e-3)
+    assert abs(float(held[0, -1, 2])) < 0.01
 
 
 def test_load_bvh(tmp_path):
