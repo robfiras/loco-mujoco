@@ -515,29 +515,80 @@ def atleast_3d(tensor, backend):
     return tensor
 
 
-def take_columns(x, ind):
+def _column_runs(ind, offsets):
     """
-    Returns ``x[..., ind]`` for static, unique indices. Its gradient is a gather as well: the scatter that JAX would
-    use instead is very slow on batched arrays.
+    Splits static column indices into runs: stretches of consecutive columns of one array, or of negative indices.
 
     Args:
-        x (jnp.ndarray): Array to select from.
+        ind (np.ndarray): Indices into the concatenation of some arrays.
+        offsets (np.ndarray): The first column of each of the arrays in their concatenation, and its total width.
+
+    Returns:
+        List of (array, first column in the array, length) per run; the array is -1 for negative indices.
+
+    """
+    if len(ind) == 0:
+        return []
+    prev, cur = ind[:-1], ind[1:]
+    joined = np.where(prev < 0, cur < 0, (cur == prev + 1) & ~np.isin(cur, offsets))
+    starts = np.concatenate([[0], np.flatnonzero(~joined) + 1])
+    lengths = np.diff(np.concatenate([starts, [len(ind)]]))
+    arrays = np.where(ind[starts] < 0, -1, np.searchsorted(offsets, ind[starts], side="right") - 1)
+    return [(int(a), int(i - offsets[a]), int(n)) for a, i, n in zip(arrays, ind[starts], lengths)]
+
+
+def take_columns(x, ind, max_runs=64):
+    """
+    Returns the columns ``ind`` of ``x``, for static indices. ``x`` can be a list of arrays, standing for their
+    concatenation along the last axis, and a negative index gives a zero.
+
+    Unique indices that form a few runs of consecutive columns are sliced and concatenated, forward and backward.
+    Otherwise the columns are gathered, and so is the gradient: on batched arrays a gather is slow, and the scatter
+    that JAX would use for its gradient is very slow.
+
+    Args:
+        x (jnp.ndarray or list of jnp.ndarray): Array, or arrays, to select from.
         ind (np.ndarray): Indices into the last axis of x.
+        max_runs (int): Largest number of runs to slice instead of gathering.
 
     Returns:
         The selected columns of x.
 
     """
+    parts = tuple(x) if isinstance(x, (list, tuple)) else (x,)
     ind = np.asarray(ind)
-    inverse = np.full(x.shape[-1], len(ind))  # columns that are not selected read the appended zero
-    inverse[ind] = np.arange(len(ind))
+    offsets = np.concatenate([[0], np.cumsum([p.shape[-1] for p in parts])]).astype(int)
+    width, bounds = offsets[-1], list(zip(offsets[:-1], offsets[1:]))
+    picked = ind[ind >= 0]
+
+    def gather(sources, index):
+        zero = jnp.zeros(sources[0].shape[:-1] + (1,), sources[0].dtype)
+        padded = jnp.concatenate(tuple(sources) + (zero,), axis=-1)
+        return padded[..., np.where(index < 0, padded.shape[-1] - 1, index)]
+
+    if len(np.unique(picked)) < len(picked):
+        return gather(parts, ind)
+
+    def blocks(sources, runs):
+        out = [jnp.zeros(sources[0].shape[:-1] + (n,), sources[0].dtype) if a < 0 else sources[a][..., i:i + n]
+               for a, i, n in runs]
+        return out[0] if len(out) == 1 else jnp.concatenate(out, axis=-1)
+
+    # the inverse map, for the gradient: the position in the result of each column of the parts, or -1
+    inverse = np.full(width, -1)
+    inverse[picked] = np.flatnonzero(ind >= 0)
+    runs = _column_runs(ind, offsets)
+    inverse_runs = [_column_runs(inverse[a:b], np.array([0, len(ind)])) for a, b in bounds]
+    sliced = len(ind) > 0 and max(len(runs), *(len(r) for r in inverse_runs)) <= max_runs
 
     @jax.custom_vjp
-    def take(x):
-        return x[..., ind]
+    def take(parts):
+        return blocks(parts, runs) if sliced else gather(parts, ind)
 
     def backward(_, g):
-        return (jnp.concatenate([g, jnp.zeros_like(g[..., :1])], axis=-1)[..., inverse],)
+        if sliced:
+            return (tuple(blocks((g,), r) for r in inverse_runs),)
+        return (tuple(gather((g,), inverse[a:b]) for a, b in bounds),)
 
-    take.defvjp(lambda x: (take(x), None), backward)
-    return take(x)
+    take.defvjp(lambda parts: (take(parts), None), backward)
+    return take(parts)

@@ -196,7 +196,7 @@ class Mjx(Mujoco):
 
     def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None,
                  auto_reset: bool = True, physics_fn: Optional[Callable] = None,
-                 skip_obs: Tuple[str, ...] = ()) -> MjxState:
+                 obs_ind: Optional[np.ndarray] = None, skip_reward: bool = False) -> MjxState:
         """
 
         Args:
@@ -212,8 +212,11 @@ class Mjx(Mujoco):
                 simulation (pre/post step, observation, reward, absorbing) still runs, so a learned
                 dynamics model can reuse the environment's own observation and reward functions. The
                 returned data must have its kinematic quantities (xpos, site_xpos, cvel, ...) up to date.
-            skip_obs (tuple of str, optional): Names of stateful observations to leave at zero in the
-                returned observation, for callers that do not read them.
+            obs_ind (np.ndarray, optional): Entries of the observation to compute, for callers that read only
+                these. The other entries of the returned observation are not computed and hold zero, plus
+                whatever the domain randomizer adds to them.
+            skip_reward (bool): If True, the reward, the absorbing flag and the done flag are not computed
+                (zero and False are returned), for callers that compute them afterwards for many states at once.
 
         Returns:
             MjxState: The next state of the environment.
@@ -265,7 +268,7 @@ class Mjx(Mujoco):
         data, carry = self._mjx_simulation_post_step(self._model, data, carry, traj)
 
         # create the observation
-        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj, skip_obs)
+        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj, obs_ind, keep_layout=True)
 
         # modify the observation and the data if needed (does nothing by default)
         cur_obs, data, cur_info, carry = self._mjx_step_finalize(cur_obs, self._model, data, cur_info, carry, traj)
@@ -274,13 +277,18 @@ class Mjx(Mujoco):
         cur_info = self._mjx_update_info_dictionary(cur_info, cur_obs, data, carry)
 
         # check if the next obs is an absorbing state
-        absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry, traj)
+        if skip_reward:
+            absorbing = done = jnp.zeros((), dtype=bool)
+            reward = jnp.zeros_like(state.reward)
+        else:
+            absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry, traj)
 
-        # calculate the reward
-        reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data, carry, traj)
+            # calculate the reward
+            reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data,
+                                             carry, traj)
 
-        # check if done
-        done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry, traj)
+            # check if done
+            done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry, traj)
 
         done = jnp.logical_or(done, jnp.any(jnp.isnan(cur_obs)))
         cur_obs = jnp.nan_to_num(cur_obs, nan=0.0)
@@ -316,7 +324,8 @@ class Mjx(Mujoco):
                                 data: Data,
                                 carry: MjxAdditionalCarry,
                                 traj: Optional[Trajectory] = None,
-                                skip: Tuple[str, ...] = ()) -> jax.Array:
+                                ind: Optional[np.ndarray] = None,
+                                keep_layout: bool = False) -> jax.Array:
         """
         Creates the observation for the environment.
 
@@ -325,13 +334,16 @@ class Mjx(Mujoco):
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.
             traj (Trajectory, optional): Trajectory to use.
-            skip (tuple of str, optional): Names of stateful observations to leave at zero.
+            ind (np.ndarray, optional): Entries of the observation to create. Only the observations that hold
+                one of them are computed. Defaults to all entries.
+            keep_layout (bool): With ``ind``: if True, the whole observation is returned with the other entries
+                at zero; if False, only the entries ``ind``, in this order.
 
         Returns:
             jax.Array: The observation of the environment.
 
         """
-        return self._create_observation_compat(model, data, carry, jnp, traj, skip)
+        return self._create_observation_compat(model, data, carry, jnp, traj, ind, keep_layout)
 
     def _mjx_reset_info_dictionary(self, obs: jnp.ndarray,
                                    data: Data,

@@ -921,7 +921,8 @@ class Mujoco:
                                    carry: AdditionalCarry,
                                    backend: ModuleType,
                                    traj: Optional[Trajectory] = None,
-                                   skip: Tuple[str, ...] = ()) -> Tuple[np.ndarray, AdditionalCarry]:
+                                   ind: Optional[np.ndarray] = None,
+                                   keep_layout: bool = False) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Creates the observation array by concatenating extracted observations from all types.
 
@@ -931,41 +932,42 @@ class Mujoco:
             carry (AdditionalCarry): Additional carry information.
             backend (ModuleType): The numerical backend to use (NumPy or JAX NumPy).
             traj (Trajectory, optional): Trajectory to use.
-            skip (tuple of str, optional): Names of stateful observations to leave at zero, without computing them.
+            ind (np.ndarray, optional): Entries of the observation to create. Only the observations that hold
+                one of them are computed. Defaults to all entries.
+            keep_layout (bool): With ``ind``: if True, the whole observation is returned with the other entries
+                at zero; if False, only the entries ``ind``, in this order.
 
         Returns:
             Tuple[np.ndarray, AdditionalCarry]: The observation array and updated carry.
         """
-        obs_not_stateful = backend.concatenate([
-            obs_type.get_all_obs_of_type(self, model, data, self._data_indices, backend)
-            for obs_type in ObservationType.list_all_non_stateful()
-        ])
+        n_obs = len(self._obs_indices.concatenated_indices) + len(self.obs_container.get_all_stateful_indices())
+        ind = np.arange(n_obs) if ind is None else np.asarray(ind)
 
-        obs_stateful = []
+        # the observation vectors that hold a requested entry, and the entries they hold
+        vectors, entries = [], []
+        for obs_type in ObservationType.list_all_non_stateful():
+            type_entries = getattr(self._obs_indices, obs_type.__name__)
+            if np.isin(type_entries, ind).any():
+                vectors.append(obs_type.get_all_obs_of_type(self, model, data, self._data_indices, backend))
+                entries.append(type_entries)
         for obs in self.obs_container.list_all_stateful():
-            if obs.name in skip:
-                obs_stateful.append(backend.zeros(len(obs.obs_ind)))
-                continue
-            obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
-            obs_stateful.append(obs_s)
+            if np.isin(obs.obs_ind, ind).any():
+                obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
+                vectors.append(obs_s)
+                entries.append(obs.obs_ind)
 
-        obs_stateful = backend.concatenate(obs_stateful)
-        stateful_obs_ind = self.obs_container.get_all_stateful_indices()
+        # where each requested entry is in the concatenated vectors (-1: nowhere, a zero)
+        position = np.full(n_obs, -1)
+        position[np.concatenate(entries)] = np.arange(sum(len(e) for e in entries))
+        if keep_layout:
+            position[np.setdiff1d(np.arange(n_obs), ind)] = -1
+        else:
+            position = position[ind]
 
-        # merge the non-stateful and stateful observations and bring them in the order of the observation spec
-        non_stateful_order = self._obs_indices.concatenated_indices
         if backend == np:
-            merged = backend.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=float)
-            mask = backend.ones(len(merged), dtype=bool)
-            mask[stateful_obs_ind] = False
-            merged[mask] = obs_not_stateful[non_stateful_order]
-            merged[stateful_obs_ind] = obs_stateful
+            merged = np.concatenate(vectors + [np.zeros(1)])[position].astype(float)
         elif backend == jnp:
-            # the order is static: one gather, instead of a gather and two scatters
-            order = np.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=int)
-            order[stateful_obs_ind] = len(obs_not_stateful) + np.arange(len(stateful_obs_ind))
-            order[np.setdiff1d(np.arange(len(order)), stateful_obs_ind)] = non_stateful_order
-            merged = take_columns(jnp.concatenate([obs_not_stateful, obs_stateful]), order)
+            merged = take_columns(vectors, position)
 
         return merged, carry
 
