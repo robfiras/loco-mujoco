@@ -39,6 +39,7 @@ Requires the JAX MJX backend (``use_mjwarp=False``): MjWarp is not differentiabl
 """
 
 import ast
+import functools
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, NamedTuple
@@ -254,8 +255,12 @@ def context_index(env, n_samples=32):
     """Entries of the context that differ between episodes: the others tell the networks nothing."""
     if not uses_domain_randomization(env):
         return []
-    states = jax.vmap(env.mjx_reset, axis_name=VECENV_AXIS_NAME)(jax.random.split(jax.random.PRNGKey(0), n_samples))
-    xi = jax.vmap(lambda c: context_from_carry(c, True))(states.additional_carry)
+    @jax.jit  # compiled: op by op, every primitive of the reset is its own compilation
+    def contexts(keys):
+        states = jax.vmap(env.mjx_reset, axis_name=VECENV_AXIS_NAME)(keys)
+        return jax.vmap(lambda c: context_from_carry(c, True))(states.additional_carry)
+
+    xi = contexts(jax.random.split(jax.random.PRNGKey(0), n_samples))
     return np.flatnonzero(np.asarray(jnp.std(xi, axis=0)) > 1e-6).tolist()
 
 
@@ -345,6 +350,69 @@ class SuperMimicPolicyNet(nn.Module):
         return dec(jnp.concatenate([jnp.tanh(z), history], axis=-1))
 
 
+@functools.lru_cache(maxsize=None)
+def _slim_layer(activation, dtype, layer_norm):
+    """
+    Dense (+ LayerNorm) + activation of ``_MLP`` with a hand-written backward pass that keeps one array per layer
+    (the output, or the normalized pre-activation) instead of every intermediate of the activation and the norm.
+
+    """
+    assert (activation, layer_norm) in (("elu", False), ("relu", False), ("tanh", False), ("silu", True)), \
+        f"imag_compact has no backward pass for {activation} with layer_norm={layer_norm}"
+    act = get_activation_fn(activation)
+
+    def pre_activation(x, dense):
+        kernel = dense["kernel"].astype(dtype)
+        return x @ kernel + dense["bias"].astype(dtype), kernel
+
+    def dense_bwd(x, kernel, d_pre):
+        return d_pre @ kernel.T, {"kernel": (x.T @ d_pre).astype(jnp.float32),
+                                  "bias": jnp.sum(d_pre.astype(jnp.float32), axis=0)}
+
+    def fwd(x, dense, norm):
+        pre, kernel = pre_activation(x, dense)
+        if not layer_norm:
+            y = act(pre)
+            return y, (x, kernel, y)
+        pre = pre.astype(jnp.float32)
+        mean = jnp.mean(pre, axis=-1, keepdims=True)
+        var = jnp.maximum(jnp.mean(pre * pre, axis=-1, keepdims=True) - mean * mean, 0.0)
+        inv_std = jax.lax.rsqrt(var + 1e-6)
+        unit = (pre - mean) * inv_std
+        return act(unit * norm["scale"] + norm["bias"]), (x, kernel, unit, inv_std, norm["scale"], norm["bias"])
+
+    def bwd(res, ct):
+        if not layer_norm:
+            x, kernel, y = res
+            slope = {"elu": lambda: jnp.where(y > 0, 1.0, y + 1.0), "relu": lambda: y > 0,
+                     "tanh": lambda: 1.0 - y * y}[activation]()
+            dx, d_dense = dense_bwd(x, kernel, ct * slope.astype(ct.dtype))
+            return dx, d_dense, None
+        x, kernel, unit, inv_std, scale, bias = res
+        z = unit * scale + bias
+        sig = jax.nn.sigmoid(z)
+        dz = ct * (sig * (1.0 + z * (1.0 - sig)))
+        d_unit = dz * scale
+        d_pre = inv_std * (d_unit - jnp.mean(d_unit, axis=-1, keepdims=True)
+                           - unit * jnp.mean(d_unit * unit, axis=-1, keepdims=True))
+        dx, d_dense = dense_bwd(x, kernel, d_pre.astype(dtype))
+        return dx, d_dense, {"scale": jnp.sum(dz * unit, axis=0), "bias": jnp.sum(dz, axis=0)}
+
+    layer = jax.custom_vjp(lambda x, dense, norm: fwd(x, dense, norm)[0])
+    layer.defvjp(fwd, bwd)
+    return layer
+
+
+def slim_mlp_apply(layers, x, activation, dtype):
+    """``_MLP`` on a batch ``x`` (B, D) from its parameters, with ``_slim_layer`` for the hidden layers."""
+    n = sum(k.startswith("Dense_") for k in layers)
+    for i in range(n - 1):
+        norm = layers.get(f"LayerNorm_{i}")
+        x = _slim_layer(activation, dtype, norm is not None)(x.astype(dtype), layers[f"Dense_{i}"], norm)
+    last = layers[f"Dense_{n - 1}"]
+    return (x.astype(dtype) @ last["kernel"].astype(dtype) + last["bias"].astype(dtype)).astype(jnp.float32)
+
+
 # smallest error scale of the world-model loss, per entry of WorldModelSpec.error: [p, rot, v, w] then [qj, qd]
 WM_ERR_FLOOR = ((3e-3, 5e-3, 2e-2, 5e-2), (3e-3, 5e-2))
 
@@ -361,11 +429,12 @@ class RunningNorm:
         return cls(mean=jnp.zeros(dim), var=jnp.ones(dim), count=jnp.zeros(()))
 
     def update(self, x, max_count=2e8):
-        x = x.reshape(-1, x.shape[-1])
+        # centred on the running mean: both moments come from one pass over x
+        x = x.reshape(-1, x.shape[-1]) - self.mean
         n = x.shape[0]
-        m, v = jnp.mean(x, axis=0), jnp.var(x, axis=0)
+        delta = jnp.mean(x, axis=0)
+        v = jnp.maximum(jnp.mean(x * x, axis=0) - delta ** 2, 0.0)
         total = self.count + n
-        delta = m - self.mean
         live = self.count < max_count
         return RunningNorm(mean=jnp.where(live, self.mean + delta * n / total, self.mean),
                            var=jnp.where(live, (self.var * self.count + v * n + delta ** 2 * self.count * n / total) / total,
@@ -667,7 +736,7 @@ def _build_nets(env, config):
     alpha = float(exp.lr_final_ratio)
     sched = lambda lr, steps: optax.cosine_decay_schedule(float(lr), max(1, int(frac * steps)), alpha)  # noqa: E731
     # A non-finite gradient skips its step rather than turning the parameters into NaN for good.
-    guard = lambda tx: optax.apply_if_finite(tx, max_consecutive_errors=10 ** 9)  # noqa: E731
+    guard = lambda tx: apply_if_finite_select(tx, max_consecutive_errors=10 ** 9)  # noqa: E731
 
     def optimiser(name, lr, labels, **adam):
         if name == "adam":
@@ -691,6 +760,35 @@ def _build_nets(env, config):
                               optimiser(str(getattr(exp, "wm_optimizer", "adam")), sched(exp.lr_wm, n_wm),
                                         lambda p: muon_labels(p, "dynamics_net"))))
     return actor_net, critic_net, wm_net, actor_tx, critic_tx, wm_tx
+
+
+def apply_if_finite_select(inner, max_consecutive_errors):
+    """``optax.apply_if_finite`` with a select instead of ``lax.cond``.
+
+    On the GPU, XLA runs a ``lax.cond`` from the host: the host waits for the predicate, so every optimizer step
+    drains the GPU's queue of launched kernels. Here the inner update always runs and the rejected result is
+    discarded, which gives the same updates and the same state (``optax.ApplyIfFiniteState``).
+    """
+    inner = optax.with_extra_args_support(inner)
+    increment = lambda x: x + (x < jnp.iinfo(jnp.int32).max).astype(jnp.int32)  # noqa: E731
+
+    def init_fn(params):
+        return optax.ApplyIfFiniteState(notfinite_count=jnp.zeros([], jnp.int32), last_finite=jnp.array(True),
+                                        total_notfinite=jnp.zeros([], jnp.int32), inner_state=inner.init(params))
+
+    def update_fn(updates, state, params=None, **extra_args):
+        isfinite = jnp.all(jnp.array([jnp.all(jnp.isfinite(u)) for u in jax.tree.leaves(updates)]))
+        notfinite_count = jnp.where(isfinite, jnp.zeros([], jnp.int32), increment(state.notfinite_count))
+        apply = isfinite | (notfinite_count > max_consecutive_errors)
+        new_updates, new_inner = inner.update(updates, state.inner_state, params, **extra_args)
+        new_updates = jax.tree.map(lambda u: jnp.where(apply, u, jnp.zeros_like(u)), new_updates)
+        new_inner = jax.tree.map(lambda n, o: jnp.where(apply, n, o), new_inner, state.inner_state)
+        return new_updates, optax.ApplyIfFiniteState(
+            notfinite_count=notfinite_count, last_finite=isfinite,
+            total_notfinite=jnp.where(isfinite, state.total_notfinite, increment(state.total_notfinite)),
+            inner_state=new_inner)
+
+    return optax.GradientTransformationExtraArgs(init_fn, update_fn)
 
 
 class SpikeGuardState(NamedTuple):
@@ -992,14 +1090,16 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         feat_dim = 13 + 2 * int(exp.n_joints)
         rng_a, rng_c, rng_w = jax.random.split(rng, 3)
         history_len = int(getattr(exp, "history_len", 0))
+        # compiled: op by op, every primitive of an initializer is its own compilation
+        init = lambda net, key, *dims: jax.jit(  # noqa: E731
+            lambda k: net.init(k, *(jnp.zeros((1, d)) for d in dims))["params"])(key)
         if history_len > 0:
-            actor_params = agent_conf.actor_net.init(rng_a, jnp.zeros((1, agent_conf.goal_ind.size)), jnp.zeros(
-                (1, history_len * agent_conf.history_ind.size)))["params"]
+            actor_params = init(agent_conf.actor_net, rng_a, agent_conf.goal_ind.size,
+                                history_len * agent_conf.history_ind.size)
         else:
-            actor_params = agent_conf.actor_net.init(rng_a, jnp.zeros((1, obs_dim)))["params"]
-        critic_params = agent_conf.critic_net.init(rng_c, jnp.zeros((1, obs_dim)), jnp.zeros((1, xi_dim)))["params"]
-        wm_params = agent_conf.wm_net.init(rng_w, jnp.zeros((1, feat_dim)), jnp.zeros((1, action_dim)),
-                                           jnp.zeros((1, xi_dim)), jnp.zeros((1, int(exp.term_obs_dim))))["params"]
+            actor_params = init(agent_conf.actor_net, rng_a, obs_dim)
+        critic_params = init(agent_conf.critic_net, rng_c, obs_dim, xi_dim)
+        wm_params = init(agent_conf.wm_net, rng_w, feat_dim, action_dim, xi_dim, int(exp.term_obs_dim))
         mk = lambda net, params, tx: TrainState.create(apply_fn=net.apply, params=params,  # noqa: E731
                                                        run_stats={}, tx=tx)
         return SuperMimicAgentState(
@@ -1208,21 +1308,53 @@ class SuperMimicJax(JaxRLAlgorithmBase):
         # Needs a smooth termination, and rewards that do not read the previous observation.
         lean = bool(getattr(exp, "imag_lean", False))
         assert not lean or (analytic_only_truncates and agent_conf.history_ind is not None)
+        # imag_unroll: no XLA while loop around the rollout (fewer, larger kernels; compilation takes about twice
+        # as long)
+        imag_unroll = horizon if bool(getattr(exp, "imag_unroll", False)) else 1
+        # imag_compact: the rollout step is only the policy decoder, the world model and the policy's history
+        # columns of the next state. What does not depend on the imagined state comes from a forward-only pass over
+        # the env's carry before it (goals, on which the policy encoder runs once for all steps, observation noise,
+        # carries and infos), and kinematics, reward, termination and critic inputs are computed afterwards for all
+        # states of the rollout at once. The networks get hand-written backward passes (see _slim_layer). Few enough
+        # values per step to store them (remat=false) instead of recomputing the step.
+        # Needs, on top of imag_lean: an env step that changes the simulated state only in the physics (no pushes);
+        # a carry and info that do not depend on the simulated state or the action, apart from ``last_action``;
+        # policy observations that read only qpos, qvel and the trajectory, with noise that is added without
+        # reading them (no observation delay); and a reward whose only state is ``reward_state.last_action``.
+        compact = bool(getattr(exp, "imag_compact", False))
+        assert not compact or (lean and not imag_pack and isinstance(agent_conf.actor_net, SuperMimicPolicyNet)), \
+            "imag_compact needs imag_lean, a SuperMimicPolicyNet actor and no imag_pack"
         goal_ind, net_actor = agent_conf.goal_ind, agent_conf.actor_net
-        skip_obs = ()
+        # an imagined env step leaves out the stateful observations the policy does not read
+        step_obs_ind = None
         if lean:
-            read = set(np.asarray(goal_ind).tolist()) | set(np.asarray(agent_conf.history_ind).tolist())
-            skip_obs = tuple(o.name for o in env.obs_container.list_all_stateful()
-                             if not read & set(np.asarray(o.obs_ind).tolist()))
+            read = np.union1d(goal_ind, agent_conf.history_ind)
+            unread = [o.obs_ind for o in env.obs_container.list_all_stateful() if not np.isin(o.obs_ind, read).any()]
+            if unread:
+                step_obs_ind = np.setdiff1d(np.arange(env.info.observation_space.shape[0]), np.concatenate(unread))
 
         def imag_env_step(state, action, wm_params):
             def physics(sys, data, carry, a):
                 delta = wm_dynamics(wm_params, spec.features(data.qpos, data.qvel), a, xi_norm(xi_of(carry)))
                 qpos, qvel = spec.integrate(data.qpos, data.qvel, delta)
                 return imag_kinematics(sys, data.replace(qpos=qpos, qvel=qvel)), carry
-            return env.mjx_step(state, action, traj, auto_reset=False, physics_fn=physics, skip_obs=skip_obs)
+            return env.mjx_step(state, action, traj, auto_reset=False, physics_fn=physics, obs_ind=step_obs_ind)
 
         v_imag_env_step = jax.vmap(imag_env_step, in_axes=(0, 0, None))
+        # the env step with the state left as it is: advances the carry and computes only the goal, which leaves
+        # in the other entries of the observation what the env adds to it (noise)
+        v_goal_env_step = jax.vmap(lambda state, action: env.mjx_step(
+            state, action, traj, auto_reset=False, physics_fn=lambda sys, data, carry, a: (data, carry),
+            obs_ind=np.asarray(goal_ind), skip_reward=True))
+
+        def slim_wm_delta(wm, qpos, qvel, xi_n, action):
+            """The world model's output for a batch of states, as ``physics`` in ``imag_env_step`` computes it."""
+            params, norm = wm
+            x = jnp.concatenate([spec.features(qpos, qvel), action, xi_n], axis=-1)
+            y = slim_mlp_apply(params["dynamics_net"], x if norm is None else norm["input"](x), wm_net.activation,
+                               wm_net.compute_dtype)
+            return y if norm is None else y * norm["output"].std() + norm["output"].mean
+
         v_absorbing_prob = jax.vmap(lambda s: env._mjx_absorbing_prob(s.observation, s.info, s.data,
                                                                       s.additional_carry, traj))
 
@@ -1234,14 +1366,35 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             points = traj.data.split_points
             return ts.subtraj_step_no + horizon < points[ts.traj_no + 1] - points[ts.traj_no]
 
+        obs_sys = kin_sys if use_warp else env.sys
+
         def critic_inputs(qpos, qvel, carry):
             """The critic's observation columns of a batch of imagined states, without observation noise."""
             def one(qp, qv, c):
                 data = imag_kinematics(env.sys, first_data.replace(qpos=qp, qvel=qv))
-                return env._mjx_create_observation(kin_sys if use_warp else env.sys, data, c, traj)[0]
-            return critic_obs(jax.vmap(one)(qpos, qvel, carry))
+                return env._mjx_create_observation(obs_sys, data, c, traj, critic_ind)[0]
+            return jax.vmap(one)(qpos, qvel, carry)
 
-        def imag_scan(step, c0):
+        def deferred_outputs(qpos, qvel, carry, info, action, prev_action):
+            """Critic observation, reward and termination probability of imagined states, each reached with
+            ``action``. The observation is the critic's training input and takes no gradient."""
+            def one(qp, qv, c, i, a, a_prev):
+                data = imag_kinematics(env.sys, first_data.replace(qpos=qp, qvel=qv))
+                critic_in = env._mjx_create_observation(obs_sys, *jax.lax.stop_gradient((data, c)), traj,
+                                                        critic_ind)[0]
+                # only computed if the reward or the termination read it
+                obs = env._mjx_create_observation(obs_sys, data, c, traj)[0]
+                d_hat = env._mjx_absorbing_prob(obs, i, data, c, traj)
+                # the carry as the reward sees it in mjx_step: before the step counters advance
+                c = c.replace(cur_step_in_episode=c.cur_step_in_episode - 1, global_step=c.global_step - 1)
+                if hasattr(c.reward_state, "last_action"):
+                    c = c.replace(reward_state=c.reward_state.replace(last_action=a_prev))
+                absorbing, c = env._mjx_is_absorbing(obs, i, data, c, traj)
+                reward = env._mjx_reward(jnp.zeros_like(obs), a, obs, absorbing, i, env._model, data, c, traj)[0]
+                return critic_in, reward, d_hat
+            return jax.vmap(jax.vmap(one))(qpos, qvel, carry, info, action, prev_action)
+
+        def imag_scan(step, c0, xs=None):
             """``horizon`` steps of ``step``, rematerialized in the backward pass if ``remat``."""
             def wrap(f):
                 if not remat:
@@ -1251,7 +1404,7 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                                       if remat_keep_dots else None)
 
             if not imag_pack:
-                return jax.lax.scan(wrap(step), c0, None, horizon)
+                return jax.lax.scan(wrap(step), c0, xs, horizon, unroll=imag_unroll)
             c_shape, o_shape = jax.eval_shape(step, c0, None)
             pc, po = _Packed(c_shape), _Packed(o_shape)
 
@@ -1297,12 +1450,89 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                       start=jax.lax.stop_gradient((start.qpos, start.qvel, carry0)))
             return ro, (obs_H, xi_H, cH[6], ones, v_H)
 
-        def with_critic_inputs(ro):
-            """Adds the critic inputs of steps 0 .. H-1 to a rollout of ``imagine_lean``."""
+        def imagine_compact(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
+            """``imagine`` for imag_compact: the rollout comes with the critic inputs of all its states."""
+            n = start.qpos.shape[0]
+            carry0 = start.carry.replace(key=jax.random.split(rng, n),
+                                         cur_step_in_episode=jnp.ones_like(start.carry.cur_step_in_episode))
+            data_template = jax.vmap(lambda qp, qv: first_data.replace(qpos=qp, qvel=qv))(start.qpos, start.qvel)
+            no_obs, ones, hist_ind = jnp.zeros_like(start.observation), jnp.ones(n), agent_conf.history_ind
+            stack = lambda s, x: jnp.concatenate([s[None], x])  # noqa: E731
+
+            def normalize(norm, x, ind):
+                return x if norm is None else norm(x, ind)
+
+            # forward-only pass over the env's carry: goal, observation noise, carry and info of s_1 .. s_H
+            def ahead_step(c, _):
+                state = MjxState(data=data_template, observation=no_obs, reward=jnp.zeros(n),
+                                 absorbing=jnp.zeros(n, dtype=bool), done=jnp.zeros(n, dtype=bool),
+                                 info=c[0], additional_carry=c[1])
+                ns = v_goal_env_step(state, jnp.zeros((n, env.info.action_space.shape[0])))
+                return (ns.info, ns.additional_carry), dict(
+                    goal=take_columns(ns.observation, goal_ind), noise=take_columns(ns.observation, hist_ind),
+                    state=(ns.additional_carry, ns.info))
+
+            ahead = jax.lax.stop_gradient(
+                jax.lax.scan(ahead_step, (start.info, carry0), None, horizon, unroll=imag_unroll)[1])
+            carries, infos = ahead["state"]
+            # the policy encoder once, on the goals of s_0 .. s_{H-1}
+            goals = stack(take_columns(start.observation, goal_ind), ahead["goal"][:-1])
+            z = slim_mlp_apply(actor_params["enc"],
+                               normalize(actor_norm, goals.reshape((-1, goals.shape[-1])), goal_ind),
+                               net_actor.activation, net_actor.compute_dtype)
+            z = jnp.tanh(z).reshape((horizon, n, -1))
+            xi_n = xi_norm(jax.vmap(jax.vmap(xi_of))(jax.tree.map(lambda s, x: stack(s, x[:-1]), carry0, carries)))
+            # the history is carried normalized, so each observation is normalized once, when it is produced
+            hist_norm = None if actor_norm is None else actor_norm.replace(
+                mean=actor_norm.mean[hist_ind], var=actor_norm.var[hist_ind])
+
+            def step(c, x):
+                qpos, qvel, history = c
+                z_t, xi_t, next_carry, noise = x
+                a = slim_mlp_apply(actor_params["dec"], jnp.concatenate([z_t, history.reshape((n, -1))], axis=-1),
+                                   net_actor.activation, net_actor.compute_dtype)
+                qpos, qvel = spec.integrate(qpos, qvel, slim_wm_delta(wm_params, qpos, qvel, xi_t, a))
+                new = jax.vmap(lambda qp, qv, nc, a_: env._mjx_create_observation(
+                    obs_sys, first_data.replace(qpos=qp, qvel=qv), nc.replace(last_action=a_), traj,
+                    hist_ind)[0])(qpos, qvel, next_carry, a)
+                # as the env step finishes its observation
+                new = normalize(hist_norm, jnp.nan_to_num(new + noise, nan=0.0), None)
+                return ((qpos, qvel, jnp.concatenate([history[:, 1:], new[:, None]], axis=1)),
+                        dict(action=a, qpos=qpos, qvel=qvel))
+
+            _, ro = imag_scan(step, (start.qpos, start.qvel, normalize(actor_norm, start.history, hist_ind)),
+                              (z, xi_n, carries, ahead["noise"]))
+            act = ro["action"]
+            # states s_0 .. s_H in one pass; s_0 is not reached by an action and only gives critic inputs.
+            # The carry gets the actions with their gradient: the reward and the bootstrap value read them.
+            carry, info = jax.tree.map(stack, (carry0, start.info), (carries.replace(last_action=act), infos))
+            last = getattr(carry0.reward_state, "last_action", jnp.zeros_like(act[0]))
+            obs, reward, d_hat = deferred_outputs(
+                stack(start.qpos, ro["qpos"]), stack(start.qvel, ro["qvel"]), carry, info,
+                stack(jnp.zeros_like(act[0]), act), jnp.concatenate([jnp.zeros_like(act[:1]), last[None], act[:-1]]))
+            reward, d_hat = reward[1:], d_hat[1:]
+            surv = jnp.cumprod(1.0 - d_hat, axis=0)
+            # the bootstrap value is the only reader of an observation with its gradient
+            carry_H = jax.tree.map(lambda x: x[-1], carry)
+            xi_H = jax.vmap(xi_of)(carry_H)
+            obs_H = critic_inputs(ro["qpos"][-1], ro["qvel"][-1], carry_H)
+            v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
+            ro = dict(reward=reward, surv=stack(ones, surv[:-1]), d_hat=d_hat,
+                      action_norm=jnp.linalg.norm(act, axis=-1), alive=jnp.ones_like(reward),
+                      done=jnp.zeros_like(reward), obs=obs,
+                      xi=jax.lax.stop_gradient(jax.vmap(jax.vmap(xi_of))(carry)))
+            return ro, (obs_H, xi_H, surv[-1], ones, v_H)
+
+        def with_critic_inputs(ro, obs_H, xi_H):
+            """The rollout with the critic inputs of all its states s_0 .. s_H."""
+            if compact:  # has them from its pass over all states
+                return ro
             ro = dict(ro)
-            start, states = ro.pop("start"), ro.pop("state")
-            qpos, qvel, carry = jax.tree.map(lambda s, x: jnp.concatenate([s[None], x[:-1]]), start, states)
-            return dict(ro, obs=jax.vmap(critic_inputs)(qpos, qvel, carry), xi=jax.vmap(jax.vmap(xi_of))(carry))
+            if lean:
+                start, states = ro.pop("start"), ro.pop("state")
+                qpos, qvel, carry = jax.tree.map(lambda s, x: jnp.concatenate([s[None], x[:-1]]), start, states)
+                ro.update(obs=jax.vmap(critic_inputs)(qpos, qvel, carry), xi=jax.vmap(jax.vmap(xi_of))(carry))
+            return dict(ro, obs=jnp.concatenate([ro["obs"], obs_H[None]]), xi=jnp.concatenate([ro["xi"], xi_H[None]]))
 
         def imagine(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
             """H-step rollout; returns per-step tensors (H, B) and the critic inputs (H+1, B, .)."""
@@ -1346,7 +1576,8 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             return ro, (obs_H, xi_H, surv_H, alive_H, v_H)
 
         def actor_loss_fn(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
-            ro, (obs_H, xi_H, surv_H, alive_H, v_H) = (imagine_lean if lean else imagine)(
+            rollout = imagine_compact if compact else imagine_lean if lean else imagine
+            ro, (obs_H, xi_H, surv_H, alive_H, v_H) = rollout(
                 actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm)
             disc = gamma ** jnp.arange(horizon)
             J = jnp.sum(disc[:, None] * ro["surv"] * ro["alive"] * ro["reward"], axis=0)
@@ -1354,11 +1585,13 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             loss = -jnp.mean(J) / (1.0 if actor_loss_sum else horizon)
             return loss, (ro, obs_H, xi_H, alive_H)
 
-        def critic_update(critic_state, ro, obs_H, xi_H, alive_H, rng, norm):
-            obs_all = jnp.concatenate([ro["obs"], obs_H[None]], axis=0)  # (H+1, B, O)
-            obs_all = (obs_all if norm is None else norm(obs_all)).astype(critic_net.compute_dtype)
-            xi_all = xi_norm(jnp.concatenate([ro["xi"], xi_H[None]], axis=0))
-            values = critic_apply(critic_state.params, obs_all, xi_all, None)  # (H+1, B)
+        def critic_update(critic_state, ro, rng, norm):
+            """Fits the critic to the lambda-returns of a rollout with the critic inputs of its states s_0 .. s_H."""
+            obs = (ro["obs"] if norm is None else norm(ro["obs"])).astype(critic_net.compute_dtype)
+            # one array of inputs, so that a minibatch is one gather
+            X = jnp.concatenate([obs, xi_norm(ro["xi"]).astype(obs.dtype)], axis=-1)  # (H+1, B, .)
+            value = lambda params, x: critic_apply(params, x, x[..., :0], None)  # noqa: E731
+            values = value(critic_state.params, X)
             cont = (1.0 - ro["d_hat"]) * (1.0 - ro["done"])  # continuation into s_{t+1}
 
             def back(R, t):
@@ -1366,31 +1599,25 @@ class SuperMimicJax(JaxRLAlgorithmBase):
                 return R, R
 
             _, targets = jax.lax.scan(back, values[horizon], jnp.arange(horizon - 1, -1, -1))
-            targets = jax.lax.stop_gradient(targets[::-1])
-            n_rows = horizon * obs_all.shape[1]
-            X_obs = obs_all[:-1].reshape((n_rows, obs_all.shape[-1]))
-            X_xi = xi_all[:-1].reshape((n_rows, xi_all.shape[-1]))  # explicit: xi may be 0-wide
-            Y = targets.reshape(-1)
+            Y = jax.lax.stop_gradient(targets[::-1]).reshape(-1)
             W = ro["alive"].reshape(-1)
             n = Y.shape[0]
+            X = X.reshape((-1, X.shape[-1]))  # the minibatches only index its first n rows, s_0 .. s_{H-1}
             mb = n // critic_mb
 
-            def loss_fn(params, idx):
-                err = critic_apply(params, X_obs[idx], X_xi[idx], None) - Y[idx]
-                return jnp.sum(W[idx] * err ** 2) / jnp.maximum(jnp.sum(W[idx]), 1.0)
+            def mb_step(st, idx):
+                def loss_fn(params):
+                    err = value(params, X[idx]) - Y[idx]
+                    return jnp.sum(W[idx] * err ** 2) / jnp.maximum(jnp.sum(W[idx]), 1.0)
 
-            def epoch(st, r):
-                perm = jax.random.permutation(r, n)[:mb * critic_mb].reshape((critic_mb, mb))
+                loss, g = jax.value_and_grad(loss_fn)(st.params)
+                return st.apply_gradients(grads=g), loss
 
-                def mb_step(st, idx):
-                    loss, g = jax.value_and_grad(loss_fn)(st.params, idx)
-                    return st.apply_gradients(grads=g), loss
-
-                return jax.lax.scan(mb_step, st, perm)
-
-            critic_state, losses = jax.lax.scan(epoch, critic_state, jax.random.split(rng, critic_epochs))
-            del alive_H
-            return critic_state, losses[-1, -1]
+            # the minibatches of all epochs: one loop
+            perms = jnp.concatenate([jax.random.permutation(r, n)[:mb * critic_mb].reshape((critic_mb, mb))
+                                     for r in jax.random.split(rng, critic_epochs)])
+            critic_state, losses = jax.lax.scan(mb_step, critic_state, perms)
+            return critic_state, losses[-1]
 
         def policy_update(actor_state, critic_state, wm_params, start_buffer, rng, mult, actor_norm, critic_norm):
             rng_s, rng_i, rng_c = jax.random.split(rng, 3)
@@ -1401,14 +1628,11 @@ class SuperMimicJax(JaxRLAlgorithmBase):
             actor_state = actor_state.apply_gradients(grads=g)
             actor_state = actor_state.replace(params=jax.tree.map(lambda o, n: o + mult * (n - o), old_params,
                                                                   actor_state.params))
-            ro = jax.lax.stop_gradient(ro)
-            if lean:
-                ro = with_critic_inputs(ro)
+            ro = with_critic_inputs(*jax.lax.stop_gradient((ro, obs_H, xi_H)))
             if critic_norm is not None:
-                critic_norm = critic_norm.update(ro["obs"])
+                critic_norm = critic_norm.update(ro["obs"][:-1])
             with jax.named_scope("critic_update"):
-                critic_state, critic_loss = critic_update(critic_state, ro, jax.lax.stop_gradient(obs_H),
-                                                          jax.lax.stop_gradient(xi_H), alive_H, rng_c, critic_norm)
+                critic_state, critic_loss = critic_update(critic_state, ro, rng_c, critic_norm)
             m = dict(imag_return=jnp.mean(jnp.sum(ro["surv"] * ro["alive"] * ro["reward"], axis=0)),
                      imag_survival=jnp.mean(ro["surv"][-1]), imag_alive=jnp.mean(ro["alive"][-1]),
                      critic_loss=critic_loss, actor_grad_norm=optax.global_norm(g),
