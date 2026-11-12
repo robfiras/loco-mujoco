@@ -4,15 +4,10 @@ import numpy as np
 
 
 def _quat_mul(a, b):
-    aw, av, bw, bv = a[..., :1], a[..., 1:], b[..., :1], b[..., 1:]
-    return jnp.concatenate([aw * bw - jnp.sum(av * bv, axis=-1, keepdims=True),
-                            aw * bv + bw * av + jnp.cross(av, bv)], axis=-1)
-
-
-def _quat_rotate(q, v):
-    w, u = q[..., :1], q[..., 1:]
-    t = 2.0 * jnp.cross(u, v)
-    return v + w * t + jnp.cross(u, t)
+    aw, ax, ay, az = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    bw, bx, by, bz = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
+    return jnp.stack([aw * bw - ax * bx - ay * by - az * bz, aw * bx + ax * bw + ay * bz - az * by,
+                      aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw], axis=-1)
 
 
 def _quat_to_mat(q):
@@ -23,14 +18,27 @@ def _quat_to_mat(q):
     return jnp.stack(rows, axis=-1).reshape(q.shape[:-1] + (3, 3))
 
 
+def _cross(a, b):
+    ax, ay, az = a[..., 0], a[..., 1], a[..., 2]
+    bx, by, bz = b[..., 0], b[..., 1], b[..., 2]
+    return jnp.stack([ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx], axis=-1)
+
+
+def _rotate(mat, v):
+    return jnp.sum(mat * v[..., None, :], axis=-1)
+
+
 class FlatKinematics:
     """
-    Forward kinematics and velocities of one floating tree of hinge joints, level by level of the tree. Gives the
-    same ``xpos``, ``xquat``, ``xmat``, ``site_xpos``, ``site_xmat`` and ``cvel`` as ``mjx.kinematics``, ``mjx.com_pos``
-    and ``mjx.com_vel``, with far fewer operations, which matters inside long differentiated rollouts.
+    Forward kinematics and velocities of one floating tree of hinge joints, body by body. Gives the same ``xpos``,
+    ``xquat``, ``xmat``, ``site_xpos``, ``site_xmat`` and ``cvel`` as ``mjx.kinematics``, ``mjx.com_pos`` and
+    ``mjx.com_vel``, with far fewer operations, which matters inside long differentiated rollouts.
 
     Only these fields are updated. ``subtree_com`` holds the center of mass of the whole tree for every body, which is
     the entry ``cvel`` refers to; all other kinematic fields of the data stay as they are.
+
+    Every body is a few products and sums of small arrays, stacked once at the end: batched over many states, neither
+    the forward nor the backward pass has a gather or a scatter.
 
     Args:
         model (mujoco.MjModel): Model with a free joint on the first body, and at most one hinge on every other body.
@@ -43,70 +51,65 @@ class FlatKinematics:
             "FlatKinematics needs a free joint on the first body."
         assert np.all(model.jnt_type[1:] == hinge) and np.all(model.body_jntnum[2:] <= 1) \
             and np.all(model.body_parentid[2:] >= 1), "FlatKinematics needs one tree with at most one hinge per body."
-        self._levels = []  # per level: bodies, positions of their parents in the level above, and static data
-        depth = np.zeros(model.nbody, dtype=int)
-        depth[1] = 1
+        self._parent, self._pos, self._quat = model.body_parentid, model.body_pos, model.body_quat
+        self._jnt, self._axis, self._anchor = model.body_jntadr, model.jnt_axis, model.jnt_pos
+        self._qpos, self._dof, self._qpos0 = model.jnt_qposadr, model.jnt_dofadr, model.qpos0
+        # a hinge angle a turns the body frame to cos(a/2) * quat + sin(a/2) * turn
+        self._turn = np.zeros((model.nbody, 4))
+        self._anchor_in_parent = np.zeros((model.nbody, 3))
         for b in range(2, model.nbody):
-            depth[b] = depth[model.body_parentid[b]] + 1
-        slot = {1: 0}
-        for d in range(2, depth.max() + 1):
-            bodies = np.flatnonzero(depth == d)
-            jnt = np.array([model.body_jntadr[b] for b in bodies])
-            has = jnt >= 0
-            jnt = np.where(has, jnt, 0)
-            self._levels.append(dict(
-                bodies=bodies, parents=[slot[model.body_parentid[b]] for b in bodies], has_joint=has[:, None],
-                pos=model.body_pos[bodies], quat=model.body_quat[bodies], axis=model.jnt_axis[jnt],
-                anchor=model.jnt_pos[jnt], qpos=model.jnt_qposadr[jnt], dof=model.jnt_dofadr[jnt],
-                qpos0=model.qpos0[model.jnt_qposadr[jnt]]))
-            slot.update({b: i for i, b in enumerate(bodies)})
-        self._order = np.argsort(np.concatenate([[0, 1]] + [lv["bodies"] for lv in self._levels]))
-        self._ipos, self._iquat, self._mass = model.body_ipos[1:], model.body_iquat[1:], model.body_mass[1:]
-        self._site_body, self._site_pos, self._site_quat = model.site_bodyid, model.site_pos, model.site_quat
+            if model.body_jntadr[b] >= 0:
+                j = model.body_jntadr[b]
+                mujoco.mju_mulQuat(self._turn[b], model.body_quat[b], np.concatenate([[0.0], model.jnt_axis[j]]))
+                mujoco.mju_rotVecQuat(self._anchor_in_parent[b], model.jnt_pos[j], model.body_quat[b])
+        self._ipos, self._mass = model.body_ipos[1:], model.body_mass[1:]
+        self._site_body, self._site_pos = model.site_bodyid, model.site_pos
+        self._site_mat = np.zeros((model.nsite, 9))
+        for s in range(model.nsite):
+            mujoco.mju_quat2Mat(self._site_mat[s], model.site_quat[s])
+        self._site_mat = self._site_mat.reshape(-1, 3, 3)
 
     def __call__(self, data):
         """Returns data with the fields above brought up to its qpos and qvel. Works on a single state."""
         qpos, qvel = data.qpos, data.qvel
-        p = qpos[None, :3]
-        q = qpos[None, 3:7] / jnp.linalg.norm(qpos[3:7])
-        positions, quats, hinges = [p], [q], []
-        for lv in self._levels:
-            take = lambda x: jnp.stack([x[i] for i in lv["parents"]])  # noqa: E731, static slices keep gradients cheap
-            pq = take(q)
-            quat = _quat_mul(pq, lv["quat"])
-            pos = take(p) + _quat_rotate(pq, lv["pos"])
-            anchor = pos + _quat_rotate(quat, lv["anchor"])
-            axis = _quat_rotate(quat, lv["axis"])
-            half = 0.5 * (qpos[lv["qpos"]] - lv["qpos0"])[:, None]
-            turned = _quat_mul(quat, jnp.concatenate([jnp.cos(half), jnp.sin(half) * lv["axis"]], axis=-1))
-            quat = jnp.where(lv["has_joint"], turned, quat)
-            pos = jnp.where(lv["has_joint"], anchor - _quat_rotate(quat, lv["anchor"]), pos)
-            p, q = pos, quat
-            positions.append(p)
-            quats.append(q)
-            hinges.append((axis, anchor))
+        root = qpos[3:7] / jnp.linalg.norm(qpos[3:7])
+        pos, quat = [jnp.zeros(3), qpos[:3]], [jnp.array([1.0, 0.0, 0.0, 0.0]), root]
+        mat = [jnp.eye(3), _quat_to_mat(root)]
+        anchor = [None, None]  # of each body's hinge, in the world
+        bodies = range(2, len(self._parent))
+        for b in bodies:
+            par, j = self._parent[b], self._jnt[b]
+            local = self._quat[b]
+            if j >= 0:
+                half = 0.5 * (qpos[self._qpos[j]] - self._qpos0[self._qpos[j]])
+                local = jnp.cos(half) * local + jnp.sin(half) * self._turn[b]
+            quat.append(_quat_mul(quat[par], local))
+            mat.append(_quat_to_mat(quat[b]))
+            p = pos[par] + _rotate(mat[par], self._pos[b])
+            anchor.append(p)
+            if j >= 0 and np.any(self._anchor[j] != 0):  # the hinge is off the body frame: the body turns around it
+                anchor[b] = p + _rotate(mat[par], self._anchor_in_parent[b])
+                p = anchor[b] - _rotate(mat[b], self._anchor[j])
+            pos.append(p)
 
-        all_pos, all_quat = jnp.concatenate(positions), jnp.concatenate(quats)
-        world = jnp.zeros((1, 3)), jnp.array([[1.0, 0.0, 0.0, 0.0]])
-        xpos = jnp.concatenate([world[0], all_pos])[self._order]
-        xquat = jnp.concatenate([world[1], all_quat])[self._order]
-        xmat = _quat_to_mat(xquat)
-        xipos = xpos[1:] + _quat_rotate(xquat[1:], self._ipos)
+        xpos, xquat, xmat = jnp.stack(pos), jnp.stack(quat), jnp.stack(mat)
+        xipos = xpos[1:] + _rotate(xmat[1:], self._ipos)
         com = jnp.sum(self._mass[:, None] * xipos, axis=0) / np.sum(self._mass)
 
         # velocities in cvel's convention: angular, then linear at the center of mass
-        w = _quat_rotate(quats[0][0], qvel[3:6])
-        vel = jnp.concatenate([w, qvel[:3] + jnp.cross(w, com - positions[0][0])])[None]
-        velocities = [vel]
-        for lv, (axis, anchor) in zip(self._levels, hinges):
-            speed = jnp.where(lv["has_joint"], qvel[lv["dof"]][:, None], 0.0)
-            dof = jnp.concatenate([axis, jnp.cross(axis, com - anchor)], axis=-1)
-            vel = jnp.stack([vel[i] for i in lv["parents"]]) + speed * dof
-            velocities.append(vel)
-        cvel = jnp.concatenate([jnp.zeros((1, 6)), jnp.concatenate(velocities)])[self._order]
+        w = _rotate(mat[1], qvel[3:6])
+        vel = [jnp.zeros(6), jnp.concatenate([w, qvel[:3] + _cross(w, com - pos[1])])]
+        for b in bodies:
+            par, j = self._parent[b], self._jnt[b]
+            vel.append(vel[par])
+            if j >= 0:
+                axis = _rotate(mat[b], self._axis[j])
+                vel[b] = vel[par] + qvel[self._dof[j]] * jnp.concatenate([axis, _cross(axis, com - anchor[b])])
 
-        site_quat = _quat_mul(xquat[self._site_body], self._site_quat)
-        return data.replace(xpos=xpos, xquat=xquat, xmat=xmat, cvel=cvel,
-                            subtree_com=jnp.broadcast_to(com, data.subtree_com.shape),
-                            site_xpos=xpos[self._site_body] + _quat_rotate(xquat[self._site_body], self._site_pos),
-                            site_xmat=_quat_to_mat(site_quat))
+        data = data.replace(xpos=xpos, xquat=xquat, xmat=xmat, cvel=jnp.stack(vel),
+                            subtree_com=jnp.broadcast_to(com, data.subtree_com.shape))
+        if len(self._site_body) == 0:
+            return data
+        site_pos, site_mat = jnp.stack([pos[b] for b in self._site_body]), jnp.stack([mat[b] for b in self._site_body])
+        return data.replace(site_xpos=site_pos + _rotate(site_mat, self._site_pos),
+                            site_xmat=jnp.sum(site_mat[:, :, :, None] * self._site_mat[:, None, :, :], axis=-2))
