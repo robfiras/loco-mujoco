@@ -1,4 +1,4 @@
-from typing import List, NamedTuple, Sequence, Tuple
+from typing import Dict, List, NamedTuple, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -95,6 +95,7 @@ def global_transforms(
     local_pos: jax.Array,
     local_rot: jax.Array,
     joint_ids: Sequence[int],
+    world: np.ndarray = WORLD_FROM_BVH,
 ) -> Tuple[jax.Array, jax.Array]:
     """Compute world poses of selected joints.
 
@@ -103,6 +104,7 @@ def global_transforms(
         local_pos: Local translations, shape (..., J, 3).
         local_rot: Local rotation matrices, shape (..., J, 3, 3).
         joint_ids: Joints to return.
+        world: Rotation from the skeleton's root frame to the Z-up world.
 
     Returns:
         World positions (..., N, 3) and rotation matrices (..., N, 3, 3).
@@ -115,7 +117,7 @@ def global_transforms(
             needed.add(joint)
             joint = parents[joint]
 
-    world = jnp.asarray(WORLD_FROM_BVH, local_pos.dtype)
+    world = jnp.asarray(world, local_pos.dtype)
     pos, rot = {}, {}
     for joint in sorted(needed):
         parent = parents[joint]
@@ -255,18 +257,23 @@ def body_contact_points(
     return bodies, points, groups
 
 
-def contact_joints(skeleton: BVHSkeleton, sites: Sequence[str]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Look up the SOMA joints that show when the given sites touch the floor.
+def contact_joints(
+    skeleton: BVHSkeleton,
+    sites: Sequence[str],
+    contacts: Dict[str, Tuple[Tuple[str, float], ...]] = SOMA_CONTACTS,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Look up the source joints that show when the given sites touch the floor.
 
     Args:
-        skeleton: The SOMA skeleton.
-        sites: Names of the sites, keys of SOMA_CONTACTS.
+        skeleton: The source skeleton.
+        sites: Names of the sites, keys of contacts.
+        contacts: Joints and contact heights of each site, SOMA_CONTACTS for SOMA.
 
     Returns:
         The joints (J,), their contact heights (J,) and the mask of each site's joints (G, J).
 
     """
-    entries = [(i, name, height) for i, site in enumerate(sites) for name, height in SOMA_CONTACTS[site]]
+    entries = [(i, name, height) for i, site in enumerate(sites) for name, height in contacts[site]]
     joints = np.array([skeleton.index(name) for _, name, _ in entries])
     heights = np.array([height for _, _, height in entries])
     owner = np.array([i for i, _, _ in entries])
@@ -443,6 +450,8 @@ def align_rest_pose(
     rest_local_rot: np.ndarray,
     site_names: Sequence[str],
     site_pos: np.ndarray,
+    site_map: Dict[str, Tuple[str, float, float]] = SOMA_SITE_MAP,
+    world: np.ndarray = WORLD_FROM_BVH,
 ) -> np.ndarray:
     """Rotate the limbs of a SOMA pose onto the bone directions of the robot's rest pose.
 
@@ -455,6 +464,8 @@ def align_rest_pose(
         rest_local_rot: Local rotations of the SOMA pose, shape (J, 3, 3).
         site_names: Names of the robot sites.
         site_pos: Site positions in the robot's rest pose, shape (S, 3).
+        site_map: Source joint and weights of each site, SOMA_SITE_MAP for SOMA.
+        world: Rotation from the skeleton's root frame to the Z-up world.
 
     Returns:
         Local rotations of the aligned pose, shape (J, 3, 3).
@@ -464,11 +475,11 @@ def align_rest_pose(
     local_rot = np.array(rest_local_rot)
 
     for parent_site, child_site in LIMB_BONES:
-        joint = skeleton.index(SOMA_SITE_MAP[parent_site][0])
-        child = skeleton.index(SOMA_SITE_MAP[child_site][0])
+        joint = skeleton.index(site_map[parent_site][0])
+        child = skeleton.index(site_map[child_site][0])
         above = skeleton.parents[joint]
         pos, rot = global_transforms(skeleton.parents, jnp.asarray(rest_local_pos),
-                                     jnp.asarray(local_rot), [above, joint, child])
+                                     jnp.asarray(local_rot), [above, joint, child], world)
         pos, rot = np.asarray(pos, dtype=np.float64), np.asarray(rot, dtype=np.float64)
 
         current = pos[2] - pos[1]
@@ -488,6 +499,8 @@ def calibrate(
     site_pos: np.ndarray,
     site_rot: np.ndarray,
     pelvis_height: float,
+    site_map: Dict[str, Tuple[str, float, float]] = SOMA_SITE_MAP,
+    world: np.ndarray = WORLD_FROM_BVH,
 ) -> Calibration:
     """Compute the mapping from SOMA joints to robot sites from matching rest poses.
 
@@ -499,6 +512,8 @@ def calibrate(
         site_pos: Site positions in the robot's rest pose with its feet on the floor, shape (S, 3).
         site_rot: Site rotation matrices in the robot's rest pose, shape (S, 3, 3).
         pelvis_height: Height of the robot's pelvis site above the floor in its rest pose.
+        site_map: Source joint and weights of each site, SOMA_SITE_MAP for SOMA.
+        world: Rotation from the skeleton's root frame to the Z-up world.
 
     Returns:
         The calibration.
@@ -507,12 +522,12 @@ def calibrate(
         KeyError: If a site has no SOMA joint assigned.
 
     """
-    joint_ids = np.array([skeleton.index(SOMA_SITE_MAP[s][0]) for s in site_names])
+    joint_ids = np.array([skeleton.index(site_map[s][0]) for s in site_names])
     root_id = list(site_names).index("pelvis_mimic")
 
-    aligned_rot = align_rest_pose(skeleton, rest_local_pos, rest_local_rot, site_names, site_pos)
+    aligned_rot = align_rest_pose(skeleton, rest_local_pos, rest_local_rot, site_names, site_pos, site_map, world)
     pos, rot = global_transforms(skeleton.parents, jnp.asarray(rest_local_pos),
-                                 jnp.asarray(aligned_rot), joint_ids)
+                                 jnp.asarray(aligned_rot), joint_ids, world)
     pos, rot = np.asarray(pos, dtype=np.float64), np.asarray(rot, dtype=np.float64)
 
     scale = pelvis_height / pos[root_id, 2]
