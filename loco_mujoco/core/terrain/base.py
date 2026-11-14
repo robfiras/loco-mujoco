@@ -125,6 +125,45 @@ class Terrain(StatefulObject):
         raise NotImplementedError
 
     @property
+    def has_env_origins(self) -> bool:
+        """
+        Whether envs are placed at per-env origins on the terrain (e.g., a shared tiled terrain).
+
+        Returns:
+            bool: False by default; all envs start around the world origin.
+        """
+        return False
+
+    def get_env_origin_xy(self, carry: Any, backend: ModuleType) -> Union[np.ndarray, jnp.ndarray]:
+        """
+        Get the world xy origin of the env, i.e., where the trajectory start (or default pose) is placed.
+
+        Args:
+            carry (Any): Carry instance with additional state information.
+            backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: The xy origin, shape (2,).
+        """
+        return backend.zeros(2)
+
+    def shift_to_env_origin(self, env: Any, data: Union[MjData, Data], carry: Any,
+                            backend: ModuleType) -> Union[MjData, Data]:
+        """
+        Move the env's free joints to its origin. Called after the initial state has been set on reset.
+
+        Args:
+            env (Any): The environment instance.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Carry instance with additional state information.
+            backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+
+        Returns:
+            Union[MjData, Data]: The (unchanged by default) simulation data.
+        """
+        return data
+
+    @property
     def is_dynamic(self) -> bool:
         """
         Check if the terrain is dynamic.

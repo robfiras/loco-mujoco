@@ -892,7 +892,7 @@ class GoalTrajMimic(Goal):
             geom_type = user_scene.geoms.type.at[self.visual_geoms_idx].set(type)
             geom_size = user_scene.geoms.size.at[self.visual_geoms_idx].set(size)
             geom_rgba = user_scene.geoms.rgba.at[self.visual_geoms_idx].set(color)
-            geom_pos = geom_pos.at[:, :2].add(-qpos_init[:2])
+            geom_pos = geom_pos.at[:, :2].add(-qpos_init[:2] + env._terrain.get_env_origin_xy(carry, backend))
         else:
             user_scene.geoms.pos[self.visual_geoms_idx] = site_xpos[s_ids]
             user_scene.geoms.mat[self.visual_geoms_idx] = site_xmat[s_ids]
@@ -904,7 +904,7 @@ class GoalTrajMimic(Goal):
             geom_type = user_scene.geoms.type[self.visual_geoms_idx]
             geom_rgba = user_scene.geoms.rgba[self.visual_geoms_idx]
             geom_size = user_scene.geoms.size[self.visual_geoms_idx]
-            geom_pos[:, :2] -= qpos_init[:2]
+            geom_pos[:, :2] += env._terrain.get_env_origin_xy(carry, backend) - qpos_init[:2]
 
         # update carry
         new_user_scene = user_scene.replace(geoms=user_scene.geoms.replace(
@@ -1039,7 +1039,7 @@ class GoalTrajMimicv2(GoalTrajMimic):
         if backend == jnp:
 
             # calculate geom positions and orientations usinf FK
-            qpos = qpos.at[:2].add(-qpos_init[:2])
+            qpos = qpos.at[:2].add(-qpos_init[:2] + env._terrain.get_env_origin_xy(carry, backend))
             data = data.replace(qpos=qpos, qvel=qvel)
             data = mujoco.mjx.kinematics(env.sys, data)
             geom_pos = data.geom_xpos[self._geom_ids]
@@ -1056,7 +1056,7 @@ class GoalTrajMimicv2(GoalTrajMimic):
             # calculate geom positions and orientations usinf FK
             data = deepcopy(data)
             data.qpos = qpos
-            data.qpos[:2] -= qpos_init[:2]
+            data.qpos[:2] += env._terrain.get_env_origin_xy(carry, backend) - qpos_init[:2]
             data.qvel = qvel
             mujoco.mj_kinematics(model, data)
             geom_pos = data.geom_xpos[self._geom_ids]

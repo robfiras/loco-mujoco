@@ -618,6 +618,8 @@ class Mujoco:
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, np, traj)
         data, carry = self._terrain.reset(self, model, data, carry, np, traj)
         data, carry = self._init_state_handler.reset(self, model, data, carry, np, traj)
+        if self._terrain.has_env_origins:
+            data = self._terrain.shift_to_env_origin(self, data, carry, np)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, np, traj)
         data, carry = self._reward_function.reset(self, model, data, carry, np, traj)
         data, carry = self._control_func.reset(self, model, data, carry, np, traj)

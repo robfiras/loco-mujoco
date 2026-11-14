@@ -170,7 +170,8 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         # deviation of the root position from the reference
         traj_data_cur = env.th.get_current_traj_data(traj.data, carry, backend)
         traj_data_init = env.th.get_init_traj_data(traj.data, carry, backend)
-        traj_root_pos = traj_data_cur.qpos[root_xy] - traj_data_init.qpos[root_xy]
+        traj_root_pos = traj_data_cur.qpos[root_xy] - traj_data_init.qpos[root_xy] \
+            + env._terrain.get_env_origin_xy(carry, backend)
         norm = np.linalg.norm if backend == np else safe_norm
         pos_deviation = norm(pos - traj_root_pos)
 
