@@ -35,9 +35,13 @@ names = list(exp.task_factory.params.lafan1_dataset_conf.dataset_name)
 agent_conf, state = SuperMimicJax.load_agent(run / ckpt)
 params, policy, history_ind = state.deployed_params, SuperMimicJax.policy_fn(agent_conf), agent_conf.history_ind
 
-rp = exp.env_params.reward_params
-max_step_reward = float(rp.w_root_pos + rp.w_root_ori + rp.w_body_pos + rp.w_body_ori + rp.w_body_lin_vel
-                        + rp.w_body_ang_vel) * env.dt
+if hasattr(env._reward_function, "max_reward"):
+    max_step_reward = env._reward_function.max_reward
+else:
+    # MimicReward: the site terms count only with sites; the velocity weight covers the linear and the angular term
+    rp = exp.env_params.get("reward_params") or {}
+    max_step_reward = float(rp.get("qpos_w_sum", 0.0) + rp.get("qvel_w_sum", 0.0) + rp.get("rpos_w_sum", 0.5)
+                            + rp.get("rquat_w_sum", 0.3) + 2 * rp.get("rvel_w_sum", 0.0))
 n_steps = jnp.array([int(env.th.len_trajectory(i, traj.data)) - 1 for i in range(len(names))])
 
 # reset outside of jit: per-env start frames set inside jit do not reach the reset correctly
