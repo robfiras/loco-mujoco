@@ -177,3 +177,36 @@ def test_smplh_get_offsets_and_mesh(smplh_parser):
     assert len(off) == 8
     mesh = smplh_parser.get_mesh_offsets()
     assert len(mesh) == 11
+
+
+# --------------------------- batched mesh offsets ---------------------------
+
+@pytest.mark.parametrize("parser_fixture, n_joints", (("smpl_parser", 24), ("smplh_parser", 52)))
+@pytest.mark.parametrize("flatfoot", (False, True))
+def test_get_mesh_offsets_batch(parser_fixture, n_joints, flatfoot, request):
+    parser = request.getfixturevalue(parser_fixture)
+    batch = 3
+    betas = torch.zeros(batch, parser.num_betas)
+
+    (verts, joint_pos, skin_weights, names, offsets, parents,
+     axes, dofs, joint_range, contype, conaffinity) = parser.get_mesh_offsets_batch(betas=betas, flatfoot=flatfoot)
+
+    assert verts.shape == (64, 3)                 # vertices of the first batch element
+    assert joint_pos.shape[0] == batch
+    assert skin_weights.shape == (64, n_joints)
+    assert set(offsets) == set(names) == set(parents)
+    root = names[0]
+    assert parents[root] is None
+    # the root offset is its position, every other offset is relative to the parent joint
+    np.testing.assert_allclose(offsets[root], joint_pos[:, 0])
+    child = names[1]
+    parent_idx = names.index(parents[child])
+    np.testing.assert_allclose(offsets[child], joint_pos[:, 1] - joint_pos[:, parent_idx], atol=1e-6)
+    if flatfoot:
+        lowest = verts[:, 1] < verts[:, 1].min() + 1e-6
+        assert lowest.sum() >= 1
+
+
+def test_smpl_get_mesh_offsets_batch_defaults_to_zero_betas(smpl_parser):
+    out = smpl_parser.get_mesh_offsets_batch()
+    assert out[1].shape[0] == 1
