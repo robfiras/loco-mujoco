@@ -164,6 +164,29 @@ class Terrain(StatefulObject):
         return data
 
     @property
+    def grounds_robot(self) -> bool:
+        """
+        Whether the terrain lifts the robot out of the ground after the initial state has been set on reset (see
+        ``ground_robot``). False by default: a flat floor needs no correction.
+        """
+        return False
+
+    def ground_robot(self, env: Any, data: Union[MjData, Data], backend: ModuleType) -> Union[MjData, Data]:
+        """
+        Lift the robot so that none of its collision geometry starts inside the terrain. Called on reset after the
+        initial state (including reset noise) has been set.
+
+        Args:
+            env (Any): The environment instance.
+            data (Union[MjData, Data]): The simulation data.
+            backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+
+        Returns:
+            Union[MjData, Data]: The (unchanged by default) simulation data.
+        """
+        return data
+
+    @property
     def is_dynamic(self) -> bool:
         """
         Check if the terrain is dynamic.

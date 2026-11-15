@@ -285,8 +285,10 @@ class SharedTerrain(StaticTerrain):
 
     # ------------------------------------------------------------------ queries
 
-    def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType) -> Union[np.ndarray, jnp.ndarray]:
-        """Bilinear terrain height at world points ``xy`` of shape (..., 2)."""
+    def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType,
+                      env: Any = None) -> Union[np.ndarray, jnp.ndarray]:
+        """Bilinear terrain height at world points ``xy`` of shape (..., 2). ``env`` is unused (same interface as
+        HeightmapTerrain)."""
         H = self._heights_jnp if backend == jnp else self.heights
         fx = backend.clip((xy[..., 0] + self.half_x) / self.hs, 0, self.ncol - 1.001)
         fy = backend.clip((xy[..., 1] + self.half_y) / self.hs, 0, self.nrow - 1.001)

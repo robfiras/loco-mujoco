@@ -579,6 +579,8 @@ class Mjx(Mujoco):
         data, carry = self._init_state_handler.reset(self, model, data, carry, jnp, traj)
         if self._terrain.has_env_origins:
             data = self._terrain.shift_to_env_origin(self, data, carry, jnp)
+        if self._terrain.grounds_robot:
+            data = self._terrain.ground_robot(self, data, jnp)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp, traj)
         data, carry = self._reward_function.reset(self, model, data, carry, jnp, traj)
         data, carry = self._control_func.reset(self, model, data, carry, jnp, traj)
