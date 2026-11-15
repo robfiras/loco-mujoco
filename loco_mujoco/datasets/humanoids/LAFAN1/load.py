@@ -16,7 +16,7 @@ import requests
 
 import loco_mujoco
 from loco_mujoco.core.utils.math import quat_scalarlast2scalarfirst
-from loco_mujoco.datasets.data_generation import ExtendTrajData, optimize_for_collisions, calculate_qvel_with_finite_difference
+from loco_mujoco.datasets.data_generation import ExtendTrajData, calculate_qvel_with_finite_difference
 from loco_mujoco.smpl.retargeting import load_robot_conf_file, retarget_traj_from_robot_to_robot
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.core.trajectory import (

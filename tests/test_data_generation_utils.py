@@ -2,9 +2,8 @@
 
 These cover the finite-difference velocity computation, the ``!expr`` YAML
 loader, and the body/site name-and-id lookups -- none of which need a full
-environment build. The heavier replay callbacks (ExtendTrajData /
-CollisionExtender / optimize_for_collisions) are driven elsewhere via the
-retargeting pipeline.
+environment build. The ExtendTrajData replay callback is additionally
+driven via the retargeting pipeline.
 """
 from pathlib import Path
 

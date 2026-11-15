@@ -38,7 +38,7 @@ from loco_mujoco.core.trajectory import (
     TrajectoryHandler,
     interpolate_trajectories,
 )
-from loco_mujoco.datasets.data_generation import ExtendTrajData, optimize_for_collisions
+from loco_mujoco.datasets.data_generation import ExtendTrajData
 from loco_mujoco.core.utils.mujoco import mj_get_collision_dist_and_normal
 from loco_mujoco import PATH_TO_SMPL_ROBOT_CONF
 from loco_mujoco.utils import setup_logger
