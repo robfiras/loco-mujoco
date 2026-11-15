@@ -44,7 +44,7 @@ class UsdTrajectoryExporter:
             if exc.name == "pxr":
                 raise ImportError(
                     "USD export requires the optional USD bindings. Install them with "
-                    "`pip install -e '.[usd]'`."
+                    "`pip install loco-mujoco[usd]`."
                 ) from exc
             raise
 
