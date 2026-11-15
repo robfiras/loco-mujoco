@@ -313,7 +313,10 @@ class BaseSkeleton(LocoEnv):
 
             for actuator in mjspec.actuators:
                 if "mot" not in actuator.name:
-                    actuator.force *= body_scaling ** 2
+                    # peak isometric force of a muscle: third muscle parameter (the `force`
+                    # attribute in the XML), stored in both the gain and the bias parameters
+                    actuator.gainprm[2] *= body_scaling ** 2
+                    actuator.biasprm[2] *= body_scaling ** 2
                 else:
                     actuator.gear *= body_scaling ** 2
         else:
