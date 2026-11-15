@@ -179,28 +179,14 @@ class ReplayBuffer:
             # Per-element Bernoulli keep mask.
             keep = jax.random.uniform(rng, (batch_size,)) < self.add_prob
             kept_cnt = jnp.sum(keep.astype(jnp.int32))
-            # Running write offset: -1 for dropped, 0..K-1 for kept entries.
-            # Dropped entries write onto the slot of the most recent kept
-            # entry (idempotent — the next kept entry overwrites it).
+            # Kept entries are written to consecutive slots; dropped entries get the
+            # out-of-range index `capacity`, which mode="drop" discards. They must not be
+            # routed to a real slot: a scatter with duplicate indices applies its updates
+            # in an unspecified order, so a dropped entry could overwrite a kept one.
             offsets = jnp.cumsum(keep.astype(jnp.int32)) - 1
-            offsets = jnp.maximum(offsets, 0)
-            indices = (self.ptr + offsets) % capacity
-            # Masked writes: where keep is False, write back the current slot
-            # contents so the .at[].set is a no-op for that entry.
-            cur_obs = self.obs[indices]
-            new_obs_vals = jnp.where(keep[:, None], obs, cur_obs)
-            new_action_vals = jnp.where(
-                keep[:, None], action, self.action[indices]
-            )
-            new_reward_vals = jnp.where(keep, reward, self.reward[indices])
-            done_f32 = done.astype(jnp.float32)
-            new_done_vals = jnp.where(keep, done_f32, self.done[indices])
+            indices = jnp.where(keep, (self.ptr + offsets) % capacity, capacity)
             if self.store_next_obs:
-                cur_next_obs = self.next_obs[indices]
-                new_next_obs_vals = jnp.where(
-                    keep[:, None], next_obs, cur_next_obs
-                )
-                new_next_obs = self.next_obs.at[indices].set(new_next_obs_vals)
+                new_next_obs = self.next_obs.at[indices].set(next_obs, mode="drop")
             else:
                 new_next_obs = self.next_obs
             if self.store_value_target:
@@ -208,18 +194,15 @@ class ReplayBuffer:
                     "buffer was created with store_value_target=True but "
                     "add_batch received value_target=None"
                 )
-                new_vt_vals = jnp.where(
-                    keep, value_target, self.value_target[indices]
-                )
-                new_value_target = self.value_target.at[indices].set(new_vt_vals)
+                new_value_target = self.value_target.at[indices].set(value_target, mode="drop")
             else:
                 new_value_target = self.value_target
             return self.replace(
-                obs=self.obs.at[indices].set(new_obs_vals),
+                obs=self.obs.at[indices].set(obs, mode="drop"),
                 next_obs=new_next_obs,
-                action=self.action.at[indices].set(new_action_vals),
-                reward=self.reward.at[indices].set(new_reward_vals),
-                done=self.done.at[indices].set(new_done_vals),
+                action=self.action.at[indices].set(action, mode="drop"),
+                reward=self.reward.at[indices].set(reward, mode="drop"),
+                done=self.done.at[indices].set(done.astype(jnp.float32), mode="drop"),
                 value_target=new_value_target,
                 ptr=(self.ptr + kept_cnt) % capacity,
                 size=jnp.minimum(self.size + kept_cnt, capacity),
