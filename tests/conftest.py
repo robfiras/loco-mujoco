@@ -19,6 +19,9 @@ single forward-kinematics frame tiled over time (a "balance"/standing clip).
 That is sufficient to exercise the algorithm build/compile/save/load code
 paths, which is what these tests assert.
 """
+import gc
+
+import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
@@ -30,6 +33,20 @@ from loco_mujoco.core.trajectory import (
     TrajectoryModel,
     TrajectoryData,
 )
+
+
+@pytest.fixture(autouse=True)
+def _release_jax_caches():
+    """Drop JAX's compilation caches after every test.
+
+    Each test builds its own environment and jit-compiles its own functions. JAX keeps
+    every compiled function alive in process-wide caches, so without this the memory of
+    a single pytest process grows with the number of tests (tens of GB for the algorithm
+    tests) until the machine runs out of memory.
+    """
+    yield
+    jax.clear_caches()
+    gc.collect()
 
 
 def _synthetic_traj_from_env(env, n_steps: int = 200) -> Trajectory:
