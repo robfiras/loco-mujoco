@@ -450,7 +450,8 @@ def test_SuperMimic_train_save_load(supermimic_config, domain_randomization, tmp
 
 def test_traj_future_frames_matches_frame_by_frame():
     from types import SimpleNamespace
-    from loco_mujoco.core.observations.goals_future import TrajFutureFrames, _heading_mat, _quat_to_mat, _rot6d
+    from loco_mujoco.core.observations.goals import TrajFutureFrames
+    from loco_mujoco.core.utils.math import heading_mat as _heading_mat, quat_to_mat as _quat_to_mat, rot6d_from_mat as _rot6d
 
     rng = np.random.default_rng(0)
     n_future, nj, T = 4, 3, 12
