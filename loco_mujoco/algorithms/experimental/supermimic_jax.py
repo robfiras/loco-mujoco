@@ -65,73 +65,14 @@ from loco_mujoco.core import MjxState
 from loco_mujoco.core.domain_randomizer import NoDomainRandomization
 from loco_mujoco.core.utils.flat_kinematics import FlatKinematics
 from loco_mujoco.core.utils.math import take_columns
+from loco_mujoco.core.utils.math import (safe_norm as _safe_norm, quat_mul as _quat_mul, quat_conj as _quat_conj,
+                                         quat_rotate as _quat_rotate, quat_rotate_inv as _quat_rotate_inv,
+                                         quat_normalize as _quat_normalize, heading_quat as _heading_quat,
+                                         quat_from_rotvec as _quat_from_rotvec,
+                                         rotvec_from_quat as _rotvec_from_quat, rot6d_from_quat as _rot6d_from_quat)
 from loco_mujoco.core.wrappers import SummaryMetrics
 from loco_mujoco.core.wrappers.mjx import BaseWrapper, VECENV_AXIS_NAME
 from loco_mujoco.utils import ValidationSummary
-
-
-# ---------------------------------------------------------------------------
-# Quaternion helpers (MuJoCo convention: w, x, y, z)
-# ---------------------------------------------------------------------------
-
-def _safe_norm(v):
-    # sqrt has an infinite derivative at 0; the epsilon keeps gradients finite at zero rotation.
-    return jnp.sqrt(jnp.sum(v * v, axis=-1, keepdims=True) + 1e-12)
-
-
-def _quat_mul(a, b):
-    aw, ax, ay, az = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
-    bw, bx, by, bz = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
-    return jnp.stack([aw * bw - ax * bx - ay * by - az * bz,
-                      aw * bx + ax * bw + ay * bz - az * by,
-                      aw * by - ax * bz + ay * bw + az * bx,
-                      aw * bz + ax * by - ay * bx + az * bw], axis=-1)
-
-
-def _quat_conj(q):
-    return q * jnp.array([1.0, -1.0, -1.0, -1.0])
-
-
-def _quat_rotate(q, v):
-    qv, w = q[..., 1:], q[..., :1]
-    t = 2.0 * jnp.cross(qv, v)
-    return v + w * t + jnp.cross(qv, t)
-
-
-def _quat_rotate_inv(q, v):
-    return _quat_rotate(_quat_conj(q), v)
-
-
-def _quat_normalize(q):
-    return q / _safe_norm(q)
-
-
-def _heading_quat(q):
-    """Rotation about world z by the yaw of the body x-axis."""
-    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-    yaw = jnp.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-    zero = jnp.zeros_like(yaw)
-    return jnp.stack([jnp.cos(0.5 * yaw), zero, zero, jnp.sin(0.5 * yaw)], axis=-1)
-
-
-def _quat_from_rotvec(v):
-    th = _safe_norm(v)
-    return jnp.concatenate([jnp.cos(0.5 * th), v * (jnp.sin(0.5 * th) / th)], axis=-1)
-
-
-def _rotvec_from_quat(q):
-    q = jnp.where(q[..., :1] < 0.0, -q, q)
-    s = _safe_norm(q[..., 1:])
-    angle = 2.0 * jnp.arctan2(s, q[..., :1])
-    return q[..., 1:] * (angle / s)
-
-
-def _rot6d_from_quat(q):
-    """First two columns of the rotation matrix (continuous rotation representation)."""
-    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-    c0 = jnp.stack([1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)], axis=-1)
-    c1 = jnp.stack([2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)], axis=-1)
-    return jnp.concatenate([c0, c1], axis=-1)
 
 
 # ---------------------------------------------------------------------------

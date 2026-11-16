@@ -5,27 +5,8 @@ import numpy as np
 import mujoco
 
 from loco_mujoco.core.observations.goals import Goal
-
-
-def _quat_to_mat(q, backend):
-    """Rotation matrix of a scalar-first quaternion."""
-    w, x, y, z = q[0], q[1], q[2], q[3]
-    return backend.stack([
-        backend.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)]),
-        backend.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)]),
-        backend.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)])])
-
-
-def _heading_mat(R, backend):
-    """Rotation about z by the heading of R."""
-    n = backend.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2 + 1e-12)
-    c, s = R[0, 0] / n, R[1, 0] / n
-    zero, one = backend.zeros_like(c), backend.ones_like(c)
-    return backend.stack([backend.stack([c, -s, zero]), backend.stack([s, c, zero]), backend.stack([zero, zero, one])])
-
-
-def _rot6d(R, backend):
-    return backend.ravel(R[:, :2])
+from loco_mujoco.core.utils.math import (quat_to_mat as _quat_to_mat, heading_mat as _heading_mat,
+                                         rot6d_from_mat as _rot6d)
 
 
 class _FreeRootGoal(Goal):
@@ -97,7 +78,7 @@ class TrajFutureFrames(_FreeRootGoal):
         qpos, qvel = td.qpos[start + steps], td.qvel[start + steps]
         ref_p, fut_p, fut_v = qpos[0, :3], qpos[1:], qvel[1:]
         heading_inv = _heading_mat(_quat_to_mat(qpos[0, 3:7], backend), backend).T
-        R = backend.moveaxis(_quat_to_mat(fut_p[:, 3:7].T, backend), -1, 0)  # (K, 3, 3)
+        R = _quat_to_mat(fut_p[:, 3:7], backend)  # (K, 3, 3)
         # written as products and sums: as matmuls these 3x3 blocks become kernels of their own under vmap
         rel_R = backend.sum(heading_inv[None, :, :, None] * R[:, None, :, :], axis=2)
         blocks = [backend.sum(heading_inv * (fut_p[:, None, :3] - ref_p), axis=-1),

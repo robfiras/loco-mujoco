@@ -15,7 +15,7 @@ from loco_mujoco.core.observations.base import ObservationType
 from loco_mujoco.core.utils import mj_jntname2qposid, mj_jntname2qvelid, mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.utils.math import calculate_relative_site_quatities, quaternion_angular_distance
 from loco_mujoco.core.utils.math import quat_scalarfirst2scalarlast
-from loco_mujoco.core.utils.math import calc_site_velocities
+from loco_mujoco.core.utils.math import calc_site_velocities, heading_mat, rotation_angle
 from loco_mujoco.core.reward.utils import out_of_bounds_action_cost
 
 
@@ -429,25 +429,6 @@ class MimicReward(TrajectoryBasedReward):
         return total_reward, carry
 
 
-def _heading_rotation(mat, backend):
-    """Rotation around the world z axis by the heading of a rotation matrix."""
-    yaw = backend.arctan2(mat[1, 0], mat[0, 0])
-    c, s, zero = backend.cos(yaw), backend.sin(yaw), 0.0 * yaw
-    return backend.stack([backend.stack([c, -s, zero]), backend.stack([s, c, zero]),
-                          backend.stack([zero, zero, zero + 1.0])])
-
-
-def _rotation_angle(mat_a, mat_b, backend):
-    """Angle between rotation matrices of shape (..., 3, 3), with a finite gradient at equal rotations."""
-    rel = backend.einsum("...ji,...jk->...ik", mat_a, mat_b)
-    trace = rel[..., 0, 0] + rel[..., 1, 1] + rel[..., 2, 2]
-    axis = backend.stack([rel[..., 2, 1] - rel[..., 1, 2], rel[..., 0, 2] - rel[..., 2, 0],
-                          rel[..., 1, 0] - rel[..., 0, 1]], axis=-1)
-    sq = backend.sum(axis * axis, axis=-1)
-    sin2 = backend.where(sq > 0.0, backend.sqrt(backend.where(sq > 0.0, sq, 1.0)), 0.0)
-    return backend.arctan2(sin2, trace - 1.0)
-
-
 @struct.dataclass
 class SiteTrackingRewardState:
     """
@@ -626,16 +607,16 @@ class SiteTrackingReward(TrajectoryBasedReward):
         ref_vel = calc_site_velocities(self._site_ids, ref, self._site_body_ids, self._site_root_ids, backend)
 
         # the reference at the robot's horizontal position and heading, with its own height, roll and pitch
-        turn = _heading_rotation(mat[0] @ ref_mat[0].T, backend)
+        turn = heading_mat(mat[0] @ ref_mat[0].T, backend)
         ref_pos_moved = (backend.concatenate([pos[0, :2], ref_pos[0, 2:]])
                          + (ref_pos - ref_pos[0]) @ turn.T)
         ref_mat_moved = backend.einsum("ij,bjk->bik", turn, ref_mat)
 
         dist = backend.stack([
             backend.sum(backend.square(ref_pos[0] - pos[0])),
-            backend.square(_rotation_angle(ref_mat[0], mat[0], backend)),
+            backend.square(rotation_angle(ref_mat[0], mat[0], backend)),
             backend.mean(backend.sum(backend.square(ref_pos_moved - pos), axis=-1)),
-            backend.mean(backend.square(_rotation_angle(ref_mat_moved, mat, backend))),
+            backend.mean(backend.square(rotation_angle(ref_mat_moved, mat, backend))),
             backend.mean(backend.sum(backend.square(ref_vel[:, 3:] - vel[:, 3:]), axis=-1)),
             backend.mean(backend.sum(backend.square(ref_vel[:, :3] - vel[:, :3]), axis=-1))])
         tracking_reward = backend.sum(self._w * backend.exp(-dist / self._std_sq))

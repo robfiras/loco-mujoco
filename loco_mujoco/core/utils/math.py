@@ -592,3 +592,118 @@ def take_columns(x, ind, max_runs=64):
 
     take.defvjp(lambda parts: (take(parts), None), backward)
     return take(parts)
+
+
+# ---------------------------------------------------------------------------
+# Rotation helpers in MuJoCo's quaternion convention (w, x, y, z)
+#
+# Unlike the SciPy-based functions above, which expect scalar-last quaternions, everything below takes
+# scalar-first quaternions, batched along the leading axes. The quaternion functions are written for JAX
+# and are differentiated through (the learned dynamics of SuperMimic): norms carry a small epsilon so that
+# their gradients stay finite at zero rotation. Do not replace them by exact norms.
+# ---------------------------------------------------------------------------
+
+def safe_norm(v):
+    """Norm along the last axis with a finite gradient at zero."""
+    # sqrt has an infinite derivative at 0; the epsilon keeps gradients finite at zero rotation.
+    return jnp.sqrt(jnp.sum(v * v, axis=-1, keepdims=True) + 1e-12)
+
+
+def quat_mul(a, b):
+    """Hamilton product a * b."""
+    aw, ax, ay, az = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    bw, bx, by, bz = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
+    return jnp.stack([aw * bw - ax * bx - ay * by - az * bz,
+                      aw * bx + ax * bw + ay * bz - az * by,
+                      aw * by - ax * bz + ay * bw + az * bx,
+                      aw * bz + ax * by - ay * bx + az * bw], axis=-1)
+
+
+def quat_conj(q):
+    """Conjugate, the inverse of a unit quaternion."""
+    return q * jnp.array([1.0, -1.0, -1.0, -1.0])
+
+
+def quat_rotate(q, v):
+    """Rotates the vector v by q."""
+    qv, w = q[..., 1:], q[..., :1]
+    t = 2.0 * jnp.cross(qv, v)
+    return v + w * t + jnp.cross(qv, t)
+
+
+def quat_rotate_inv(q, v):
+    """Rotates the vector v by the inverse of q."""
+    return quat_rotate(quat_conj(q), v)
+
+
+def quat_normalize(q):
+    """Unit quaternion of q."""
+    return q / safe_norm(q)
+
+
+def heading_quat(q):
+    """Rotation about world z by the yaw of the body x-axis."""
+    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    yaw = jnp.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    zero = jnp.zeros_like(yaw)
+    return jnp.stack([jnp.cos(0.5 * yaw), zero, zero, jnp.sin(0.5 * yaw)], axis=-1)
+
+
+def quat_from_rotvec(v):
+    """Quaternion of the rotation vector v."""
+    th = safe_norm(v)
+    return jnp.concatenate([jnp.cos(0.5 * th), v * (jnp.sin(0.5 * th) / th)], axis=-1)
+
+
+def rotvec_from_quat(q):
+    """Rotation vector of q, with an angle in [0, pi]."""
+    q = jnp.where(q[..., :1] < 0.0, -q, q)
+    s = safe_norm(q[..., 1:])
+    angle = 2.0 * jnp.arctan2(s, q[..., :1])
+    return q[..., 1:] * (angle / s)
+
+
+def rot6d_from_quat(q):
+    """6D rotation of q: the first column of the rotation matrix, then the second (c0, c1)."""
+    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    c0 = jnp.stack([1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)], axis=-1)
+    c1 = jnp.stack([2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)], axis=-1)
+    return jnp.concatenate([c0, c1], axis=-1)
+
+
+def quat_to_mat(q, backend=jnp):
+    """Rotation matrix of the scalar-first quaternion q, shape (..., 4) -> (..., 3, 3)."""
+    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    rows = [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+            2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+            2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]
+    return backend.stack(rows, axis=-1).reshape(q.shape[:-1] + (3, 3))
+
+
+def heading_mat(R, backend=jnp):
+    """Rotation about the world z axis by the heading of the rotation matrix R (3, 3): the yaw of its x axis."""
+    n = backend.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2 + 1e-12)
+    c, s = R[0, 0] / n, R[1, 0] / n
+    zero, one = backend.zeros_like(c), backend.ones_like(c)
+    return backend.stack([backend.stack([c, -s, zero]), backend.stack([s, c, zero]), backend.stack([zero, zero, one])])
+
+
+def rot6d_from_mat(R, backend=jnp):
+    """
+    6D rotation of the rotation matrix R (3, 3), row by row: (r00, r01, r10, r11, r20, r21).
+
+    Note the layout differs from :func:`rot6d_from_quat`, which returns the two columns one after the other.
+    Both are inputs of trained networks, so neither can be changed without invalidating checkpoints.
+    """
+    return backend.ravel(R[:, :2])
+
+
+def rotation_angle(mat_a, mat_b, backend=jnp):
+    """Angle between rotation matrices of shape (..., 3, 3), with a finite gradient at equal rotations."""
+    rel = backend.einsum("...ji,...jk->...ik", mat_a, mat_b)
+    trace = rel[..., 0, 0] + rel[..., 1, 1] + rel[..., 2, 2]
+    axis = backend.stack([rel[..., 2, 1] - rel[..., 1, 2], rel[..., 0, 2] - rel[..., 2, 0],
+                          rel[..., 1, 0] - rel[..., 0, 1]], axis=-1)
+    sq = backend.sum(axis * axis, axis=-1)
+    sin2 = backend.where(sq > 0.0, backend.sqrt(backend.where(sq > 0.0, sq, 1.0)), 0.0)
+    return backend.arctan2(sin2, trace - 1.0)

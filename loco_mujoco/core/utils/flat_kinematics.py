@@ -2,20 +2,7 @@ import jax.numpy as jnp
 import mujoco
 import numpy as np
 
-
-def _quat_mul(a, b):
-    aw, ax, ay, az = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
-    bw, bx, by, bz = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
-    return jnp.stack([aw * bw - ax * bx - ay * by - az * bz, aw * bx + ax * bw + ay * bz - az * by,
-                      aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw], axis=-1)
-
-
-def _quat_to_mat(q):
-    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-    rows = [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
-            2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
-            2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]
-    return jnp.stack(rows, axis=-1).reshape(q.shape[:-1] + (3, 3))
+from loco_mujoco.core.utils.math import quat_mul as _quat_mul, quat_to_mat as _quat_to_mat
 
 
 def _cross(a, b):
