@@ -68,6 +68,7 @@ Key Advantages
    source/tutorials/creating_environments.rst
    source/tutorials/customizing_environments.rst
    source/tutorials/creating_new_environments.rst
+   source/tutorials/real_robot_deployment.rst
    source/tutorials/trajectory_interface.rst
    source/tutorials/rendering.rst
 
