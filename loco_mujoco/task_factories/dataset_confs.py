@@ -10,7 +10,7 @@ class DefaultDatasetConf:
     Configuration for loading default datasets provided by LocoMuJoCo.
 
     Attributes:
-        dataset_type (str): The type of the dataset to load. Can be "mocap" or "pretrained".
+        dataset_type (str): The type of the dataset to load. Only "mocap" (motion capture data) is available.
         task (str): The task to load.
         debug (bool): Whether to load the dataset in debug mode.
 
@@ -21,7 +21,8 @@ class DefaultDatasetConf:
     debug: bool = False
 
     def __post_init__(self):
-        assert self.dataset_type in ["mocap", "pretrained"], f"Unknown dataset type: {self.dataset_type}"
+        if self.dataset_type != "mocap":
+            raise ValueError(f"Unknown dataset type: '{self.dataset_type}'. Only 'mocap' is available.")
 
 
 @dataclass

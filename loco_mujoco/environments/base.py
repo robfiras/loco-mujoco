@@ -796,10 +796,9 @@ class LocoEnv(Mjx):
 
         Args:
             task (str): Main task to solve.
-            dataset_type (str): "mocap" or "pretrained". "real" uses real motion capture data as the
-            reference trajectory. This data does not perfectly match the kinematics
-            and dynamics of this environment, hence it is more challenging. "perfect" uses
-            a perfect dataset.
+            dataset_type (str): Only "mocap" is available: motion capture data retargeted to the
+            robot. This data does not perfectly match the kinematics and dynamics of the
+            environment.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
             clip_trajectory_to_joint_ranges (bool): If True, trajectory is clipped to joint ranges.
 
