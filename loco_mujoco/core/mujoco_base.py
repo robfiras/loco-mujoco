@@ -27,7 +27,7 @@ from loco_mujoco.core.terminal_state_handler.base import TerminalStateHandler
 from loco_mujoco.core.visuals import MjvScene, MujocoViewer, UsdTrajectoryExporter, ViserViewer
 from loco_mujoco.core.visuals.usd_exporter import USD_EXPORTER_PARAMS
 from loco_mujoco.core.visuals.viser_viewer import VISER_ONLY_VIEWER_PARAMS
-from importlib.resources import files
+from loco_mujoco.core.utils.models import get_models_dir
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
@@ -142,9 +142,11 @@ class Mujoco:
     @staticmethod
     def get_model_path(*relative_parts: str) -> str:
         """
-        Return absolute path to a model file inside loco-mujoco-models.
+        Return absolute path to a robot model file, e.g. ``get_model_path("unitree_h1", "h1.xml")``.
+
+        The model files are downloaded on first use; see ``loco_mujoco.core.utils.models``.
         """
-        return str(files("loco_mujoco_models").joinpath(*relative_parts))
+        return str(get_models_dir().joinpath(*relative_parts))
 
     def __init__(self,
                  spec: Union[MjSpec, str],

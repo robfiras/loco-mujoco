@@ -25,7 +25,7 @@ dependencies = [
     "requests",
     "httpx",
     "rich",
-    "loco-mujoco-models @ git+https://github.com/robfiras/loco-mujoco-models.git"]
+    "filelock"]
 
 requires-python = ">=3.10"
 authors = [{name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
@@ -129,9 +129,7 @@ Repository = "https://github.com/robfiras/loco-mujoco"
 Issues = "https://github.com/robfiras/loco-mujoco/issues"
 
 [project.scripts]
-loco-mujoco-download = "loco_mujoco.utils:download_all_datasets"
-loco-mujoco-download-real = "loco_mujoco.utils:download_real_datasets"
-loco-mujoco-download-perfect = "loco_mujoco.utils:download_perfect_datasets"
+loco-mujoco-download-models = "loco_mujoco.utils:download_models_cli"
 loco-mujoco-myomodel-init = "loco_mujoco.utils:fetch_myoskeleton"
 loco-mujoco-myomodel-clear = "loco_mujoco.utils:clear_myoskeleton"
 loco-mujoco-set-smpl-model-path = "loco_mujoco.utils:set_smpl_model_path"

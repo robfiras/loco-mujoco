@@ -18,6 +18,18 @@ To use **JAX with GPU**:
 
    pip install jax["cuda12"]
 
+The robot models (about 200 MB) are downloaded automatically the first time you create an
+environment and cached in ``~/.loco-mujoco-caches/robot_models``. On a cluster or in a container
+you can fetch them ahead of time:
+
+.. code-block:: bash
+
+   loco-mujoco-download-models
+
+To use a local copy instead, for example on a machine without network access, point
+``LOCOMUJOCO_ROBOT_MODELS_PATH`` to the ``loco_mujoco_models`` folder of the
+`models repository <https://github.com/robfiras/loco-mujoco-models>`_.
+
 .. note::
 
    To run the **MyoSkeleton** environment, run:

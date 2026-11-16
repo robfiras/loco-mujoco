@@ -24,11 +24,9 @@ pytest --ignore=tests/test_task_factories.py
 pytest tests/test_reward.py
 ```
 
-**CLI utilities (dataset management):**
+**CLI utilities (models and dataset management):**
 ```bash
-loco-mujoco-download           # Download all datasets
-loco-mujoco-download-real      # Download real mocap datasets
-loco-mujoco-download-perfect   # Download perfect/synthetic datasets
+loco-mujoco-download-models    # Download the robot models ahead of time (otherwise fetched on first use)
 loco-mujoco-set-amass-path     # Configure AMASS path
 loco-mujoco-set-lafan1-path    # Configure LAFAN1 path
 ```

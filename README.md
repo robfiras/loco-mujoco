@@ -67,6 +67,16 @@ By default, this installs the CPU version of JAX. If you want to use JAX on the 
 pip install jax["cuda12"]
 ```
 
+The robot models (about 200 MB) are downloaded automatically the first time you create an environment
+and cached in `~/.loco-mujoco-caches/robot_models`. On a cluster or in a container you can fetch them ahead of time:
+
+```bash
+loco-mujoco-download-models
+```
+
+To use a local copy instead, for example on a machine without network access, point `LOCOMUJOCO_ROBOT_MODELS_PATH`
+to the `loco_mujoco_models` folder of the [models repository](https://github.com/robfiras/loco-mujoco-models).
+
 > [!NOTE]
 > If you want to run the **MyoSkeleton** environment, you need to additionally run
 > `loco-mujoco-myomodel-init` to accept the license and download the model.
