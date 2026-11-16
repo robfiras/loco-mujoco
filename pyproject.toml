@@ -97,7 +97,7 @@ skip_covered = false
 smpl = [
     "torch",
     "tqdm",
-    "smplx @ git+https://github.com/ZhengyiLuo/smplx",
+    "smplx",
     "joblib",
 ]
 # Browser-based rendering with viser, used by env.render_viser() and env.mjx_render_viser().
