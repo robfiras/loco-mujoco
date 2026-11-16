@@ -674,8 +674,11 @@ class MujocoViewer:
             If record was True, the video is saved and the path is returned.
 
         """
-        if not self._headless:
+        # stop() runs twice when the user closes the window: once from the render loop and once more
+        # at interpreter exit. Destroying a window a second time crashes, so it is done only once.
+        if not self._headless and self._window is not None:
             glfw.destroy_window(self._window)
+            self._window = None
         if self._recorder:
             return self._recorder.stop()
         else:
