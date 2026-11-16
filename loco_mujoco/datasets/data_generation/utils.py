@@ -196,7 +196,8 @@ def add_mocap_bodies(mjspec: MjSpec,
                 eq_type = mujoco.mjtEq.mjEQ_WELD
                 torque_scale = 1.0
 
-            constraint_data = np.zeros(11)
+            # the length of the constraint data depends on the MuJoCo version (11 in 3.x, 12 in 4.x)
+            constraint_data = np.zeros(mujoco.mjNEQDATA)
             constraint_data[10] = torque_scale
             e = mjspec.add_equality(type=eq_type, name1=b1, name2=b2,
                                 objtype=mujoco.mjtObj.mjOBJ_SITE, data=constraint_data)

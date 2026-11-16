@@ -96,7 +96,9 @@ class Mjx(Mujoco):
             )
             time.sleep(3)
             self.sys = mjx.put_model(self._model, impl='warp')
-            self._first_data = mjx.make_data(self._model, impl='warp', nconmax=nconmax, naconmax=naconmax, njmax=njmax)
+            # `nconmax` is the deprecated name of `naconmax`; MJX 4 no longer accepts it
+            naconmax = nconmax if naconmax is None else naconmax
+            self._first_data = mjx.make_data(self._model, impl='warp', naconmax=naconmax, njmax=njmax)
         else:
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
