@@ -172,6 +172,16 @@ def add_mocap_bodies(mjspec: MjSpec,
         for j in mjspec.joints:
             j.limited = False
 
+    if robot_conf is not None:
+        # stiffness of the joint limits in the retargeting model only; None keeps the model's own
+        limit_solref = robot_conf.optimization_params.get("joint_limit_solref")
+        limit_solimp = robot_conf.optimization_params.get("joint_limit_solimp")
+        for j in mjspec.joints:
+            if limit_solref is not None:
+                j.solref_limit = list(limit_solref)
+            if limit_solimp is not None:
+                j.solimp_limit = list(limit_solimp)
+
     if robot_conf is not None and robot_conf.optimization_params.disable_collisions:
         for g in mjspec.geoms:
             g.contype = 0
