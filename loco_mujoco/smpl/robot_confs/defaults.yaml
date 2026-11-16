@@ -67,6 +67,8 @@ optimization_params:
   motion_iterations: 25
   shape_lr: 0.05
   disable_joint_limits: False
+  joint_limit_solref: null  # [timeconst, dampratio] of the joint limits while retargeting; null keeps the model's
+  joint_limit_solimp: null  # five solimp values of the joint limits while retargeting; null keeps the model's
   disable_collisions: False
   z_offset_feet: 0.0
   skip_frames: 4
