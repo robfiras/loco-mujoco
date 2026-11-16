@@ -131,6 +131,17 @@ def test_quaternion_angular_distance(backend):
     assert float(np.asarray(d0)) == pytest.approx(0.0, abs=_ATOL)
 
 
+def test_quaternion_angular_distance_jax_matches_numpy_with_finite_gradients():
+    q1 = sRot.random(64, random_state=0).as_quat()
+    q2 = sRot.random(64, random_state=1).as_quat()
+    np.testing.assert_allclose(np.asarray(m.quaternion_angular_distance(jnp.asarray(q1), jnp.asarray(q2), jnp)),
+                               m.quaternion_angular_distance(q1, q2, np), atol=1e-5)
+    # equal rotations: jax.scipy's magnitude() has a NaN gradient here
+    g = jax.grad(lambda q: jnp.sum(m.quaternion_angular_distance(q, jnp.asarray(q1), jnp)))(jnp.asarray(q1))
+    assert np.all(np.isfinite(np.asarray(g)))
+
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_quat2angle(backend):
     q = backend.array(sRot.from_rotvec([0.0, 0.0, 0.7]).as_quat())
@@ -244,7 +255,7 @@ def test_rotation_helpers_have_finite_gradients_at_zero_rotation():
 
     grads = [jax.jacobian(m.quat_from_rotvec)(jnp.zeros(3)),
              jax.jacobian(m.rotvec_from_quat)(identity),
-             jax.grad(lambda v: m.safe_norm(v)[0])(jnp.zeros(3)),
+             jax.grad(lambda v: m.eps_norm(v)[0])(jnp.zeros(3)),
              jax.grad(lambda R: m.rotation_angle(R, jnp.eye(3)))(jnp.eye(3))]
     for g in grads:
         assert np.all(np.isfinite(np.asarray(g)))

@@ -444,6 +444,22 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
     return site_rpos, site_rangles, site_rvel
 
 
+def safe_norm(x, axis=-1):
+    """
+    Euclidean norm over ``axis`` whose gradient is zero, not NaN, at the zero vector.
+
+    Args:
+        x (jnp.ndarray): Input array.
+        axis (int): Axis to reduce.
+
+    Returns:
+        jnp.ndarray: The norms.
+    """
+    sq = jnp.sum(x * x, axis=axis)
+    positive = sq > 0.0
+    return jnp.where(positive, jnp.sqrt(jnp.where(positive, sq, 1.0)), 0.0)
+
+
 def quaternion_angular_distance(q1, q2, backend):
     """
     Calculate the angular distance between two rotations represented by quaternions.
@@ -457,20 +473,17 @@ def quaternion_angular_distance(q1, q2, backend):
     """
 
     if backend == np:
-        R = np_R
-    else:
-        R = jnp_R
+        # Compute the relative rotation and extract its angle in radians
+        return (np_R.from_quat(q1).inv() * np_R.from_quat(q2)).magnitude()
 
-    # Create Rotation objects for both quaternions
-    r1 = R.from_quat(q1)
-    r2 = R.from_quat(q2)
-
-    # Compute the relative rotation
-    relative_rotation = r1.inv() * r2
-
-    # Extract the angle of the relative rotation
-    angular_distance = relative_rotation.magnitude()  # Returns the angle in radians
-    return angular_distance
+    # Same angle as jax.scipy's magnitude(), whose plain square root of the vector part's squared norm has a
+    # NaN gradient when the two rotations are equal.
+    q1 = q1 / jnp.linalg.norm(q1, axis=-1, keepdims=True)
+    q2 = q2 / jnp.linalg.norm(q2, axis=-1, keepdims=True)
+    v1, w1, v2, w2 = q1[..., :3], q1[..., 3:], q2[..., :3], q2[..., 3:]
+    vec = w1 * v2 - w2 * v1 - jnp.cross(v1, v2)  # vector part of q1^-1 q2
+    w = jnp.sum(q1 * q2, axis=-1)                 # its scalar part
+    return 2.0 * jnp.arctan2(safe_norm(vec), jnp.abs(w))
 
 
 def quat2angle(quat, backend):
@@ -603,8 +616,11 @@ def take_columns(x, ind, max_runs=64):
 # their gradients stay finite at zero rotation. Do not replace them by exact norms.
 # ---------------------------------------------------------------------------
 
-def safe_norm(v):
-    """Norm along the last axis with a finite gradient at zero."""
+def eps_norm(v):
+    """
+    Norm along the last axis, kept as an axis of size 1, with a small epsilon under the square root so that the
+    gradient is finite at zero. See :func:`safe_norm` for the exact norm with a zero gradient at zero.
+    """
     # sqrt has an infinite derivative at 0; the epsilon keeps gradients finite at zero rotation.
     return jnp.sqrt(jnp.sum(v * v, axis=-1, keepdims=True) + 1e-12)
 
@@ -638,7 +654,7 @@ def quat_rotate_inv(q, v):
 
 def quat_normalize(q):
     """Unit quaternion of q."""
-    return q / safe_norm(q)
+    return q / eps_norm(q)
 
 
 def heading_quat(q):
@@ -651,14 +667,14 @@ def heading_quat(q):
 
 def quat_from_rotvec(v):
     """Quaternion of the rotation vector v."""
-    th = safe_norm(v)
+    th = eps_norm(v)
     return jnp.concatenate([jnp.cos(0.5 * th), v * (jnp.sin(0.5 * th) / th)], axis=-1)
 
 
 def rotvec_from_quat(q):
     """Rotation vector of q, with an angle in [0, pi]."""
     q = jnp.where(q[..., :1] < 0.0, -q, q)
-    s = safe_norm(q[..., 1:])
+    s = eps_norm(q[..., 1:])
     angle = 2.0 * jnp.arctan2(s, q[..., :1])
     return q[..., 1:] * (angle / s)
 

@@ -400,8 +400,6 @@ def test_SuperMimic_blink_options_train(supermimic_config, tmp_path):
 def test_handler_absorbing_prob_replaces_learned_head(supermimic_config):
     config = OmegaConf.create(OmegaConf.to_container(supermimic_config, resolve=True))
     env, traj = _make(config)
-    assert env._terminal_state_handler.mjx_absorbing_prob(env, None, None, None, None, traj) is None
-
     p = 0.25
     env._terminal_state_handler.mjx_absorbing_prob = lambda *args: jnp.array(p)
     agent_conf = SuperMimicJax.init_agent_conf(env, config)

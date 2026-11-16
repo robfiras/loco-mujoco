@@ -96,3 +96,10 @@ class NoTerminalStateHandler(TerminalStateHandler):
 
         """
         return False, carry
+
+    def mjx_absorbing_prob(self, env: Any, obs: jnp.ndarray, info: Dict[str, Any], data: Data, carry: Any,
+                           traj=None) -> jnp.ndarray:
+        """
+        Always 0: there are no terminal states.
+        """
+        return jnp.array(0.0)

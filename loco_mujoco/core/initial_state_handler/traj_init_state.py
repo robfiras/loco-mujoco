@@ -45,8 +45,9 @@ class TrajInitialStateHandler(InitialStateHandler):
         model = env._model
         self._root_qpos = np.array(mj_jntname2qposid(env.root_free_joint_xml_name, model))
         self._root_qvel = np.array(mj_jntname2qvelid(env.root_free_joint_xml_name, model))
-        hinges = [i for i in range(model.njnt) if model.jnt_type[i] in (mujoco.mjtJoint.mjJNT_HINGE,
-                                                                        mujoco.mjtJoint.mjJNT_SLIDE)]
+        # compared as ints: from MuJoCo 3.16 on, `enum == numpy int` is always False, so `in (enum, ...)` is too
+        hinges = [i for i in range(model.njnt) if int(model.jnt_type[i]) in (int(mujoco.mjtJoint.mjJNT_HINGE),
+                                                                             int(mujoco.mjtJoint.mjJNT_SLIDE))]
         self._joint_qpos = model.jnt_qposadr[hinges]
         limited = model.jnt_limited[hinges].astype(bool)
         self._joint_low = np.where(limited, model.jnt_range[hinges, 0], -np.inf)

@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, Union, Tuple
 from types import ModuleType
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from mujoco import MjData, MjModel
@@ -114,14 +115,9 @@ class TerminalStateHandler(StatefulObject):
         Smooth, differentiable version of mjx_is_absorbing, used by algorithms that backpropagate through
         imagined rollouts. Handlers without one return None, and such algorithms fall back to a learned estimate.
 
-        TODO: implement this for the handlers, sharing the error terms with _is_absorbing_compat so that the
-            two cannot drift apart, as 1 - prod(1 - sigmoid((error - threshold) / temperature)):
-            - NoTerminalStateHandler: always 0.
-            - HeightBasedTerminalStateHandler: one sigmoid per limit of the height range.
-            - RootTrackingTerminalStateHandler: height and tilt error.
-            - RootPoseTrajTerminalStateHandler: needs atan2 instead of arccos (infinite gradient at equal
-              rotations) and a norm of the xy deviation that is safe at zero.
-            Self-collision conditions have no smooth version: imagination computes no contacts, so return None.
+        Handlers implement it as 1 - prod(1 - sigmoid(excess / temperature)) over the same excesses (error minus
+        threshold) that their hard check compares with zero, see ``soft_any``. Self-collision conditions have no
+        smooth version: imagination computes no contacts.
 
         Args:
             env (Any): The environment instance.
@@ -136,6 +132,32 @@ class TerminalStateHandler(StatefulObject):
             handler has no smooth version.
         """
         return None
+
+    @staticmethod
+    def soft_any(violations) -> jnp.ndarray:
+        """
+        Smooth version of ``any(excess > 0)``: 1 - prod(1 - sigmoid(excess / temperature)).
+
+        Args:
+            violations: Iterable of (excess, temperature) pairs; the excess is positive past the threshold.
+
+        Returns:
+            jnp.ndarray: Probability in [0, 1].
+        """
+        alive = jnp.array(1.0)
+        for excess, temperature in violations:
+            alive = alive * (1.0 - jax.nn.sigmoid(excess / temperature))
+        return 1.0 - alive
+
+    @staticmethod
+    def hard_any(violations, backend: ModuleType):
+        """
+        ``any(excess > 0)`` over (excess, temperature) pairs.
+        """
+        is_absorbing = backend.array(False)
+        for excess, _ in violations:
+            is_absorbing = backend.logical_or(is_absorbing, backend.greater(excess, 0.0))
+        return is_absorbing
 
     def _is_absorbing_compat(self,
                              env: Any,

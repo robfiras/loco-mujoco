@@ -65,7 +65,7 @@ from loco_mujoco.core import MjxState
 from loco_mujoco.core.domain_randomizer import NoDomainRandomization
 from loco_mujoco.core.utils.flat_kinematics import FlatKinematics
 from loco_mujoco.core.utils.math import take_columns
-from loco_mujoco.core.utils.math import (safe_norm as _safe_norm, quat_mul as _quat_mul, quat_conj as _quat_conj,
+from loco_mujoco.core.utils.math import (eps_norm as _safe_norm, quat_mul as _quat_mul, quat_conj as _quat_conj,
                                          quat_rotate as _quat_rotate, quat_rotate_inv as _quat_rotate_inv,
                                          quat_normalize as _quat_normalize, heading_quat as _heading_quat,
                                          quat_from_rotvec as _quat_from_rotvec,

@@ -16,6 +16,8 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
     """
     Check if the current state is terminal based on the height of the root.
     """
+
+    soft_temperature_m = 0.02  # width of the smooth termination around the height limits, in meters
     def __init__(self, env: Any, **handler_config: Dict[str, Any]):
         """
         Initialize the TerminalStateHandler.
@@ -124,8 +126,19 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
-        root_pose = data.qpos[self.root_free_joint_xml_ind]
-        height = root_pose[2]
-        height_cond = backend.logical_or(backend.less(height, self.root_height_range[0]),
-                                         backend.greater(height, self.root_height_range[1]))
-        return height_cond, carry
+        return self.hard_any(self._violations(data), backend), carry
+
+    def mjx_absorbing_prob(self, env: Any, obs: jnp.ndarray, info: Dict[str, Any], data: Data, carry: Any,
+                           traj=None) -> jnp.ndarray:
+        """
+        Smooth termination probability of the root height range, see ``TerminalStateHandler.soft_any``.
+        """
+        return self.soft_any(self._violations(data))
+
+    def _violations(self, data: Union[MjData, Data]):
+        """
+        (excess, temperature) pairs of the conditions: the root height below and above the healthy range.
+        """
+        height = data.qpos[self.root_free_joint_xml_ind][2]
+        return [(self.root_height_range[0] - height, self.soft_temperature_m),
+                (height - self.root_height_range[1], self.soft_temperature_m)]
