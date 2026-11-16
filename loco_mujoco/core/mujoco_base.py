@@ -2,7 +2,9 @@ import atexit
 from copy import deepcopy
 from typing import Union, List, Dict, Tuple, Optional
 from types import ModuleType
-import requests
+from html import escape
+from pathlib import Path
+import tempfile
 import webbrowser
 
 from functools import partial
@@ -168,6 +170,7 @@ class Mujoco:
                  control_type: str = "DefaultControl",
                  control_params: Dict = None,
                  max_num_samples_traj: int = 10_000,
+                 print_obs_summary: bool = True,
                  **viewer_params):
 
         # set the timestep if provided, else read it from model
@@ -262,6 +265,10 @@ class Mujoco:
         self._max_num_samples_traj = max_num_samples_traj
         self._traj = None
         self._strict_traj = False  # when True, traj must be passed explicitly (no self._traj fallback)
+
+        # print the observation space to the terminal (disable with print_obs_summary=False)
+        if print_obs_summary:
+            self.print_observation_summary()
 
     def reset(self, key=None, traj: Optional[Trajectory] = None) -> np.ndarray:
         """
@@ -1171,41 +1178,21 @@ class Mujoco:
                 info_props[attr_name] = deepcopy(getattr(self, attr_name))
         return info_props
 
-    def create_observation_summary(
-            self,
-            filename: Optional[str] = None,
-            open_in_browser: bool = True
-    ) -> str:
-        """Generates and uploads an HTML summary of a LocoMuJoCo environment's observations.
+    def _observation_summary_tables(self) -> List[Tuple[str, List[str], List[List[str]]]]:
+        """Builds the tables shown by the observation summaries.
 
-        This function creates a main table with all observations and additional group-specific
-        tables. Each table shows observation indices, names, types, min/max values, group membership,
-        and randomizability flags. Arrays longer than 6 elements are summarized by showing the
-        first 3 elements, an ellipsis (`...`), and the last 3 elements.
-        Observation indices and filtered indices are shown as `range(...)` if longer than 1.
-
-        The generated HTML is uploaded to https://0x0.st for easy sharing. If `filename` is provided,
-        it is also saved locally.
-
-        Args:
-            filename (str | None, optional): The filename to save the HTML locally. If None, nothing is saved.
-                Defaults to "obs_table.html".
-            open_in_browser (bool, optional): Whether to open the uploaded URL in the default browser.
-                Defaults to True.
+        The first table lists all observations, followed by one table per observation group. Arrays
+        longer than 6 elements are shortened to their first and last 3 elements, and index arrays
+        are shown as ``range(...)``.
 
         Returns:
-            str: A public URL to the uploaded HTML summary hosted on 0x0.st.
-
-        Raises:
-            Exception: If the upload to 0x0.st fails.
+            List[Tuple[str, List[str], List[List[str]]]]: One (title, column names, rows) tuple per table.
         """
-        obs_container = self.obs_container
-        env_name = self.__class__.__name__
 
         def summarize_array(arr, max_len=6, force_range: bool = False):
             if arr is None:
                 return "None"
-            arr_list = list(arr) if isinstance(arr, (np.ndarray, list)) else [arr]
+            arr_list = list(arr) if isinstance(arr, (np.ndarray, list, range)) else [arr]
             n = len(arr_list)
 
             if force_range and n > 1:
@@ -1217,143 +1204,135 @@ class Mujoco:
                 return f"{first_part}, ..., {last_part}"
             return ", ".join(map(str, arr_list))
 
-        html = f"""
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>LocoMuJoCo Observation Summary - {env_name}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; background: #f8f9fa; padding: 2rem; }}
-                table {{ border-collapse: collapse; width: 90%; margin: auto; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-                th, td {{ padding: 12px 18px; border: 1px solid #ddd; text-align: left; }}
-                th {{ background-color: rgb(9, 16, 61); color: white; }}
-                tr:hover {{ background-color: #f1f1f1; }}
-                h2 {{ text-align: center; }}
-            </style>
-        </head>
-        <body>
-            <h2>LocoMuJoCo Observation Summary – {env_name}</h2>
-            <table>
-                <tr>
-                    <th>Obs Indices</th>
-                    <th>Obs Name</th>
-                    <th>Obs Type</th>
-                    <th>Min / Max</th>
-                    <th>Group(s)</th>
-                    <th>Randomizable</th>
-                </tr>
-        """
-
-        for obs in obs_container.values():
-            obs_ind = summarize_array(obs.obs_ind, force_range=True)
-            name = obs.name
-            obs_type = obs.__class__.__name__
-
+        def describe(obs):
             if obs.min is not None and obs.max is not None:
-                min_vals = summarize_array(np.round(obs.min, 3))
-                max_vals = summarize_array(np.round(obs.max, 3))
-                minmax = f"{min_vals} / {max_vals}"
+                minmax = (f"{summarize_array(np.round(obs.min, 3))} / "
+                          f"{summarize_array(np.round(obs.max, 3))}")
             else:
                 minmax = "None"
+            groups = [g for g in (obs.group or []) if g is not None]
+            return [obs.name, obs.__class__.__name__, minmax,
+                    ", ".join(groups) if groups else "None", str(obs.allow_randomization)]
 
-            groups = "None"
-            if obs.group:
-                filtered = [g for g in obs.group if g is not None]
-                groups = ", ".join(filtered) if filtered else "None"
+        all_obs = list(self.obs_container.values())
+        common = ["Obs Name", "Obs Type", "Min / Max", "Group(s)", "Randomizable"]
 
-            rand = str(obs.allow_randomization)
+        tables = [("All observations", ["Obs Indices"] + common,
+                   [[summarize_array(obs.obs_ind, force_range=True)] + describe(obs) for obs in all_obs])]
 
-            html += f"""
-                <tr>
-                    <td>{obs_ind}</td>
-                    <td>{name}</td>
-                    <td>{obs_type}</td>
-                    <td>{minmax}</td>
-                    <td>{groups}</td>
-                    <td>{rand}</td>
-                </tr>
-            """
-
-        html += "</table>"
-
-        # Additional tables per group
-        all_groups = {g for obs in obs_container.values() if obs.group for g in obs.group if g is not None}
-
+        all_groups = {g for obs in all_obs for g in (obs.group or []) if g is not None}
         for group in sorted(all_groups):
-            filtered_obs = [obs for obs in obs_container.values() if group in (obs.group or [])]
-
-            html += f"""
-                <h2 style="text-align:center;">Group: {group}</h2>
-                <table>
-                    <tr>
-                        <th>Obs Indices</th>
-                        <th>Filtered Obs Indices</th>
-                        <th>Obs Name</th>
-                        <th>Obs Type</th>
-                        <th>Min / Max</th>
-                        <th>Group(s)</th>
-                        <th>Randomizable</th>
-                    </tr>
-            """
-
-            offset = 0
-            for obs in filtered_obs:
-                obs_ind = summarize_array(obs.obs_ind, force_range=True)
-                name = obs.name
-                obs_type = obs.__class__.__name__
-
-                if obs.min is not None and obs.max is not None:
-                    min_vals = summarize_array(np.round(obs.min, 3))
-                    max_vals = summarize_array(np.round(obs.max, 3))
-                    minmax = f"{min_vals} / {max_vals}"
-                else:
-                    minmax = "None"
-
-                groups = "None"
-                if obs.group:
-                    filtered_group = [g for g in obs.group if g is not None]
-                    groups = ", ".join(filtered_group) if filtered_group else "None"
-
-                rand = str(obs.allow_randomization)
-
+            rows, offset = [], 0
+            for obs in all_obs:
+                if group not in (obs.group or []):
+                    continue
                 dim = len(obs.obs_ind) if obs.obs_ind is not None else 0
-                filtered_indices = summarize_array(range(offset, offset + dim), force_range=True)
+                rows.append([summarize_array(obs.obs_ind, force_range=True),
+                             summarize_array(range(offset, offset + dim), force_range=True)]
+                            + describe(obs))
                 offset += dim
+            tables.append((f"Group: {group}", ["Obs Indices", "Filtered Obs Indices"] + common, rows))
 
-                html += f"""
-                    <tr>
-                        <td>{obs_ind}</td>
-                        <td>{filtered_indices}</td>
-                        <td>{name}</td>
-                        <td>{obs_type}</td>
-                        <td>{minmax}</td>
-                        <td>{groups}</td>
-                        <td>{rand}</td>
-                    </tr>
-                """
+        return tables
 
-            html += "</table>"
+    def print_observation_summary(self) -> None:
+        """Prints a summary of the environment's observations to the terminal.
 
-        html += "</body></html>"
+        Shows the same tables as :meth:`create_observation_summary`: one with all observations and
+        one per observation group, listing indices, names, types, min/max values, group membership
+        and randomizability flags.
+        """
+        from rich import box
+        from rich.console import Console
+        from rich.table import Table
+        from rich.text import Text
 
-        # Save to file if specified
-        if filename:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(html)
+        console = Console()
+        env_name = self.__class__.__name__
+        obs_dim = sum(len(obs.obs_ind) for obs in self.obs_container.values() if obs.obs_ind is not None)
+        console.print(f"\n[bold]LocoMuJoCo Observation Summary – {env_name}[/bold] "
+                      f"[dim](observation dim: {obs_dim})[/dim]")
+        for title, columns, rows in self._observation_summary_tables():
+            table = Table(title=title, title_justify="left", title_style="bold cyan",
+                          box=box.SIMPLE_HEAD, header_style="bold")
+            for column in columns:
+                table.add_column(column, overflow="fold")
+            for row in rows:
+                table.add_row(*(Text(cell) for cell in row))
+            console.print(table)
 
-        # Upload HTML
-        files = {"file": ("file.html", html, "text/html")}
-        headers = {"User-Agent": "curl/7.68.0"}
-        res = requests.post("https://0x0.st", files=files, headers=headers)
+    def create_observation_summary(
+            self,
+            filename: Optional[str] = None,
+            open_in_browser: bool = True
+    ) -> str:
+        """Generates an HTML summary of a LocoMuJoCo environment's observations and opens it locally.
 
-        if res.status_code == 200:
-            url = res.text.strip()
-            print(f"✅ Uploaded Observation summary to: {url}")
-            if open_in_browser:
-                webbrowser.open(url)
-            return url
+        This function creates a main table with all observations and additional group-specific
+        tables. Each table shows observation indices, names, types, min/max values, group membership,
+        and randomizability flags. Arrays longer than 6 elements are summarized by showing the
+        first 3 elements, an ellipsis (`...`), and the last 3 elements.
+        Observation indices and filtered indices are shown as `range(...)` if longer than 1.
+
+        The HTML is written to a local file and opened from there, so no internet connection is
+        needed. If no browser is available (e.g., on a headless machine), the summary is printed
+        to the terminal instead. Use :meth:`print_observation_summary` to always print it.
+
+        Args:
+            filename (str | None, optional): Where to save the HTML. If None, it is written to the
+                system's temporary directory.
+            open_in_browser (bool, optional): Whether to open the file in the default browser.
+                Defaults to True.
+
+        Returns:
+            str: Path to the generated HTML file.
+        """
+        env_name = self.__class__.__name__
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>LocoMuJoCo Observation Summary - {escape(env_name)}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; background: #f8f9fa; padding: 2rem; }}
+        table {{ border-collapse: collapse; width: 90%; margin: auto; background: white;
+                 box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+        th, td {{ padding: 12px 18px; border: 1px solid #ddd; text-align: left; }}
+        th {{ background-color: rgb(9, 16, 61); color: white; }}
+        tr:hover {{ background-color: #f1f1f1; }}
+        h2 {{ text-align: center; }}
+    </style>
+</head>
+<body>
+"""
+        for i, (title, columns, rows) in enumerate(self._observation_summary_tables()):
+            heading = f"LocoMuJoCo Observation Summary – {env_name}" if i == 0 else title
+            html += f"    <h2>{escape(heading)}</h2>\n    <table>\n"
+            html += "        <tr>" + "".join(f"<th>{escape(c)}</th>" for c in columns) + "</tr>\n"
+            for row in rows:
+                html += "        <tr>" + "".join(f"<td>{escape(c)}</td>" for c in row) + "</tr>\n"
+            html += "    </table>\n"
+        html += "</body>\n</html>\n"
+
+        if filename is None:
+            path = Path(tempfile.gettempdir()) / f"loco_mujoco_obs_summary_{env_name}.html"
         else:
-            raise Exception(f"❌ Upload failed: {res.status_code} - {res.text}")
+            path = Path(filename).expanduser()
+        path = path.resolve()
+        path.write_text(html, encoding="utf-8")
+        print(f"Observation summary saved to: {path}")
+
+        if open_in_browser:
+            try:
+                opened = webbrowser.open(path.as_uri())
+            except webbrowser.Error:
+                opened = False
+            if not opened:
+                print("Could not open a browser, printing the observation summary instead.")
+                self.print_observation_summary()
+
+        return str(path)
 
     @staticmethod
     def parse_observation_spec(obs_spec: List[Dict]) -> List[ObservationType]:

@@ -24,6 +24,7 @@ dependencies = [
     "huggingface_hub",
     "requests",
     "httpx",
+    "rich",
     "loco-mujoco-models @ git+https://github.com/robfiras/loco-mujoco-models.git"]
 
 requires-python = ">=3.10"

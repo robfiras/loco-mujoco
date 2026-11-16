@@ -16,7 +16,8 @@ observation_spec = [
 env, traj = ImitationFactory.make("ToddlerBot", observation_spec=observation_spec,
                             default_dataset_conf=dict(task="walk"))
 
-# checkout the detailed observation space (opens webbrowser)
+# the observation space is printed to the terminal when the environment is created
+# (disable with print_obs_summary=False); this also opens it in the browser
 env.create_observation_summary()
 
 # run training ....

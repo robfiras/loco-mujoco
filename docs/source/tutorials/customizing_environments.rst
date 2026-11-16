@@ -11,8 +11,9 @@ Custom Observation Space
 
 Within this example, we change the observation space of the environment. The observation specification is passed as a list of
 different observation objects. All observation types can be found :mod:`here <loco_mujoco.core.observations.base>`.
-The ``create_observation_summary`` function can be used to get a detailed overview over the size and indices of the created
-observation space in the browser.
+The ``print_observation_summary`` function prints a detailed overview over the size and indices of the created
+observation space to the terminal, while ``create_observation_summary`` saves it as a local HTML file and opens it in the
+browser. The overview is also printed whenever an environment is created; pass ``print_obs_summary=False`` to disable this.
 
 .. literalinclude:: ../../../examples/tutorials/05_changing_the_observation_space.py
    :language: python
