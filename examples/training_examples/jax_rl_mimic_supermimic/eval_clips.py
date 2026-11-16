@@ -35,13 +35,22 @@ names = list(exp.task_factory.params.lafan1_dataset_conf.dataset_name)
 agent_conf, state = SuperMimicJax.load_agent(run / ckpt)
 params, policy, history_ind = state.deployed_params, SuperMimicJax.policy_fn(agent_conf), agent_conf.history_ind
 
+# reward of a step on the reference, to normalize the return
+rp = exp.env_params.get("reward_params") or {}
 if hasattr(env._reward_function, "max_reward"):
     max_step_reward = env._reward_function.max_reward
-else:
-    # MimicReward: the site terms count only with sites; the velocity weight covers the linear and the angular term
-    rp = exp.env_params.get("reward_params") or {}
+elif exp.env_params.get("reward_type", "MimicReward") == "MimicReward":
+    # the site terms count only with sites; the velocity weight covers the linear and the angular term
     max_step_reward = float(rp.get("qpos_w_sum", 0.0) + rp.get("qvel_w_sum", 0.0) + rp.get("rpos_w_sum", 0.5)
                             + rp.get("rquat_w_sum", 0.3) + 2 * rp.get("rvel_w_sum", 0.0))
+else:
+    # tracking rewards defined outside of LocoMuJoCo that follow the root / body weight names
+    weights = ("w_root_pos", "w_root_ori", "w_body_pos", "w_body_ori", "w_body_lin_vel", "w_body_ang_vel")
+    missing = [w for w in weights if w not in rp]
+    if missing:
+        raise ValueError(f"Cannot normalize the return of {exp.env_params.reward_type}: give it a `max_reward` "
+                         f"property, or set {missing} in reward_params.")
+    max_step_reward = float(sum(rp[w] for w in weights)) * env.dt
 n_steps = jnp.array([int(env.th.len_trajectory(i, traj.data)) - 1 for i in range(len(names))])
 
 # reset outside of jit: per-env start frames set inside jit do not reach the reset correctly
