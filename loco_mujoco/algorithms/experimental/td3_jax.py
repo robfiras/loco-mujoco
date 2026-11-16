@@ -56,6 +56,7 @@ class TD3ActorNet(nn.Module):
     use_obs_norm: bool = True
     output_squash: str = "none"
     obs_ind: jnp.ndarray = None
+    compute_dtype: str = "float32"  # matmul dtype; the parameters and the output stay float32
 
     @nn.compact
     def __call__(self, x):
@@ -66,10 +67,10 @@ class TD3ActorNet(nn.Module):
             x = RunningMeanStd()(x)
         for dim in self.hidden_layer_dims:
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
-                         bias_init=constant(0.0))(x)
+                         bias_init=constant(0.0), dtype=self.compute_dtype)(x)
             x = activation_fn(x)
         a = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
-                     bias_init=constant(0.0))(x)
+                     bias_init=constant(0.0), dtype=self.compute_dtype)(x).astype(jnp.float32)
         if self.output_squash == "tanh":
             a = jnp.tanh(a)
         elif self.output_squash != "none":

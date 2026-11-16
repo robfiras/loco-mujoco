@@ -53,6 +53,7 @@ class LocoEnv(Mjx):
                  default_camera_mode: str = "follow",
                  th_params: Dict = None,
                  traj_params: Dict = None,
+                 recenter_root_xy: bool = True,
                  **core_params):
         """
         Constructor.
@@ -60,9 +61,13 @@ class LocoEnv(Mjx):
         Args:
             th_params (Dict): Dictionary of parameters for the trajectory handler.
             traj_params (Dict): Dictionary of parameters to load trajectories.
+            recenter_root_xy (bool): If True, episodes start at the origin in xy. If False, they start at the
+                xy of the trajectory, so that the robot and the trajectory share a world frame.
             core_params (Dict): Dictionary of other core parameters.
 
         """
+
+        self._recenter_root_xy = recenter_root_xy
 
         if "geom_group_visualization_on_startup" not in core_params.keys():
             core_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
@@ -629,6 +634,8 @@ class LocoEnv(Mjx):
         Returns:
             MjData: The updated Mujoco data structure.
         """
+        if not self._recenter_root_xy:
+            return Mjx.set_sim_state_from_traj_data(data, traj_data, carry)
         robot_free_jnt_name = self.root_free_joint_xml_name
         robot_free_jnt_qpos_id_xy = np.array(mj_jntname2qposid(robot_free_jnt_name, self._model))[:2]
         all_free_jnt_qpos_id_xy = self.free_jnt_qpos_id[:, :2].reshape(-1)
@@ -652,6 +659,8 @@ class LocoEnv(Mjx):
         Returns:
             Data: Updated Mujoco data.
         """
+        if not self._recenter_root_xy:
+            return Mjx.mjx_set_sim_state_from_traj_data(data, traj_data, carry)
         if traj is None:
             traj = self._traj
         robot_free_jnt_name = self.root_free_joint_xml_name

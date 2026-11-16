@@ -215,3 +215,64 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         valid_threshold = max_distance + np.radians(self.root_rot_margin_degrees)
 
         return centroid_quat, valid_threshold
+
+
+class RootTrackingTerminalStateHandler(RootPoseTrajTerminalStateHandler):
+    """
+    Terminates when the root leaves the *current* reference frame, rather than the range of the whole dataset.
+    Unlike RootPoseTrajTerminalStateHandler this stays meaningful for datasets containing motions on the
+    ground: with a fall-and-get-up clip in the dataset, lying on the floor is inside the dataset's range.
+    """
+
+    def __init__(self, env: Any, max_height_error: float = 0.25, max_tilt_error: float = 0.8):
+        """
+        Initialize the TerminalStateHandler.
+
+        Args:
+            env (Any): The environment instance.
+            max_height_error (float): Maximum deviation of the root height from the reference in meters.
+            max_tilt_error (float): Maximum deviation of the z-component of the root's up axis from the reference.
+        """
+        super(RootTrackingTerminalStateHandler, self).__init__(env)
+        self.max_height_error = max_height_error
+        self.max_tilt_error = max_tilt_error
+
+    def _is_absorbing_compat(self,
+                             env: Any,
+                             obs: Union[np.ndarray, jnp.ndarray],
+                             info: Dict[str, Any],
+                             data: Union[MjData, Data],
+                             carry: Any,
+                             backend: ModuleType,
+                             traj=None) -> Union[bool, Any]:
+        """
+        Check if the current state is terminal. The state is terminal if the root height or tilt deviate
+        too far from the current frame of the reference trajectory.
+
+        Args:
+            obs (Union[np.ndarray, jnp.ndarray]): shape (n_samples, n_obs), the observations
+            info (dict): the info dictionary
+            data (Union[MjData, Data]): Mujoco data structure
+            carry (Any): additional carry.
+            backend (ModuleType): the backend to use (np or jnp)
+            traj: Trajectory to use (optional).
+
+        Returns:
+            Boolean indicating whether the current state is terminal or not.
+
+        """
+        root_ind = traj.info.joint_name2ind_qpos[self.root_joint_name]
+        root_height_ind = int(root_ind[2])
+        root_quat_ind = np.array(root_ind[3:7])
+        traj_qpos = env.th.get_current_traj_data(traj.data, carry, backend).qpos
+
+        def up_z(quat):  # scalar-first
+            quat = quat / backend.linalg.norm(quat)
+            return 1.0 - 2.0 * (quat[1] ** 2 + quat[2] ** 2)
+
+        height_error = backend.abs(data.qpos[root_height_ind] - traj_qpos[root_height_ind])
+        tilt_error = backend.abs(up_z(data.qpos[root_quat_ind]) - up_z(traj_qpos[root_quat_ind]))
+        is_absorbing = backend.logical_or(backend.greater(height_error, self.max_height_error),
+                                          backend.greater(tilt_error, self.max_tilt_error))
+
+        return is_absorbing, carry

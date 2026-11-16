@@ -1,4 +1,4 @@
-from typing import Dict, Any, Union, Tuple
+from typing import Dict, Any, Optional, Union, Tuple
 from types import ModuleType
 
 import jax.numpy as jnp
@@ -102,6 +102,40 @@ class TerminalStateHandler(StatefulObject):
             NotImplementedError: If not implemented in a subclass.
         """
         raise NotImplementedError
+
+    def mjx_absorbing_prob(self,
+                           env: Any,
+                           obs: jnp.ndarray,
+                           info: Dict[str, Any],
+                           data: Data,
+                           carry: Any,
+                           traj=None) -> Optional[jnp.ndarray]:
+        """
+        Smooth, differentiable version of mjx_is_absorbing, used by algorithms that backpropagate through
+        imagined rollouts. Handlers without one return None, and such algorithms fall back to a learned estimate.
+
+        TODO: implement this for the handlers, sharing the error terms with _is_absorbing_compat so that the
+            two cannot drift apart, as 1 - prod(1 - sigmoid((error - threshold) / temperature)):
+            - NoTerminalStateHandler: always 0.
+            - HeightBasedTerminalStateHandler: one sigmoid per limit of the height range.
+            - RootTrackingTerminalStateHandler: height and tilt error.
+            - RootPoseTrajTerminalStateHandler: needs atan2 instead of arccos (infinite gradient at equal
+              rotations) and a norm of the xy deviation that is safe at zero.
+            Self-collision conditions have no smooth version: imagination computes no contacts, so return None.
+
+        Args:
+            env (Any): The environment instance.
+            obs (jnp.ndarray): Observations with shape (n_samples, n_obs).
+            info (Dict[str, Any]): The info dictionary.
+            data (Data): The Mujoco data structure for Mjx.
+            carry (Any): Additional carry information.
+            traj: Trajectory to use (optional).
+
+        Returns:
+            Optional[jnp.ndarray]: Probability in [0, 1] that the current state is terminal, or None if the
+            handler has no smooth version.
+        """
+        return None
 
     def _is_absorbing_compat(self,
                              env: Any,

@@ -355,6 +355,53 @@ def transform_motion(vel, new_pos, old_pos, rot_mat_new2old, backend, flg_local=
     return xvel
 
 
+def rotvec_from_matrix_jax(mat):
+    """
+    Rotation vectors of rotation matrices (..., 3, 3), angle in [0, pi], with the same values as
+    ``jax.scipy``'s ``Rotation.from_matrix(mat).as_rotvec()`` but finite gradients everywhere.
+
+    ``from_matrix`` evaluates all four branches of Shepperd's method and selects one with ``where``;
+    the unselected branches take the square root of non-positive numbers, and their NaN gradients
+    survive the selection (0 * NaN = NaN), poisoning every gradient that passes through. Here every
+    branch's square root is clamped, and the rotation angle uses a smoothed norm.
+
+    Args:
+        mat (jnp.ndarray): Rotation matrices of shape (..., 3, 3).
+
+    Returns:
+        jnp.ndarray: Rotation vectors of shape (..., 3).
+    """
+    m = mat
+    m00, m01, m02 = m[..., 0, 0], m[..., 0, 1], m[..., 0, 2]
+    m10, m11, m12 = m[..., 1, 0], m[..., 1, 1], m[..., 1, 2]
+    m20, m21, m22 = m[..., 2, 0], m[..., 2, 1], m[..., 2, 2]
+    trace = m00 + m11 + m22
+
+    def _half_sqrt(x):
+        return 0.5 * jnp.sqrt(jnp.maximum(x, 1e-12))
+
+    # each candidate is (w, x, y, z), built around the largest of w, x, y, z
+    sw = _half_sqrt(1.0 + trace)
+    qw = jnp.stack([sw, (m21 - m12) / (4 * sw), (m02 - m20) / (4 * sw), (m10 - m01) / (4 * sw)], axis=-1)
+    sx = _half_sqrt(1.0 + m00 - m11 - m22)
+    qx = jnp.stack([(m21 - m12) / (4 * sx), sx, (m01 + m10) / (4 * sx), (m02 + m20) / (4 * sx)], axis=-1)
+    sy = _half_sqrt(1.0 - m00 + m11 - m22)
+    qy = jnp.stack([(m02 - m20) / (4 * sy), (m01 + m10) / (4 * sy), sy, (m12 + m21) / (4 * sy)], axis=-1)
+    sz = _half_sqrt(1.0 - m00 - m11 + m22)
+    qz = jnp.stack([(m10 - m01) / (4 * sz), (m02 + m20) / (4 * sz), (m12 + m21) / (4 * sz), sz], axis=-1)
+
+    choice = jnp.argmax(jnp.stack([trace, m00, m11, m22], axis=-1), axis=-1)
+    quat = jnp.stack([qw, qx, qy, qz], axis=-2)
+    quat = jnp.take_along_axis(quat, choice[..., None, None], axis=-2)[..., 0, :]
+    quat = quat / jnp.linalg.norm(quat, axis=-1, keepdims=True)
+    quat = jnp.where(quat[..., :1] < 0.0, -quat, quat)
+
+    vec = quat[..., 1:]
+    vec_norm = jnp.sqrt(jnp.sum(vec * vec, axis=-1, keepdims=True) + 1e-12)
+    angle = 2.0 * jnp.arctan2(vec_norm, quat[..., :1])
+    return vec * (angle / vec_norm)
+
+
 def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_rootid, backend,
                                       main_site_id=0):
     """
@@ -390,7 +437,7 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
     main_site_xpos_traj = site_xpos_traj[main_site_id]
     site_xpos_traj = backend.delete(site_xpos_traj, main_site_id, axis=0)
     site_rpos = calc_rel_positions(site_xpos_traj, main_site_xpos_traj, backend)
-    site_rangles = R.from_matrix(rel_rot_mat).as_rotvec()
+    site_rangles = R.from_matrix(rel_rot_mat).as_rotvec() if backend == np else rotvec_from_matrix_jax(rel_rot_mat)
     site_rvel = calculate_relative_velocity_in_local_frame(main_site_xvel, site_xvel, main_site_xmat_traj,
                                                            rel_rot_mat, backend)
 
@@ -466,3 +513,82 @@ def atleast_3d(tensor, backend):
         tensor = backend.expand_dims(tensor, axis=0)
     
     return tensor
+
+
+def _column_runs(ind, offsets):
+    """
+    Splits static column indices into runs: stretches of consecutive columns of one array, or of negative indices.
+
+    Args:
+        ind (np.ndarray): Indices into the concatenation of some arrays.
+        offsets (np.ndarray): The first column of each of the arrays in their concatenation, and its total width.
+
+    Returns:
+        List of (array, first column in the array, length) per run; the array is -1 for negative indices.
+
+    """
+    if len(ind) == 0:
+        return []
+    prev, cur = ind[:-1], ind[1:]
+    joined = np.where(prev < 0, cur < 0, (cur == prev + 1) & ~np.isin(cur, offsets))
+    starts = np.concatenate([[0], np.flatnonzero(~joined) + 1])
+    lengths = np.diff(np.concatenate([starts, [len(ind)]]))
+    arrays = np.where(ind[starts] < 0, -1, np.searchsorted(offsets, ind[starts], side="right") - 1)
+    return [(int(a), int(i - offsets[a]), int(n)) for a, i, n in zip(arrays, ind[starts], lengths)]
+
+
+def take_columns(x, ind, max_runs=64):
+    """
+    Returns the columns ``ind`` of ``x``, for static indices. ``x`` can be a list of arrays, standing for their
+    concatenation along the last axis, and a negative index gives a zero.
+
+    Unique indices that form a few runs of consecutive columns are sliced and concatenated, forward and backward.
+    Otherwise the columns are gathered, and so is the gradient: on batched arrays a gather is slow, and the scatter
+    that JAX would use for its gradient is very slow.
+
+    Args:
+        x (jnp.ndarray or list of jnp.ndarray): Array, or arrays, to select from.
+        ind (np.ndarray): Indices into the last axis of x.
+        max_runs (int): Largest number of runs to slice instead of gathering.
+
+    Returns:
+        The selected columns of x.
+
+    """
+    parts = tuple(x) if isinstance(x, (list, tuple)) else (x,)
+    ind = np.asarray(ind)
+    offsets = np.concatenate([[0], np.cumsum([p.shape[-1] for p in parts])]).astype(int)
+    width, bounds = offsets[-1], list(zip(offsets[:-1], offsets[1:]))
+    picked = ind[ind >= 0]
+
+    def gather(sources, index):
+        zero = jnp.zeros(sources[0].shape[:-1] + (1,), sources[0].dtype)
+        padded = jnp.concatenate(tuple(sources) + (zero,), axis=-1)
+        return padded[..., np.where(index < 0, padded.shape[-1] - 1, index)]
+
+    if len(np.unique(picked)) < len(picked):
+        return gather(parts, ind)
+
+    def blocks(sources, runs):
+        out = [jnp.zeros(sources[0].shape[:-1] + (n,), sources[0].dtype) if a < 0 else sources[a][..., i:i + n]
+               for a, i, n in runs]
+        return out[0] if len(out) == 1 else jnp.concatenate(out, axis=-1)
+
+    # the inverse map, for the gradient: the position in the result of each column of the parts, or -1
+    inverse = np.full(width, -1)
+    inverse[picked] = np.flatnonzero(ind >= 0)
+    runs = _column_runs(ind, offsets)
+    inverse_runs = [_column_runs(inverse[a:b], np.array([0, len(ind)])) for a, b in bounds]
+    sliced = len(ind) > 0 and max(len(runs), *(len(r) for r in inverse_runs)) <= max_runs
+
+    @jax.custom_vjp
+    def take(parts):
+        return blocks(parts, runs) if sliced else gather(parts, ind)
+
+    def backward(_, g):
+        if sliced:
+            return (tuple(blocks((g,), r) for r in inverse_runs),)
+        return (tuple(gather((g,), inverse[a:b]) for a, b in bounds),)
+
+    take.defvjp(lambda parts: (take(parts), None), backward)
+    return take(parts)

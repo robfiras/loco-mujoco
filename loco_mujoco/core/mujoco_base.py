@@ -28,6 +28,7 @@ from loco_mujoco.core.visuals import MjvScene, MujocoViewer, UsdTrajectoryExport
 from loco_mujoco.core.visuals.usd_exporter import USD_EXPORTER_PARAMS
 from loco_mujoco.core.visuals.viser_viewer import VISER_ONLY_VIEWER_PARAMS
 from loco_mujoco.core.utils.models import get_models_dir
+from loco_mujoco.core.utils.math import take_columns
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
@@ -119,6 +120,7 @@ class Mujoco:
         timestep (int, optional): Simulation timestep. If None, it's read from the model.
         n_substeps (int, optional): Number of substeps per simulation step. Defaults to 1.
         model_option_conf (Dict, optional): Changes to apply to the Mujoco option config.
+        model_contact_conf (Dict, optional): Changes to the contact setup of the robot geoms, see _modify_contact_spec.
         reward_type (str, optional): The type of reward function. Defaults to "NoReward".
         reward_params (Dict, optional): Parameters for the reward function. Defaults to None.
         goal_type (str, optional): The type of goal specification. Defaults to "NoGoal".
@@ -157,6 +159,7 @@ class Mujoco:
                  timestep: int = None,
                  n_substeps: int = 1,
                  model_option_conf: Dict = None,
+                 model_contact_conf: Dict = None,
                  reward_type: str = "NoReward",
                  reward_params: Dict = None,
                  goal_type: str = "NoGoal",
@@ -181,6 +184,10 @@ class Mujoco:
                 model_option_conf = {"timestep": timestep}
             else:
                 model_option_conf["timestep"] = timestep
+
+        if model_contact_conf is not None:
+            spec = mujoco.MjSpec.from_file(spec) if isinstance(spec, str) else spec
+            spec = self._modify_contact_spec(spec, model_contact_conf)
 
         # load the model, spec and data
         self._init_model, self._model, self._data, self._mjspec = self.load_mujoco(spec, model_option_conf)
@@ -922,7 +929,9 @@ class Mujoco:
                                    data: MjData,
                                    carry: AdditionalCarry,
                                    backend: ModuleType,
-                                   traj: Optional[Trajectory] = None) -> Tuple[np.ndarray, AdditionalCarry]:
+                                   traj: Optional[Trajectory] = None,
+                                   ind: Optional[np.ndarray] = None,
+                                   keep_layout: bool = False) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Creates the observation array by concatenating extracted observations from all types.
 
@@ -932,38 +941,42 @@ class Mujoco:
             carry (AdditionalCarry): Additional carry information.
             backend (ModuleType): The numerical backend to use (NumPy or JAX NumPy).
             traj (Trajectory, optional): Trajectory to use.
+            ind (np.ndarray, optional): Entries of the observation to create. Only the observations that hold
+                one of them are computed. Defaults to all entries.
+            keep_layout (bool): With ``ind``: if True, the whole observation is returned with the other entries
+                at zero; if False, only the entries ``ind``, in this order.
 
         Returns:
             Tuple[np.ndarray, AdditionalCarry]: The observation array and updated carry.
         """
-        obs_not_stateful = backend.concatenate([
-            obs_type.get_all_obs_of_type(self, model, data, self._data_indices, backend)
-            for obs_type in ObservationType.list_all_non_stateful()
-        ])
+        n_obs = len(self._obs_indices.concatenated_indices) + len(self.obs_container.get_all_stateful_indices())
+        ind = np.arange(n_obs) if ind is None else np.asarray(ind)
 
-        obs_not_stateful = obs_not_stateful[self._obs_indices.concatenated_indices]
-
-        obs_stateful = []
+        # the observation vectors that hold a requested entry, and the entries they hold
+        vectors, entries = [], []
+        for obs_type in ObservationType.list_all_non_stateful():
+            type_entries = getattr(self._obs_indices, obs_type.__name__)
+            if np.isin(type_entries, ind).any():
+                vectors.append(obs_type.get_all_obs_of_type(self, model, data, self._data_indices, backend))
+                entries.append(type_entries)
         for obs in self.obs_container.list_all_stateful():
-            obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
-            obs_stateful.append(obs_s)
+            if np.isin(obs.obs_ind, ind).any():
+                obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
+                vectors.append(obs_s)
+                entries.append(obs.obs_ind)
 
-        obs_stateful = backend.concatenate(obs_stateful)
-        stateful_obs_ind = self.obs_container.get_all_stateful_indices()
-
-        # merge the non-stateful and stateful observations and bring them in the order of the observation spec
-        merged = backend.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=float)
-        mask = backend.ones(len(merged), dtype=bool)
+        # where each requested entry is in the concatenated vectors (-1: nowhere, a zero)
+        position = np.full(n_obs, -1)
+        position[np.concatenate(entries)] = np.arange(sum(len(e) for e in entries))
+        if keep_layout:
+            position[np.setdiff1d(np.arange(n_obs), ind)] = -1
+        else:
+            position = position[ind]
 
         if backend == np:
-            mask[stateful_obs_ind] = False
-            merged[mask] = obs_not_stateful
-            merged[stateful_obs_ind] = obs_stateful
+            merged = np.concatenate(vectors + [np.zeros(1)])[position].astype(float)
         elif backend == jnp:
-            mask = mask.at[stateful_obs_ind].set(False)
-            indices = jnp.where(mask, size=len(obs_not_stateful))[0]  # Convert boolean mask to indices
-            merged = merged.at[indices].set(obs_not_stateful)
-            merged = merged.at[stateful_obs_ind].set(obs_stateful)
+            merged = take_columns(vectors, position)
 
         return merged, carry
 
@@ -1141,6 +1154,33 @@ class Mujoco:
         if option_config is not None:
             for key, value in option_config.items():
                 setattr(spec.option, key, value)
+        return spec
+
+    @staticmethod
+    def _modify_contact_spec(spec: MjSpec, contact_config: Dict) -> MjSpec:
+        """
+        Modifies the contact setup of all colliding geoms outside the world body.
+
+        Args:
+            spec (MjSpec): The Mujoco specification.
+            contact_config (Dict): "self_collisions" (bool, default True): if False, these geoms only collide
+                with the world body. "condim" (int, optional): contact dimensionality to set on them.
+
+        Returns:
+            MjSpec: The modified Mujoco specification.
+        """
+        self_collisions = contact_config.get("self_collisions", True)
+        condim = contact_config.get("condim")
+        for body in spec.bodies:
+            if body.name == spec.worldbody.name:
+                continue
+            for geom in body.geoms:
+                if geom.contype == 0 and geom.conaffinity == 0:
+                    continue
+                if not self_collisions:
+                    geom.contype, geom.conaffinity = 0, 1
+                if condim is not None:
+                    geom.condim = condim
         return spec
 
     @staticmethod

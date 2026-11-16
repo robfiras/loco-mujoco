@@ -140,3 +140,25 @@ def test_MimicReward(standing_trajectory, falling_trajectory, backend, mock_rand
         reward_42 = float(transitions.rewards[42])
         assert isclose(reward_sum, 35.697357177734375, abs_tol=_ATOL)
         assert isclose(reward_42, 0.5023977160453796, abs_tol=_ATOL)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_SiteTrackingReward(standing_trajectory, falling_trajectory, backend, mock_random):
+    expert_traj: Trajectory = standing_trajectory
+    nominal_traj: Trajectory = falling_trajectory
+
+    transitions = generate_test_trajectories(expert_traj, nominal_traj, backend, horizon=100,
+                                             reward_type="SiteTrackingReward")
+
+    if backend == "numpy":
+        assert len(transitions.rewards) == 99
+        reward_sum = transitions.rewards.sum()
+        reward_42 = transitions.rewards[42]
+        assert isclose(reward_sum, 2.501685380935669, abs_tol=_ATOL)
+        assert isclose(reward_42, 0.03555460646748543, abs_tol=_ATOL)
+    else:
+        assert len(transitions.rewards) == 99
+        reward_sum = float(jnp.sum(transitions.rewards))
+        reward_42 = float(transitions.rewards[42])
+        assert isclose(reward_sum, 2.501685380935669, abs_tol=_ATOL)
+        assert isclose(reward_42, 0.03555460274219513, abs_tol=_ATOL)

@@ -15,6 +15,7 @@ from loco_mujoco.core.observations.base import ObservationType
 from loco_mujoco.core.utils import mj_jntname2qposid, mj_jntname2qvelid, mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.utils.math import calculate_relative_site_quatities, quaternion_angular_distance
 from loco_mujoco.core.utils.math import quat_scalarfirst2scalarlast
+from loco_mujoco.core.utils.math import calc_site_velocities
 from loco_mujoco.core.reward.utils import out_of_bounds_action_cost
 
 
@@ -422,5 +423,232 @@ class MimicReward(TrajectoryBasedReward):
         # update reward state
         reward_state = reward_state.replace(last_qvel=data.qvel, last_action=action)
         carry = carry.replace(reward_state=reward_state)
+
+        return total_reward, carry
+
+
+def _heading_rotation(mat, backend):
+    """Rotation around the world z axis by the heading of a rotation matrix."""
+    yaw = backend.arctan2(mat[1, 0], mat[0, 0])
+    c, s, zero = backend.cos(yaw), backend.sin(yaw), 0.0 * yaw
+    return backend.stack([backend.stack([c, -s, zero]), backend.stack([s, c, zero]),
+                          backend.stack([zero, zero, zero + 1.0])])
+
+
+def _rotation_angle(mat_a, mat_b, backend):
+    """Angle between rotation matrices of shape (..., 3, 3), with a finite gradient at equal rotations."""
+    rel = backend.einsum("...ji,...jk->...ik", mat_a, mat_b)
+    trace = rel[..., 0, 0] + rel[..., 1, 1] + rel[..., 2, 2]
+    axis = backend.stack([rel[..., 2, 1] - rel[..., 1, 2], rel[..., 0, 2] - rel[..., 2, 0],
+                          rel[..., 1, 0] - rel[..., 0, 1]], axis=-1)
+    sq = backend.sum(axis * axis, axis=-1)
+    sin2 = backend.where(sq > 0.0, backend.sqrt(backend.where(sq > 0.0, sq, 1.0)), 0.0)
+    return backend.arctan2(sin2, trace - 1.0)
+
+
+@struct.dataclass
+class SiteTrackingRewardState:
+    """
+    State of SiteTrackingReward.
+    """
+    last_action: Union[np.ndarray, jnp.ndarray]
+
+
+class SiteTrackingReward(TrajectoryBasedReward):
+    """
+    Tracking reward on the mimic sites with the terms of mjlab's motion tracking task. Every tracking term is
+    exp(-error / std^2):
+
+    - the position and the orientation of the main site in the world,
+    - the positions and orientations of all mimic sites, against the reference moved to the robot's horizontal
+      position and heading, so that drift only lowers the two main site terms,
+    - the linear and angular velocities of all mimic sites in the world.
+
+    The action rate and joint positions outside the soft joint limits are penalized. The main site is the first
+    mimic site.
+
+    """
+
+    def __init__(self, env: Any,
+                 sites_for_mimic=None,
+                 main_pos_std: float = 0.3, main_ori_std: float = 0.4,
+                 site_pos_std: float = 0.3, site_ori_std: float = 0.4,
+                 site_lin_vel_std: float = 1.0, site_ang_vel_std: float = 3.14,
+                 w_main_pos: float = 0.5, w_main_ori: float = 0.5,
+                 w_site_pos: float = 1.0, w_site_ori: float = 1.0,
+                 w_site_lin_vel: float = 1.0, w_site_ang_vel: float = 1.0,
+                 w_action_rate: float = -0.1, w_joint_limit: float = -2.0,
+                 soft_joint_pos_limit_factor: float = 0.9,
+                 scale_by_dt: bool = True,
+                 **kwargs):
+        """
+        Initialize the site tracking reward function.
+
+        Args:
+            env (Any): Environment instance.
+            sites_for_mimic (List[str], optional): Sites to track, the main site first. Defaults to None, taking all.
+            main_pos_std, main_ori_std, site_pos_std, site_ori_std, site_lin_vel_std, site_ang_vel_std (float):
+                Width of each tracking term.
+            w_main_pos, w_main_ori, w_site_pos, w_site_ori, w_site_lin_vel, w_site_ang_vel (float): Weight of each
+                tracking term.
+            w_action_rate (float): Weight of the squared action difference.
+            w_joint_limit (float): Weight of the distance of the joint positions to their soft limits.
+            soft_joint_pos_limit_factor (float): Part of each joint range, around its center, that is not penalized.
+            scale_by_dt (bool): Multiply the reward by the control timestep, as mjlab does.
+            **kwargs (Any): Additional keyword arguments.
+
+        """
+
+        super().__init__(env, **kwargs)
+
+        self._std_sq = np.square([main_pos_std, main_ori_std, site_pos_std, site_ori_std,
+                                  site_lin_vel_std, site_ang_vel_std])
+        self._w = np.array([w_main_pos, w_main_ori, w_site_pos, w_site_ori, w_site_lin_vel, w_site_ang_vel])
+        self._w_action_rate = w_action_rate
+        self._w_joint_limit = w_joint_limit
+        self._scale = env.dt if scale_by_dt else 1.0
+
+        # the mimic sites, the main site first
+        model = env._model
+        site_names = self._info_props["sites_for_mimic"] if sites_for_mimic is None else sites_for_mimic
+        self._site_ids = np.array([mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name) for name in site_names])
+        self._site_body_ids = model.site_bodyid[self._site_ids]
+        self._site_root_ids = model.body_rootid[self._site_body_ids]
+
+        # soft limits of the limited joints
+        limited = [i for i in range(model.njnt)
+                   if model.jnt_type[i] != mujoco.mjtJoint.mjJNT_FREE and model.jnt_limited[i]]
+        self._limited_qpos_ind = model.jnt_qposadr[limited]
+        center, half_range = model.jnt_range[limited].mean(axis=1), 0.5 * np.ptp(model.jnt_range[limited], axis=1)
+        self._soft_low = center - soft_joint_pos_limit_factor * half_range
+        self._soft_high = center + soft_joint_pos_limit_factor * half_range
+
+    @property
+    def max_reward(self) -> float:
+        """Reward of a step on the reference, without penalties."""
+        return float(self._scale * np.sum(self._w))
+
+    def init_state(self, env: Any,
+                   key: Any,
+                   model: Union[MjModel, Model],
+                   data: Union[MjData, Data],
+                   backend: ModuleType,
+                   traj=None):
+        """
+        Initialize the reward state.
+
+        Args:
+            env (Any): The environment instance.
+            key (Any): Key for the reward state.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+
+        Returns:
+            SiteTrackingRewardState: The initialized reward state.
+
+        """
+        return SiteTrackingRewardState(last_action=backend.zeros(env.info.action_space.shape[0]))
+
+    def reset(self,
+              env: Any,
+              model: Union[MjModel, Model],
+              data: Union[MjData, Data],
+              carry: Any,
+              backend: ModuleType,
+              traj=None):
+        """
+        Reset the reward state.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Additional carry.
+            backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj: Trajectory to use (optional).
+
+        Returns:
+            Tuple[Union[MjData, Data], Any]: The updated data and carry.
+
+        """
+        carry = carry.replace(reward_state=self.init_state(env, None, model, data, backend, traj))
+        return data, carry
+
+    @check_traj_provided
+    def __call__(self,
+                 state: Union[np.ndarray, jnp.ndarray],
+                 action: Union[np.ndarray, jnp.ndarray],
+                 next_state: Union[np.ndarray, jnp.ndarray],
+                 absorbing: bool,
+                 info: Dict[str, Any],
+                 env: Any,
+                 model: Union[MjModel, Model],
+                 data: Union[MjData, Data],
+                 carry: Any,
+                 backend: ModuleType,
+                 traj=None) -> Tuple[float, Any]:
+        """
+        Computes the site tracking reward of the current state against the current frame of the trajectory.
+
+        Args:
+            state (Union[np.ndarray, jnp.ndarray]): Last state.
+            action (Union[np.ndarray, jnp.ndarray]): Applied action.
+            next_state (Union[np.ndarray, jnp.ndarray]): Current state.
+            absorbing (bool): Whether the state is absorbing.
+            info (Dict[str, Any]): Additional information.
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Additional carry.
+            backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+
+        Returns:
+            Tuple[float, Any]: The reward for the current transition and the updated carry.
+
+        Raises:
+            ValueError: If trajectory handler is not provided.
+
+        """
+        reward_state = carry.reward_state
+        traj_data = (traj if traj is not None else env._traj).data
+        ref = traj_data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
+
+        # poses and velocities (angular, then linear) of the mimic sites in the world; the main site is entry 0
+        pos, ref_pos = data.site_xpos[self._site_ids], ref.site_xpos[self._site_ids]
+        mat = data.site_xmat[self._site_ids].reshape(-1, 3, 3)
+        ref_mat = ref.site_xmat[self._site_ids].reshape(-1, 3, 3)
+        vel = calc_site_velocities(self._site_ids, data, self._site_body_ids, self._site_root_ids, backend)
+        ref_vel = calc_site_velocities(self._site_ids, ref, self._site_body_ids, self._site_root_ids, backend)
+
+        # the reference at the robot's horizontal position and heading, with its own height, roll and pitch
+        turn = _heading_rotation(mat[0] @ ref_mat[0].T, backend)
+        ref_pos_moved = (backend.concatenate([pos[0, :2], ref_pos[0, 2:]])
+                         + (ref_pos - ref_pos[0]) @ turn.T)
+        ref_mat_moved = backend.einsum("ij,bjk->bik", turn, ref_mat)
+
+        dist = backend.stack([
+            backend.sum(backend.square(ref_pos[0] - pos[0])),
+            backend.square(_rotation_angle(ref_mat[0], mat[0], backend)),
+            backend.mean(backend.sum(backend.square(ref_pos_moved - pos), axis=-1)),
+            backend.mean(backend.square(_rotation_angle(ref_mat_moved, mat, backend))),
+            backend.mean(backend.sum(backend.square(ref_vel[:, 3:] - vel[:, 3:]), axis=-1)),
+            backend.mean(backend.sum(backend.square(ref_vel[:, :3] - vel[:, :3]), axis=-1))])
+        tracking_reward = backend.sum(self._w * backend.exp(-dist / self._std_sq))
+
+        # penalties
+        action_rate = backend.sum(backend.square(action - reward_state.last_action))
+        qpos = data.qpos[self._limited_qpos_ind]
+        out_of_limits = backend.sum(backend.maximum(self._soft_low - qpos, 0.0)
+                                    + backend.maximum(qpos - self._soft_high, 0.0))
+
+        total_reward = self._scale * (tracking_reward + self._w_action_rate * action_rate
+                                      + self._w_joint_limit * out_of_limits)
+
+        # set nan values to 0
+        total_reward = backend.nan_to_num(total_reward, nan=0.0)
+
+        # update reward state
+        carry = carry.replace(reward_state=reward_state.replace(last_action=action))
 
         return total_reward, carry

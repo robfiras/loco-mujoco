@@ -155,3 +155,18 @@ def test_atleast_3d(backend):
     # already-3d passes through unchanged
     w = backend.array(np.zeros((2, 3, 4)))
     assert m.atleast_3d(w, backend).shape == (2, 3, 4)
+
+
+def test_rotvec_from_matrix_jax_matches_scipy_and_has_finite_gradients():
+    rots = sRot.random(64, random_state=0)
+    special = sRot.from_rotvec([[0.0, 0.0, 0.0], [np.pi, 0.0, 0.0], [0.0, np.pi, 0.0],
+                                [0.0, 0.0, np.pi], [0.0, 0.0, 1e-4]])
+    mats = np.concatenate([rots.as_matrix(), special.as_matrix()])
+    got = np.asarray(m.rotvec_from_matrix_jax(jnp.asarray(mats)))
+    # compare as rotations: at angle pi, v and -v are the same rotation
+    np.testing.assert_allclose(sRot.from_rotvec(got).as_matrix(), mats, atol=1e-5)
+    np.testing.assert_allclose(got[:64], rots.as_rotvec(), atol=1e-5)
+
+    # the jax.scipy implementation this replaces has NaN gradients at the identity
+    grad = jax.grad(lambda x: jnp.sum(m.rotvec_from_matrix_jax(x)))(jnp.asarray(mats))
+    assert np.all(np.isfinite(np.asarray(grad)))
