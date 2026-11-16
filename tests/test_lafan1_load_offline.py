@@ -152,7 +152,7 @@ def test_missing_dataset_is_retargeted_from_the_source_env(tmp_path, monkeypatch
     assert isinstance(traj, Trajectory)
 
 
-def test_incomplete_clip_is_extended_with_forward_kinematics(tmp_path, monkeypatch):
+def test_incomplete_clip_is_extended_with_forward_kinematics(tmp_path, monkeypatch, capsys):
     # a variables file without a cache path: the robot configuration loader reads it too
     var_file = tmp_path / "vars.yaml"
     var_file.write_text("SOME_OTHER_KEY: x\n")
@@ -172,7 +172,10 @@ def test_incomplete_clip_is_extended_with_forward_kinematics(tmp_path, monkeypat
     assert not incomplete.data.is_complete
     _serve(monkeypatch, tmp_path, incomplete)
 
+    capsys.readouterr()   # drop the summary printed by the environment created above
     traj = load_lafan1_trajectory(_REAL_ENV, "walk1")
+    # the helper environment built for the forward kinematics does not print a second summary
+    assert "Observation Summary" not in capsys.readouterr().out
 
     # the clip is resampled to the control frequency of the robot's retargeting configuration
     n_out = traj.data.qpos.shape[0]
