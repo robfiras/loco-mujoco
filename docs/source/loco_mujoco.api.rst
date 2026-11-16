@@ -103,7 +103,9 @@ Algorithms
 
 LocoMuJoCo comes with JAX implementations of PPO, GAIL, and AMP, in which training and environment are compiled into
 a single function. DeepMimic-style training uses PPO with the
-:class:`MimicReward <loco_mujoco.core.reward.trajectory_based.MimicReward>`. Training examples are available in the
+:class:`MimicReward <loco_mujoco.core.reward.trajectory_based.MimicReward>`, the original LocoMuJoCo imitation reward.
+The :class:`SiteTrackingReward <loco_mujoco.core.reward.trajectory_based.SiteTrackingReward>` is a BeyondMimic-style
+tracking reward that is computed on the mimic sites instead of on bodies. Training examples are available in the
 `training examples folder <https://github.com/robfiras/loco-mujoco/tree/dev/examples/training_examples>`__.
 
 .. toctree::

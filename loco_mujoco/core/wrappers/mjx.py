@@ -188,13 +188,13 @@ class NStepWrapper(BaseWrapper):
 
       The current frame stays at its original indices, so every existing index (actor,
       critic, per-term) keeps pointing at the right place and only the actor needs
-      widening. That is what lets the critic stay un-stacked, matching mjlab, whose
-      ``privileged_state`` group has no history.
+      widening. That is what lets the critic stay un-stacked, as in asymmetric actor-critic
+      setups whose privileged critic observation has no history.
 
     Note the history holds PAST frames only -- the current frame is already present in
     full at the head, so including it again would feed the network the same numbers
-    twice. mjlab reaches the same arrangement differently, by pushing the current frame
-    out of a 4-frame window with a one-step lag.
+    twice. The same arrangement can also be reached by pushing the current frame out of a
+    longer window with a one-step lag.
     """
 
     def __init__(self, env, n_steps, include_actions=False, group=None):

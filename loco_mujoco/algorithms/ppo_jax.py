@@ -156,7 +156,7 @@ class PPOJax(JaxRLAlgorithmBase):
             else:
                 # Group mode: layout is [current full obs][group @ t-1] ... so the
                 # current frame keeps its indices and ONLY the actor grows. The critic is
-                # untouched, matching mjlab, whose privileged_state group has no history.
+                # untouched: its privileged observation has no history.
                 obs_len = env.info.observation_space.shape[0]
                 g_ind = jnp.asarray(
                     env.obs_container.get_obs_ind_by_group(hist_group), dtype=int)

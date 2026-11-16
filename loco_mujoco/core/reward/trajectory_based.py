@@ -149,8 +149,10 @@ class MimicRewardState:
 
 class MimicReward(TrajectoryBasedReward):
     """
-    DeepMimic reward function that computes the reward based on the deviation from the trajectory. The reward is
-    computed as the negative exponential of the squared difference between the current state and the trajectory state.
+    DeepMimic-style reward (Peng et al., 2018) and the original LocoMuJoCo imitation reward; see
+    :class:`SiteTrackingReward` for a BeyondMimic-style alternative. The reward is based on the deviation from the
+    trajectory, computed as the negative exponential of the squared difference between the current state and the
+    trajectory state.
     The reward is computed for the joint positions, joint velocities, relative site positions,
     relative site orientations, and relative site velocities. These sites are specified in the environment properties
     and are placed at key points on the body to mimic the motion of the body.
@@ -456,8 +458,10 @@ class SiteTrackingRewardState:
 
 class SiteTrackingReward(TrajectoryBasedReward):
     """
-    Tracking reward on the mimic sites with the terms of mjlab's motion tracking task. Every tracking term is
-    exp(-error / std^2):
+    BeyondMimic-style tracking reward (Liao et al., 2025), computed on the mimic sites instead of on bodies, so
+    that it applies to every robot without a robot-specific body list. Compared to :class:`MimicReward`, it has
+    no joint-space terms, tracks the main site in the world, and tracks the other sites against a reference that
+    is moved to the robot's position and heading. Every tracking term is exp(-error / std^2):
 
     - the position and the orientation of the main site in the world,
     - the positions and orientations of all mimic sites, against the reference moved to the robot's horizontal
@@ -494,7 +498,7 @@ class SiteTrackingReward(TrajectoryBasedReward):
             w_action_rate (float): Weight of the squared action difference.
             w_joint_limit (float): Weight of the distance of the joint positions to their soft limits.
             soft_joint_pos_limit_factor (float): Part of each joint range, around its center, that is not penalized.
-            scale_by_dt (bool): Multiply the reward by the control timestep, as mjlab does.
+            scale_by_dt (bool): Multiply the reward by the control timestep, as BeyondMimic does.
             **kwargs (Any): Additional keyword arguments.
 
         """
