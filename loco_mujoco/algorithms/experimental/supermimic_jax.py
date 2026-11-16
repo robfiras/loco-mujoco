@@ -35,7 +35,9 @@ Domain randomisation: when the env randomises (any randomizer other than
 flattened into a context vector ``xi`` that the dynamics and the critic receive. Otherwise
 ``xi`` is empty.
 
-Requires the JAX MJX backend (``use_mjwarp=False``): MjWarp is not differentiable.
+Backends: the environment steps can run on MJX or on MjWarp (``use_mjwarp=True``). The gradients of the
+imagined rollouts run through the kinematics, which the warp kernels cannot differentiate, so with MjWarp
+only the real steps use warp and imagination gets a JAX copy of the model.
 """
 
 import ast
