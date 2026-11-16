@@ -5,10 +5,18 @@ Installation
 --------------
 
 
+LocoMuJoCo requires **Python 3.10 or newer**. We recommend a fresh environment, for example with conda:
+
+.. code-block:: bash
+
+   conda create -n loco-mujoco python=3.11
+   conda activate loco-mujoco
+
 Clone the repo and install in editable mode:
 
 .. code-block:: bash
 
+   git clone https://github.com/robfiras/loco-mujoco.git
    cd loco-mujoco
    pip install -e .
 

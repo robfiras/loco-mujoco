@@ -22,7 +22,7 @@ Any of the default components can be overridden by passing the desired component
 
 The imitation factory requires at least one trajectory to be defined. Trajectories can be loaded from different sources such as:
 
-- **Default Datasets:** Configured using :class:`DefaultDatasetConf <loco_mujoco.task_factories.dataset_confs.DefaultDatasetConf>`, these datasets are predefined and include common tasks like "walk" or "stepinplace1". The dataset type can be either "mocap" or "pretrained".
+- **Default Datasets:** Configured using :class:`DefaultDatasetConf <loco_mujoco.task_factories.dataset_confs.DefaultDatasetConf>`, these datasets are predefined and include common tasks like "walk" or "stepinplace1".
 - **AMASS Datasets:** Configured using :class:`AMASSDatasetConf <loco_mujoco.task_factories.dataset_confs.AMASSDatasetConf>`, these datasets are typically motion capture data from the AMASS database. You can specify a relative path to the dataset or a predefined group of datasets.
 - **LAFAN1 Datasets:** Configured using :class:`LAFAN1DatasetConf <loco_mujoco.task_factories.dataset_confs.LAFAN1DatasetConf>`, these datasets are loaded from the LocoMuJoCo's HuggingFace repository: `robfiras/loco-mujoco-datasets <https://huggingface.co/datasets/robfiras/loco-mujoco-datasets>`_. They provide datasets for all humanoid environments.
 - **Custom Trajectories:** Configured using :class:`CustomDatasetConf <loco_mujoco.task_factories.dataset_confs.CustomDatasetConf>`, these datasets allow loading user-defined trajectories, which must be provided as a :class:`~loco_mujoco.core.trajectory.dataclasses.Trajectory` object.
