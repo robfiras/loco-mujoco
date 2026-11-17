@@ -882,7 +882,7 @@ class GoalTrajMimic(Goal):
         site_xmat = traj_data.get_site_xmat(traj_state.traj_no, traj_state.subtraj_step_no, backend)
         s_ids = jnp.array(self._rel_site_ids)
 
-        qpos_init = traj_data.get_qpos(traj_state.traj_no, traj_state.subtraj_step_no_init, backend)
+        offset_xy = env.get_traj_offset_xy(carry, backend, traj)   # trajectory xy -> world xy
         type = backend.full(self.n_visual_geoms, int(mujoco.mjtGeom.mjGEOM_BOX), dtype=backend.int32).reshape((-1, 1))
         size = backend.tile(backend.array([0.075, 0.05, 0.025]), (self.n_visual_geoms, 1))
         color = backend.tile(backend.array([0.0, 1.0, 0.0, 1.0]), (self.n_visual_geoms, 1))
@@ -892,7 +892,7 @@ class GoalTrajMimic(Goal):
             geom_type = user_scene.geoms.type.at[self.visual_geoms_idx].set(type)
             geom_size = user_scene.geoms.size.at[self.visual_geoms_idx].set(size)
             geom_rgba = user_scene.geoms.rgba.at[self.visual_geoms_idx].set(color)
-            geom_pos = geom_pos.at[:, :2].add(-qpos_init[:2] + env._terrain.get_env_origin_xy(carry, backend))
+            geom_pos = geom_pos.at[:, :2].add(offset_xy)
         else:
             user_scene.geoms.pos[self.visual_geoms_idx] = site_xpos[s_ids]
             user_scene.geoms.mat[self.visual_geoms_idx] = site_xmat[s_ids]
@@ -904,7 +904,7 @@ class GoalTrajMimic(Goal):
             geom_type = user_scene.geoms.type[self.visual_geoms_idx]
             geom_rgba = user_scene.geoms.rgba[self.visual_geoms_idx]
             geom_size = user_scene.geoms.size[self.visual_geoms_idx]
-            geom_pos[:, :2] += env._terrain.get_env_origin_xy(carry, backend) - qpos_init[:2]
+            geom_pos[:, :2] += offset_xy
 
         # update carry
         new_user_scene = user_scene.replace(geoms=user_scene.geoms.replace(
@@ -1032,14 +1032,14 @@ class GoalTrajMimicv2(GoalTrajMimic):
         user_scene = carry.user_scene
         goal_geoms = user_scene.geoms
 
-        qpos_init = traj_data.get_qpos(traj_state.traj_no, traj_state.subtraj_step_no_init, backend)
+        offset_xy = env.get_traj_offset_xy(carry, backend, traj)   # trajectory xy -> world xy
         qpos = traj_data.get_qpos(traj_state.traj_no, traj_state.subtraj_step_no, backend)
         qvel = traj_data.get_qvel(traj_state.traj_no, traj_state.subtraj_step_no, backend)
 
         if backend == jnp:
 
             # calculate geom positions and orientations usinf FK
-            qpos = qpos.at[:2].add(-qpos_init[:2] + env._terrain.get_env_origin_xy(carry, backend))
+            qpos = qpos.at[:2].add(offset_xy)
             data = data.replace(qpos=qpos, qvel=qvel)
             data = mujoco.mjx.kinematics(env.sys, data)
             geom_pos = data.geom_xpos[self._geom_ids]
@@ -1056,7 +1056,7 @@ class GoalTrajMimicv2(GoalTrajMimic):
             # calculate geom positions and orientations usinf FK
             data = deepcopy(data)
             data.qpos = qpos
-            data.qpos[:2] += env._terrain.get_env_origin_xy(carry, backend) - qpos_init[:2]
+            data.qpos[:2] += offset_xy
             data.qvel = qvel
             mujoco.mj_kinematics(model, data)
             geom_pos = data.geom_xpos[self._geom_ids]
