@@ -7,6 +7,7 @@ Within this directory, you can find different imitation and reinforcement learni
 - `jax_gail`: GAIL (Generative Adversarial Imitation Learning) example.
 - `jax_amp`: AMP (Adversarial Motion Prior) example.
 - `jax_rl_mimic`: DeepMimic imitation learning example.
+- `jax_rl_mimic_supermimic`: SuperMimic imitation learning example.
 - `jax_distill`: Vanilla DAgger distillation example.
 
 The remaining `jax_rl_mimic_*` directories (`bptt`, `history`, `s2pg`, `s2pg4`, `sac`, `td3`) contain

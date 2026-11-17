@@ -4,7 +4,7 @@ import jax
 import wandb
 from dataclasses import fields
 from loco_mujoco import TaskFactory
-from loco_mujoco.algorithms.experimental import SuperMimicJax
+from loco_mujoco.algorithms import SuperMimicJax
 
 import hydra
 from omegaconf import DictConfig, OmegaConf

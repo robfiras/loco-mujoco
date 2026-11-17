@@ -21,7 +21,7 @@ for a in sys.argv[1:]:
         __import__(a.split("=", 1)[1])
 
 from loco_mujoco import TaskFactory
-from loco_mujoco.algorithms.experimental import SuperMimicJax
+from loco_mujoco.algorithms import SuperMimicJax
 
 run, ckpt = Path(args[0]), args[1]
 exp = OmegaConf.load(run / "config.yaml").experiment

@@ -2,7 +2,7 @@ import os
 import argparse
 
 from loco_mujoco import TaskFactory
-from loco_mujoco.algorithms.experimental import SuperMimicJax
+from loco_mujoco.algorithms import SuperMimicJax
 
 from omegaconf import OmegaConf
 

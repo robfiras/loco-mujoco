@@ -11,9 +11,9 @@ from mujoco import mjx
 from omegaconf import OmegaConf, open_dict
 
 from loco_mujoco import TaskFactory
-from loco_mujoco.algorithms.experimental import SuperMimicJax
+from loco_mujoco.algorithms import SuperMimicJax
 from loco_mujoco.core.mujoco_base import Mujoco
-from loco_mujoco.algorithms.experimental.supermimic_jax import (BinResets, WorldModelSpec, WindowBuffer, state_is_valid,
+from loco_mujoco.algorithms.supermimic_jax import (BinResets, WorldModelSpec, WindowBuffer, state_is_valid,
                                                                  skip_gradient_spikes, muon_labels, scale_by_muon,
                                                                  _quat_mul, _quat_from_rotvec, _rotvec_from_quat, _Packed)
 
@@ -156,7 +156,7 @@ def test_buffers_skip_diverged_states():
         assert np.all(np.isfinite(np.asarray(v)))
     assert 0 < int(mask.sum()) < 512  # windows through env 1 at t=3 are masked, the rest kept
 
-    from loco_mujoco.algorithms.experimental.supermimic_jax import StartBuffer, StartState
+    from loco_mujoco.algorithms.supermimic_jax import StartBuffer, StartState
     template = SimpleNamespace(data=SimpleNamespace(qpos=qpos, qvel=qvel), observation=jnp.zeros((E, 4)),
                                info={}, additional_carry={"x": jnp.zeros(E)})
     sbuf = StartBuffer.create(4, template)
