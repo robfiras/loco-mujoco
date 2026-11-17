@@ -146,10 +146,10 @@ class UnitreeGo2(BaseRobotQuadruped):
         if actuation_spec is None:
             actuation_spec = self._get_action_specification(spec)
 
-        # set init position
-        if "init_state_type" not in kwargs.keys():
-            kwargs["init_state_type"] = "DefaultInitialStateHandler"
-            kwargs["init_state_params"] = (dict(qpos_init=self.init_qpos, qvel_init=self.init_qvel))
+        # set init position: the robot's standing pose, unless the caller chose another handler or its params
+        kwargs.setdefault("init_state_type", "DefaultInitialStateHandler")
+        if kwargs["init_state_type"] == "DefaultInitialStateHandler" and kwargs.get("init_state_params") is None:
+            kwargs["init_state_params"] = dict(qpos_init=self.init_qpos, qvel_init=self.init_qvel)
 
         # modify the specification if needed
         if self.mjx_enabled:
