@@ -38,7 +38,7 @@ from loco_mujoco.core.trajectory import (
     TrajectoryHandler,
     interpolate_trajectories,
 )
-from loco_mujoco.datasets.data_generation import ExtendTrajData, optimize_for_collisions
+from loco_mujoco.datasets.data_generation import ExtendTrajData
 from loco_mujoco.core.utils.mujoco import mj_get_collision_dist_and_normal
 from loco_mujoco import PATH_TO_SMPL_ROBOT_CONF
 from loco_mujoco.utils import setup_logger
@@ -231,7 +231,8 @@ def fit_smpl_motion(
 
     # get environment
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
+    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
+                  print_obs_summary=False)   # internal helper environment
 
     # add mocap bodies for all 'site_for_mimic' instances of an environment
     mjspec = env.mjspec
@@ -442,7 +443,8 @@ def fit_smpl_shape(
 
     # get environment
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
+    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
+                  print_obs_summary=False)   # internal helper environment
 
     # add mocap bodies for all 'site_for_mimic' instances of an environment
     mjspec = env.mjspec
@@ -611,11 +613,12 @@ def motion_transfer_robot_to_robot(
 
     if path_to_fitted_motion_source is None or not os.path.exists(path_to_fitted_motion_source):
 
-        device = torch.device("cuda")
+        device = torch.device(robot_conf_source.optimization_params.torch_device)
 
         # get the source env
         env_cls = LocoEnv.registered_envs[env_name_source]
-        env = env_cls(**robot_conf_source.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
+        env = env_cls(**robot_conf_source.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
+                  print_obs_summary=False)   # internal helper environment
 
         # add mocap bodies for all 'site_for_mimic' instances of an environment
         mjspec = env.mjspec
@@ -809,7 +812,8 @@ def extend_motion(
 
     """
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
+    env = env_cls(**env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
+                  print_obs_summary=False)   # internal helper environment
 
     traj_data, traj_info = interpolate_trajectories(traj.data, traj.info, 1.0 / env.dt)
     traj = Trajectory(info=traj_info, data=traj_data)

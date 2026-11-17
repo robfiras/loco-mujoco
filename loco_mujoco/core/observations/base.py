@@ -155,18 +155,28 @@ class ObservationContainer(UserDict):
         obs_ind_group = self.get_obs_ind_by_group(group_name)
         return obs[..., obs_ind_group]
 
-    def get_obs_ind_by_group(self, group_name: str = None):
+    def get_obs_ind_by_group(self, group_name=None):
         """
         Get the indices of the observations by group name.
 
         Args:
-            group_name (str): The group name to filter by.
+            group_name (str | list[str]): A group name, or several. With several, the
+                groups are concatenated IN THE ORDER GIVEN, and within each group the
+                observations keep container order. That order is part of the network's
+                input layout, so changing it invalidates existing checkpoints.
+
+                Passing overlapping groups duplicates the shared indices, which is
+                usually a mistake -- keep groups disjoint, or rely on the fact that a
+                term meant to be read by two consumers (e.g. last_action) can simply be
+                listed in both and requested by only one of them at a time.
 
         Returns:
             np.ndarray: The indices of the observations.
 
         """
-        obs_ind_group = [obs.obs_ind for obs in self.values() if group_name in obs.group]
+        groups = [group_name] if isinstance(group_name, str) else list(group_name)
+        obs_ind_group = [obs.obs_ind for g in groups
+                         for obs in self.values() if g in obs.group]
         return np.concatenate(obs_ind_group) if len(obs_ind_group) > 0 else np.array([])
 
     def get_randomizable_obs_indices(self):
@@ -243,11 +253,12 @@ class Observation:
         """
         Initialize the observation type from the Mujoco data structure and model.
         This method *must* initialize the following attributes:
-            - obs_ind: Indices of this observation in the observation space.
-            - data_type_ind: Indices of this observation in respective attribute
-                in the Mujoco data structure (like qpos, qvel, xpos, etc.).
-            - min: Minimum values of the observation in the observation space.
-            - max: Maximum values of the observation in the observation space.
+
+        - obs_ind: Indices of this observation in the observation space.
+        - data_type_ind: Indices of this observation in respective attribute
+          in the Mujoco data structure (like qpos, qvel, xpos, etc.).
+        - min: Minimum values of the observation in the observation space.
+        - max: Maximum values of the observation in the observation space.
 
         Args:
             env: Environment instance.
@@ -892,7 +903,7 @@ class Force(Observation):
                 con = data.contact[con_i]
                 con_geom_ids = (con.geom1, con.geom2)
 
-                if geom_ids == con_geom_ids:
+                if np.array_equal(geom_ids, con_geom_ids):
                     mujoco.mj_contactForce(model, data,
                                            con_i, c_array[i])
 

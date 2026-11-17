@@ -20,7 +20,7 @@ class Talos(BaseRobotHumanoid):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ==================== ================ ==================================== ============================== ===
     Index in Obs Name                 ObservationType  Min                                  Max                            Dim
@@ -151,7 +151,7 @@ class Talos(BaseRobotHumanoid):
     ============ ==================== ================ ==================================== ============================== ===
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **DefaultControl**
 
@@ -270,7 +270,9 @@ class Talos(BaseRobotHumanoid):
 
             spec = self._delete_from_spec(spec, joints_to_remove, motors_to_remove, equ_constr_to_remove)
 
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             spec = self._modify_spec_for_mjx(spec)
 
         super().__init__(spec=spec, actuation_spec=actuation_spec, observation_spec=observation_spec, **kwargs)

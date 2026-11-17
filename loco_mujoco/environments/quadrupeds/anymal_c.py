@@ -17,7 +17,7 @@ class AnymalC(BaseRobotQuadruped):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ========= ================ ==================================== ============================== ===
     Index in Obs Name      ObservationType  Min                                  Max                            Dim
@@ -76,7 +76,7 @@ class AnymalC(BaseRobotQuadruped):
     ============ ========= ================ ==================================== ============================== ===
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **PDControl**
 

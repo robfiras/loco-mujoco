@@ -28,6 +28,8 @@ from loco_mujoco.algorithms.common.networks import (RunningMeanStd,
 from loco_mujoco.core.wrappers import SummaryMetrics
 from loco_mujoco.algorithms.experimental.offpolicy_base import (
     OffPolicyBase, OffPolicyCriticNet, ReplayBuffer, OffPolicyAgentState,
+    _normalize_dense_kernels, _c51_project_target,
+    aggregate_q_target, pessimistic_mixture_weights,
 )
 
 
@@ -38,29 +40,42 @@ from loco_mujoco.algorithms.experimental.offpolicy_base import (
 class TD3ActorNet(nn.Module):
     """Deterministic actor.
 
-    Intentionally outputs RAW (unbounded) logits — the environment clips to
-    its own action space. Bounding via tanh saturates gradients when logits
-    drift large; letting them float and penalising only when they actually
-    exceed [-1, 1] preserves useful gradient inside the in-bounds region.
-    The out-of-bounds penalty is applied in the actor loss (see
-    `TD3Jax._actor_loss`).
+    Default (output_squash="none") emits RAW (unbounded) logits — the env / actor
+    loss clips and penalises OOB. Bounding via tanh saturates gradients when
+    logits drift large, so unconstrained outputs preserve useful gradient inside
+    [-1, 1] at the cost of needing the OOB penalty to keep them there.
+
+    output_squash="tanh" applies jnp.tanh to the final Dense output, bounding the
+    mean to (-1, 1) before exploration / target-policy noise is added. Use this
+    when the actor is drifting OOB enough that the critic extrapolation is
+    destabilising training (raw-actor failure mode on the kin G1 env).
     """
     action_dim: int
     hidden_layer_dims: tuple = (256, 256)
     activation: str = "relu"
     use_obs_norm: bool = True
+    output_squash: str = "none"
+    obs_ind: jnp.ndarray = None
+    compute_dtype: str = "float32"  # matmul dtype; the parameters and the output stay float32
 
     @nn.compact
     def __call__(self, x):
         activation_fn = get_activation_fn(self.activation)
+        if self.obs_ind is not None:
+            x = x[..., self.obs_ind]
         if self.use_obs_norm:
             x = RunningMeanStd()(x)
         for dim in self.hidden_layer_dims:
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
-                         bias_init=constant(0.0))(x)
+                         bias_init=constant(0.0), dtype=self.compute_dtype)(x)
             x = activation_fn(x)
         a = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
-                     bias_init=constant(0.0))(x)
+                     bias_init=constant(0.0), dtype=self.compute_dtype)(x).astype(jnp.float32)
+        if self.output_squash == "tanh":
+            a = jnp.tanh(a)
+        elif self.output_squash != "none":
+            raise ValueError(f"Unknown output_squash: {self.output_squash!r} "
+                             "(expected 'none' or 'tanh')")
         return a
 
 
@@ -74,6 +89,11 @@ class TD3SummaryMetrics(SummaryMetrics):
     mean_actor_loss: float = 0.0
     mean_action_norm: float = 0.0
     mean_oob_penalty: float = 0.0
+    mean_critic_grad_norm: float = 0.0
+    mean_actor_grad_norm: float = 0.0
+    mean_action_smoothness: float = 0.0
+    mean_curriculum_cur_max: float = 0.0
+    mean_global_step: float = 0.0
     buffer_size: int = 0
 
 
@@ -174,7 +194,11 @@ class TD3AgentState(OffPolicyAgentState):
         )
         extra_state = flax.serialization.from_state_dict(template_extra, d["extra_state"])
 
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return cls(
             actor_state=actor_state,
@@ -200,6 +224,28 @@ class TD3Jax(OffPolicyBase):
         obs_dim = int(env.info.observation_space.shape[0])
         action_dim = int(env.info.action_space.shape[0])
 
+        # Resolve actor/critic obs groups -> obs_ind arrays (mirrors ppo_jax).
+        actor_obs_group = getattr(config.experiment, "actor_obs_group", None)
+        critic_obs_group = getattr(config.experiment, "critic_obs_group", None)
+        # No str() here: get_obs_ind_by_group accepts a group name OR a list of them,
+        # and str() on a ListConfig produces "['a', 'b']", which matches no group and
+        # silently yields an EMPTY index array -- an actor built with zero inputs rather
+        # than an error.
+        def _resolve(group, what):
+            ind = jnp.asarray(env.obs_container.get_obs_ind_by_group(group),
+                              dtype=jnp.int32)
+            if ind.size == 0:
+                raise ValueError(
+                    f"{what}={group!r} selected no observations. Check the group "
+                    f"name(s) against the observation spec."
+                )
+            return ind
+
+        actor_obs_ind = (_resolve(actor_obs_group, "actor_obs_group")
+                         if actor_obs_group is not None else None)
+        critic_obs_ind = (_resolve(critic_obs_group, "critic_obs_group")
+                          if critic_obs_group is not None else None)
+
         with open_dict(config.experiment):
             config.experiment.obs_dim = obs_dim
             config.experiment.action_dim = action_dim
@@ -217,8 +263,10 @@ class TD3Jax(OffPolicyBase):
             hidden_layer_dims=tuple(hidden_layers),
             activation=str(exp.activation),
             use_obs_norm=bool(getattr(exp, 'use_obs_norm', False)),
+            output_squash=str(getattr(exp, 'output_squash', 'none')),
+            obs_ind=actor_obs_ind,
         )
-        critic_net = cls._build_critic_net(exp)
+        critic_net = cls._build_critic_net(exp, obs_ind=critic_obs_ind)
         actor_tx, critic_tx = cls._build_optimisers(exp)
 
         return cls._agent_conf(
@@ -246,19 +294,32 @@ class TD3Jax(OffPolicyBase):
         critic_params = agent_conf.critic_net.init(
             rng_c, jnp.zeros((1, obs_dim)), jnp.zeros((1, action_dim))
         )
+        # `critic_state.run_stats` is treated as the FULL mutable-variables
+        # bundle for the critic (everything except `params`). Today it holds
+        # `{"run_stats": ...}` when RunningMeanStd is in the trunk; with BN on,
+        # it also holds `{"batch_stats": ...}`. Bundling avoids threading a
+        # second carry field through every apply / target-update site.
+        # `log_probs_collection` is a sow output, not a long-lived state, so
+        # we exclude it from the bundle.
+        _BUNDLE_EXCLUDE = {"params", "log_probs_collection"}
+        critic_bundle = {k: v for k, v in critic_params.items() if k not in _BUNDLE_EXCLUDE}
         critic_state = TrainState.create(
             apply_fn=agent_conf.critic_net.apply,
             params=critic_params["params"],
-            run_stats=critic_params.get("run_stats", {}),
+            run_stats=critic_bundle,
             tx=agent_conf.critic_tx,
         )
         target_critic_params = critic_params["params"]
-        target_critic_run_stats = critic_params.get("run_stats", {})
+        target_critic_run_stats = critic_bundle
         extra_state = _TD3Extra(
             target_actor_params=actor_params["params"],
             target_actor_run_stats=actor_params.get("run_stats", {}),
         )
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return TD3AgentState(
             actor_state=actor_state,
@@ -290,7 +351,13 @@ class TD3Jax(OffPolicyBase):
         if not deterministic:
             sigma_act = float(getattr(exp, 'exploration_noise', 0.1))
             noise = sigma_act * jax.random.normal(rng, action.shape)
-            action = jnp.clip(action + noise, -1.0, 1.0)
+            # Pass tanh(mean) + noise to the env un-clipped. With output_squash=tanh
+            # the mean is already in (-1, 1) so noise can push the action slightly
+            # OOB — that's what the reward-side OOB term and the kin control's
+            # input clip are there to handle. With output_squash=none the actor is
+            # raw and OOB is unbounded; in that case the reward / actor-loss OOB
+            # plumbing is the only restoring force.
+            action = action + noise
         return action, actor_state
 
     @classmethod
@@ -311,22 +378,50 @@ class TD3Jax(OffPolicyBase):
     @classmethod
     def _actor_loss(cls, actor_params, actor_apply_fn, actor_run_stats,
                     critic_st, critic_apply_fn,
-                    obs_b, rng, exp, extra_state):
+                    obs_b, rng, exp, extra_state, nobs_b=None):
         action_raw, updates = actor_apply_fn(
             {"params": actor_params, "run_stats": actor_run_stats},
             obs_b, mutable=["run_stats"],
         )
-        # Query Q ONLY on in-bounds actions — clipping blocks gradient flow
-        # to the actor when a logit is outside [-1, 1], so the critic's
-        # extrapolated / hallucinated Q-values do not feed back into the
-        # actor update. Out-of-bounds logits are disciplined by the OOB
-        # penalty below instead.
-        action_for_Q = jnp.clip(action_raw, -1.0, 1.0)
-        (q1, q2), _ = critic_apply_fn(
-            {"params": critic_st.params, "run_stats": critic_st.run_stats},
-            obs_b, action_for_Q, mutable=["run_stats"],
+        # Optional stochastic actor loss (Motivo-style): query Q on
+        # tanh(mean) + clip(N(0, target_noise), -noise_clip, noise_clip)
+        # instead of the deterministic mean. Smooths the objective by penalizing
+        # actions that sit on narrow Q peaks.
+        stochastic_actor_loss = bool(getattr(exp, 'stochastic_actor_loss', False))
+        if stochastic_actor_loss:
+            sigma_tgt = float(getattr(exp, 'target_noise', 0.05))
+            noise_clip = float(getattr(exp, 'noise_clip', 0.15))
+            noise = jnp.clip(sigma_tgt * jax.random.normal(rng, action_raw.shape),
+                             -noise_clip, noise_clip)
+            action_for_Q = jnp.clip(action_raw + noise, -1.0, 1.0)
+        else:
+            # When the actor-side OOB penalty is off (lambda_oob == 0.0), route Q's
+            # gradient through the RAW action so the critic itself pulls OOB logits
+            # back toward in-bounds regions. This relies on the reward-side OOB
+            # term (LmjMimicReward.action_out_of_bounds_coeff) teaching the critic
+            # that OOB actions are bad. When lambda_oob > 0.0, keep clipping so the
+            # critic's extrapolated Q on OOB queries cannot feed back into the actor
+            # and the actor-side penalty is the sole restoring force on OOB channels.
+            lambda_oob_branch = float(getattr(exp, 'lambda_oob', 0.1))
+            if lambda_oob_branch == 0.0:
+                action_for_Q = action_raw
+            else:
+                action_for_Q = jnp.clip(action_raw, -1.0, 1.0)
+        # Actor's critic query uses the SAME bundle as the critic loss (the
+        # `critic_st.run_stats` field holds run_stats + optional batch_stats).
+        # `training=False` so any BN inside the critic uses running averages
+        # (the small per-actor-step batch would otherwise corrupt them).
+        actor_bundle = critic_st.run_stats
+        actor_mutables = list(actor_bundle.keys())
+        qs, _ = critic_apply_fn(
+            {"params": critic_st.params, **actor_bundle},
+            obs_b, action_for_Q, mutable=actor_mutables, training=False,
         )
-        # TD3 uses Q1 for the policy gradient
+        # TD3 uses Q1 for the policy gradient. Kept as head 0 rather than a
+        # min/mean over the ensemble so that raising num_critics changes only
+        # the TARGET's pessimism, not the actor's objective -- otherwise the
+        # K sweep would confound two things at once.
+        q1 = qs[0]
         q_loss = -jnp.mean(q1)
 
         # Out-of-bounds quadratic penalty on the RAW (unclipped) action:
@@ -340,12 +435,30 @@ class TD3Jax(OffPolicyBase):
         lambda_oob = float(getattr(exp, 'lambda_oob', 0.1))
         penalty_loss = lambda_oob * jax.lax.stop_gradient(q_scale) * oob_penalty
 
-        loss = q_loss + penalty_loss
+        # Optional action-smoothness regularizer: penalize the L2 distance
+        # between the (tanh-squashed) actor output on consecutive states.
+        # Discourages bang-bang policies. With output_squash="tanh" the
+        # actor returns post-tanh actions, so action_raw is already in (-1,1)
+        # and we compare it directly to actor(next_obs).
+        lambda_smooth = float(getattr(exp, 'lambda_action_smooth', 0.0))
+        if lambda_smooth > 0.0 and nobs_b is not None:
+            next_action, _ = actor_apply_fn(
+                {"params": actor_params, "run_stats": updates["run_stats"]},
+                nobs_b, mutable=["run_stats"],
+            )
+            smoothness = jnp.mean((action_raw - next_action) ** 2)
+            smooth_loss = lambda_smooth * smoothness
+        else:
+            smoothness = jnp.array(0.0)
+            smooth_loss = jnp.array(0.0)
+
+        loss = q_loss + penalty_loss + smooth_loss
         return loss, {
             "run_stats": updates["run_stats"],
             "action_norm": jnp.mean(jnp.linalg.norm(action_raw, axis=-1)),
             "oob_penalty": oob_penalty,
             "q_scale": q_scale,
+            "action_smoothness": smoothness,
         }
 
     @classmethod
@@ -390,6 +503,7 @@ class TD3Jax(OffPolicyBase):
             OffPolicyAgentState as _S,
         )
         from loco_mujoco.core.wrappers import LogEnvState
+        from loco_mujoco.core.mujoco_mjx import MjxState
         from loco_mujoco.utils import ValidationSummary
 
         exp = agent_conf.config.experiment
@@ -422,11 +536,42 @@ class TD3Jax(OffPolicyBase):
         gradient_steps = int(getattr(exp, 'gradient_steps', 1))
 
         def _critic_forward_target(obs, action, params, run_stats):
-            (q1, q2), updates = critic_net.apply(
-                {"params": params, "run_stats": run_stats},
-                obs, action, mutable=["run_stats"],
+            # `run_stats` here is the full mutable-variables bundle for the
+            # critic (run_stats + optional batch_stats).
+            #
+            # Non-joint forward suffices when BN is off; this is the legacy
+            # path. When BN is on the caller should instead use
+            # _critic_forward_target_joint so BN sees both the bootstrap and
+            # current-state batches together.
+            mutables = list(run_stats.keys())
+            qs, updates = critic_net.apply(
+                {"params": params, **run_stats},
+                obs, action,
+                mutable=mutables,
+                training=False,
             )
-            return q1, q2, updates["run_stats"]
+            new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+            return qs, new_bundle
+
+        def _critic_forward_target_joint(obs, nobs, act, next_act,
+                                         params, run_stats):
+            """Joint forward: concat (obs, nobs)/(act, next_act) so BN sees
+            both halves, then split. Returns (qs_curr, qs_next, new_bundle),
+            each a K-tuple."""
+            mutables = list(run_stats.keys())
+            cat_obs = jnp.concatenate([obs, nobs], axis=0)
+            cat_act = jnp.concatenate([act, next_act], axis=0)
+            qs_cat, updates = critic_net.apply(
+                {"params": params, **run_stats},
+                cat_obs, cat_act,
+                mutable=mutables,
+                training=True,
+            )
+            split = [jnp.split(q, 2) for q in qs_cat]
+            qs_curr = tuple(s[0] for s in split)
+            qs_next = tuple(s[1] for s in split)
+            new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+            return qs_curr, qs_next, new_bundle
 
         def _collect_transition(actor_state, replay_buffer, env_state,
                                 last_obs, rng, extra_state):
@@ -437,9 +582,16 @@ class TD3Jax(OffPolicyBase):
             next_obs, reward, absorbing, done, info, env_state = env.step(
                 env_state, action, traj
             )
-            replay_buffer = replay_buffer.add_batch(
-                last_obs, next_obs, action, reward, done.astype(jnp.float32)
-            )
+            if replay_buffer.add_subsample:
+                rng, rng_buf = jax.random.split(rng)
+                replay_buffer = replay_buffer.add_batch(
+                    last_obs, next_obs, action, reward,
+                    absorbing.astype(jnp.float32), rng=rng_buf,
+                )
+            else:
+                replay_buffer = replay_buffer.add_batch(
+                    last_obs, next_obs, action, reward, absorbing.astype(jnp.float32)
+                )
             return actor_state, replay_buffer, env_state, next_obs, rng
 
         def _single_gradient_update(carry, step_idx):
@@ -453,26 +605,155 @@ class TD3Jax(OffPolicyBase):
             next_action, next_q_bonus, _ = cls._next_action_and_q_bonus(
                 actor_st, nobs_b, rng_next, exp, ex_st
             )
-            q1n, q2n, new_tgt_rs = _critic_forward_target(
-                nobs_b, next_action, tgt_p, tgt_rs
-            )
-            q_next = jnp.minimum(q1n, q2n) + next_q_bonus
-            q_target = rew_b + gamma * (1.0 - done_b) * q_next
-            q_target = jax.lax.stop_gradient(q_target)
+
+            critic_loss_kind = str(getattr(exp, 'critic_loss', 'mse'))
+            use_bn = bool(getattr(exp, 'use_batch_norm', False))
+            num_atoms = int(getattr(exp, 'num_atoms', 1))
+            min_v = float(getattr(exp, 'min_v', -5.0))
+            max_v = float(getattr(exp, 'max_v', 5.0))
+            n_critics = int(getattr(exp, 'num_critics', 2))
+            pessimism_penalty = getattr(exp, "pessimism_penalty", None)
+
+            # Compute the next-state target. For the MSE path we use the
+            # scalar Q values returned by the critic; for categorical we also
+            # need the per-atom target log-probs which the critic sows.
+            if critic_loss_kind == 'categorical':
+                tgt_mutables = list(tgt_rs.keys()) + ["log_probs_collection"]
+                qs_n_v, tgt_updates = critic_net.apply(
+                    {"params": tgt_p, **tgt_rs},
+                    nobs_b, next_action,
+                    mutable=tgt_mutables, training=False,
+                )
+                # log_probs_collection: {"q1": {"log_probs": (sown tuple,)},
+                # "q2": ...}. `sow` wraps the value in a tuple by default, so
+                # `[0]` extracts the actual log_probs array.
+                tgt_lp_coll = tgt_updates.get("log_probs_collection", {})
+                tgt_lp_stack = jnp.stack(
+                    [tgt_lp_coll[f"q{i + 1}"]["log_probs"][0]
+                     for i in range(n_critics)], axis=0,
+                )                                      # (K, batch, atoms)
+                new_tgt_rs = {k: tgt_updates.get(k, tgt_rs[k]) for k in tgt_rs}
+
+                # Pick the head with the smallest scalar Q (per-sample) and use
+                # its log-probs for the target distribution. Matches XQC.
+                q_stack_n = jnp.stack(qs_n_v, axis=0)   # (K, batch)
+                argmin = jnp.argmin(q_stack_n, axis=0)  # (batch,)
+                onehot = jax.nn.one_hot(argmin, n_critics, axis=0)  # (K, batch)
+
+                if pessimism_penalty is None:
+                    # All mass on the argmin head -- the historical hard pick.
+                    weights = onehot
+                else:
+                    # The distributional critic cannot average Q values, so the
+                    # scalar `mean - k*range` has no direct analogue. Blend the
+                    # head distributions instead, concentrating on the argmin as
+                    # k rises: k=0.5 reproduces the hard pick exactly, k=0 is the
+                    # uniform mixture. Mixing happens on PROBABILITIES so the
+                    # result stays a valid distribution for the C51 projection.
+                    w_argmin, w_other = pessimistic_mixture_weights(
+                        n_critics, pessimism_penalty
+                    )
+                    weights = onehot * w_argmin + (1.0 - onehot) * w_other
+
+                if pessimism_penalty is None and n_critics == 2:
+                    # Bit-identical to the pre-ensemble code path.
+                    tgt_log_probs = jnp.where(
+                        (qs_n_v[0] <= qs_n_v[1])[:, None],
+                        tgt_lp_stack[0], tgt_lp_stack[1],
+                    )
+                else:
+                    mixed = jnp.sum(
+                        weights[..., None] * jnp.exp(tgt_lp_stack), axis=0
+                    )
+                    tgt_log_probs = jnp.log(jnp.clip(mixed, 1e-12, None))
+            else:
+                qs_n, new_tgt_rs = _critic_forward_target(
+                    nobs_b, next_action, tgt_p, tgt_rs
+                )
+                # Q-target aggregation across the critic ensemble; see
+                # aggregate_q_target. Default `min`, or `mean - k*range` when
+                # pessimism_penalty is set.
+                q_next = aggregate_q_target(qs_n, pessimism_penalty) + next_q_bonus
+                q_target = rew_b + gamma * (1.0 - done_b) * q_next
+                q_target = jax.lax.stop_gradient(q_target)
 
             def _critic_loss_fn(params):
-                (q1, q2), updates = critic_net.apply(
-                    {"params": params, "run_stats": critic_st.run_stats},
-                    obs_b, act_b, mutable=["run_stats"],
-                )
-                loss = jnp.mean((q1 - q_target) ** 2) + jnp.mean((q2 - q_target) ** 2)
-                return loss, updates["run_stats"]
+                run_stats = critic_st.run_stats
+                mutables = list(run_stats.keys())
+                if critic_loss_kind == 'categorical':
+                    # Shift bin centers by the bootstrap target and project
+                    # the next-state distribution onto the support, then CE.
+                    bin_values = jnp.linspace(min_v, max_v, num_atoms).reshape(1, -1)
+                    target_bin_values = (
+                        rew_b.reshape(-1, 1)
+                        + gamma * (bin_values + next_q_bonus.reshape(-1, 1))
+                          * (1.0 - done_b.reshape(-1, 1))
+                    )
+                    target_probs = jax.lax.stop_gradient(
+                        _c51_project_target(
+                            tgt_log_probs, target_bin_values,
+                            num_atoms, min_v, max_v,
+                        )
+                    )
+                    mutables_online = mutables + ["log_probs_collection"]
+                    _qs, updates = critic_net.apply(
+                        {"params": params, **run_stats},
+                        obs_b, act_b,
+                        mutable=mutables_online, training=use_bn,
+                    )
+                    pred_lp_coll = updates.get("log_probs_collection", {})
+                    # Summed over heads (not averaged) so per-head gradient
+                    # magnitude is independent of K, matching the q1 + q2 form.
+                    loss = sum(
+                        -jnp.mean(jnp.sum(
+                            target_probs * pred_lp_coll[f"q{i + 1}"]["log_probs"][0],
+                            axis=-1,
+                        ))
+                        for i in range(n_critics)
+                    )
+                    new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+                    return loss, new_bundle
+                if use_bn:
+                    # XQC / CrossQ joint forward: run the online critic on
+                    # concat([obs, nobs], [act, next_act]) so BN sees both
+                    # batches together, then split.
+                    cat_obs = jnp.concatenate([obs_b, nobs_b], axis=0)
+                    cat_act = jnp.concatenate([act_b, next_action], axis=0)
+                    qs_cat, updates = critic_net.apply(
+                        {"params": params, **run_stats},
+                        cat_obs, cat_act,
+                        mutable=mutables, training=True,
+                    )
+                    qs = tuple(jnp.split(q, 2)[0] for q in qs_cat)
+                else:
+                    qs, updates = critic_net.apply(
+                        {"params": params, **run_stats},
+                        obs_b, act_b,
+                        mutable=mutables, training=False,
+                    )
+                loss = sum(jnp.mean((q - q_target) ** 2) for q in qs)
+                new_bundle = {k: updates.get(k, run_stats[k]) for k in run_stats}
+                return loss, new_bundle
 
             (critic_loss, new_critic_rs), critic_grads = jax.value_and_grad(
                 _critic_loss_fn, has_aux=True
             )(critic_st.params)
+            critic_grad_norm = optax.global_norm(critic_grads)
             critic_st = critic_st.apply_gradients(grads=critic_grads)
             critic_st = critic_st.replace(run_stats=new_critic_rs)
+
+            # Post-step weight normalization (XQC / Salimans-Kingma).
+            # When `use_weight_norm=True`, renormalize each Dense kernel after
+            # the gradient step: W <- W / ||W||_axis=-2 (per-output-unit norm).
+            # `normalize_last_layer=True` also renormalizes the predictor head.
+            # No-op when the flag is unset, so the TD3 baseline is unchanged.
+            if bool(getattr(exp, 'use_weight_norm', False)):
+                critic_st = critic_st.replace(
+                    params=_normalize_dense_kernels(
+                        critic_st.params,
+                        normalize_last_layer=bool(getattr(exp, 'normalize_last_layer', True)),
+                    )
+                )
 
             # actor (delayed)
             rng_up, rng_actor = jax.random.split(rng_up)
@@ -482,12 +763,16 @@ class TD3Jax(OffPolicyBase):
                 return cls._actor_loss(
                     params, actor_st.apply_fn, actor_st.run_stats,
                     critic_st, critic_net.apply,
-                    obs_b, rng_actor, exp, ex_st,
+                    obs_b, rng_actor, exp, ex_st, nobs_b=nobs_b,
                 )
 
             (actor_loss, actor_aux), actor_grads = jax.value_and_grad(
                 _actor_loss_fn, has_aux=True
             )(actor_st.params)
+            # raw pre-clip grad norm; reported only on steps where the actor
+            # actually updates (zero on policy-delay skip steps).
+            actor_grad_norm_raw = optax.global_norm(actor_grads)
+            actor_grad_norm = jnp.where(do_actor_update, actor_grad_norm_raw, 0.0)
 
             def _apply_actor(args):
                 a_st, ex_st_in, t_p, t_rs = args
@@ -516,17 +801,28 @@ class TD3Jax(OffPolicyBase):
                 (actor_st, ex_st, tgt_p, tgt_rs),
             )
 
-            # critic target soft-update (every step)
+            # critic target soft-update (every step). Params via Polyak. Also
+            # soft-update the bundle of mutable variables (RunningMeanStd's
+            # run_stats and, when BN is on, batch_stats) the same way XQC does.
+            # `jax.tree.map` over an empty dict is a no-op, so this is safe
+            # for the baseline configuration where the bundle is empty.
             new_tgt_p = jax.tree.map(
                 lambda tp, cp: tau * cp + (1.0 - tau) * tp,
                 tgt_p, critic_st.params,
+            )
+            new_tgt_rs = jax.tree.map(
+                lambda tp, cp: tau * cp + (1.0 - tau) * tp,
+                new_tgt_rs, critic_st.run_stats,
             )
 
             new_carry = (actor_st, critic_st, new_tgt_p, new_tgt_rs,
                          ex_st, buf, rng_up)
             return new_carry, (critic_loss, actor_loss,
                                 actor_aux["action_norm"],
-                                actor_aux["oob_penalty"])
+                                actor_aux["oob_penalty"],
+                                critic_grad_norm,
+                                actor_grad_norm,
+                                actor_aux["action_smoothness"])
 
         def _do_updates(actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up):
             carry = (actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up)
@@ -534,13 +830,22 @@ class TD3Jax(OffPolicyBase):
                 _single_gradient_update, carry, jnp.arange(gradient_steps)
             )
             actor_st, critic_st, tgt_p, tgt_rs, ex_st, _, _ = carry
+            # losses[5] is actor_grad_norm, zeroed on policy-delay skip steps.
+            # Sum then divide by the number of *actual* actor updates to get
+            # a mean over only the steps where the actor moved.
+            n_actor_updates = jnp.maximum(jnp.sum(losses[5] != 0.0), 1)
             return (actor_st, critic_st, tgt_p, tgt_rs, ex_st,
                     jnp.mean(losses[0]), jnp.mean(losses[1]),
-                    jnp.mean(losses[2]), jnp.mean(losses[3]))
+                    jnp.mean(losses[2]), jnp.mean(losses[3]),
+                    jnp.mean(losses[4]),
+                    jnp.sum(losses[5]) / n_actor_updates,
+                    jnp.mean(losses[6]))
 
         def _skip_updates(actor_st, critic_st, tgt_p, tgt_rs, ex_st, buf, rng_up):
             return (actor_st, critic_st, tgt_p, tgt_rs, ex_st,
-                    jnp.array(0.0), jnp.array(0.0), jnp.array(0.0), jnp.array(0.0))
+                    jnp.array(0.0), jnp.array(0.0), jnp.array(0.0),
+                    jnp.array(0.0), jnp.array(0.0), jnp.array(0.0),
+                    jnp.array(0.0))
 
         def _update_step(runner_state, unused):
             (actor_state, critic_state, tgt_params, tgt_run_stats,
@@ -559,7 +864,8 @@ class TD3Jax(OffPolicyBase):
                  ex_state, replay_buffer, rng_update),
             )
             (actor_state, critic_state, tgt_params, tgt_run_stats,
-             ex_state, critic_loss, actor_loss, action_norm, oob_penalty) = result
+             ex_state, critic_loss, actor_loss, action_norm, oob_penalty,
+             critic_grad_norm, actor_grad_norm, action_smoothness) = result
 
             log_env_state = env_state.find(LogEnvState)
             logged_metrics = log_env_state.metrics
@@ -575,8 +881,22 @@ class TD3Jax(OffPolicyBase):
                 mean_actor_loss=actor_loss,
                 buffer_size=replay_buffer.size,
             )
+            # Curriculum-progress metrics. Read from MjxState.additional_carry
+            # via env.find_attr(...), which recurses through the wrapper chain.
+            additional_carry = env.find_attr(env_state, "additional_carry")
+            global_step_mean = jnp.mean(
+                additional_carry.global_step.astype(jnp.float32)
+            )
+            curriculum_cur_max = jnp.mean(
+                additional_carry.curriculum_cur_max.astype(jnp.float32)
+            )
             metric = TD3SummaryMetrics(mean_action_norm=action_norm,
                                         mean_oob_penalty=oob_penalty,
+                                        mean_critic_grad_norm=critic_grad_norm,
+                                        mean_actor_grad_norm=actor_grad_norm,
+                                        mean_action_smoothness=action_smoothness,
+                                        mean_curriculum_cur_max=curriculum_cur_max,
+                                        mean_global_step=global_step_mean,
                                         **base_kwargs)
 
             runner_state = (actor_state, critic_state, tgt_params, tgt_run_stats,

@@ -151,6 +151,10 @@ class TrajectoryInfo:
         j_qvel = 0
         for i, item in enumerate(zip(self.joint_names, self.model.jnt_type)):
             j_name, j_type = item
+            # jnt_type may be a jax array. Since jax 0.11, comparing a jax scalar against
+            # mujoco's pybind11 enum returns False instead of coercing it, which silently sent
+            # every joint to the error branch below, so compare as plain ints.
+            j_type = int(j_type)
             if j_type == mujoco.mjtJoint.mjJNT_FREE:
                 self.joint_name2ind_qpos[j_name] = np.arange(j_qpos, j_qpos + 7)
                 self.joint_name2ind_qvel[j_name] = np.arange(j_qvel, j_qvel + 6)
@@ -651,7 +655,7 @@ class TrajectoryData(SingleData):
     """
     Data structure to store the trajectory data. It holds everything in SingleData, but with an additional dimension
     (the batch dimension for an arbitrary amount of samples and trajectories).
-     It also includes the split_points attribute to separate the different trajectories.
+    It also includes the split_points attribute to separate the different trajectories.
 
     Note 1: All samples are stacked along the first dimension, and the split_points attribute is used to separate
     the different trajectories. The split_points attribute is a list of indices that define the beginning of each
@@ -1014,11 +1018,7 @@ class TrajectoryData(SingleData):
         new_split_points = []
         curr_n_samples = 0
         for i, data in enumerate(traj_datas):
-            split_points = data.split_points
-            if backend == jnp:
-                split_points = split_points.at[:].add(curr_n_samples)
-            else:
-                split_points = split_points + curr_n_samples
+            split_points = data.split_points + curr_n_samples
             curr_n_samples = split_points[-1]
             new_split_points.append(split_points[:-1])
 

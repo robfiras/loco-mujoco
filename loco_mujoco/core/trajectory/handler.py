@@ -15,6 +15,9 @@ class TrajState:
     traj_no: int
     subtraj_step_no: int
     subtraj_step_no_init: int
+    # If non-negative, the start of the next episode: set by algorithms that choose their own resets.
+    next_traj_no: int = -1
+    next_subtraj_step_no: int = -1
 
 
 class TrajectoryHandler(StatefulObject):
@@ -23,7 +26,7 @@ class TrajectoryHandler(StatefulObject):
     The full trajectory data is stored on LocoEnv as self._traj.
 
     """
-    
+
     registered: Dict[str, type] = dict()
 
     def __init__(self, traj_info, control_dt=0.01, max_n_samples=100_000, max_n_trajs=100):
@@ -289,10 +292,33 @@ class TrajectoryHandler(StatefulObject):
         return carry.replace(traj_state=traj_state)
 
     def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
-        """Sample a fresh trajectory cursor for an episode reset. Abstract — subclasses
-        must implement the per-reset sampling policy (random, fixed, etc.)."""
+        """
+        Start of a new episode: the start an algorithm chose (``next_traj_no`` / ``next_subtraj_step_no`` of the
+        trajectory state, if non-negative), otherwise the one ``sample_start`` draws.
+        """
+        key, new_traj_no, new_subtraj_step_no = self.sample_start(carry.key, backend, traj_data)
+        chosen = carry.traj_state.next_traj_no >= 0
+        new_traj_no = backend.where(chosen, carry.traj_state.next_traj_no, new_traj_no)
+        new_subtraj_step_no = backend.where(chosen, carry.traj_state.next_subtraj_step_no, new_subtraj_step_no)
+        no_choice = new_traj_no * 0 - 1
+
+        return data, carry.replace(key=key, traj_state=TrajState(new_traj_no, new_subtraj_step_no,
+                                                                 new_subtraj_step_no, no_choice, no_choice))
+
+    def sample_start(self, key, backend, traj_data) -> Tuple:
+        """
+        Draw the start of an episode. Subclasses implement their sampling policy (random, fixed, etc.).
+
+        Args:
+            key: The JAX random key of the carry.
+            backend: numpy or jax.numpy.
+            traj_data: The trajectory data.
+
+        Returns:
+            Tuple: The (possibly split) key, the trajectory index and the step within that trajectory.
+        """
         raise NotImplementedError(
-            f"{type(self).__name__} does not implement reset_state. "
+            f"{type(self).__name__} does not implement sample_start. "
             f"Use a concrete TrajectoryHandler subclass "
             f"(e.g. RandomStartTrajectoryHandler, FixedStartTrajectoryHandler, "
             f"RandomTrajFixedStepTrajectoryHandler)."
@@ -312,21 +338,15 @@ class TrajectoryHandler(StatefulObject):
 class RandomStartTrajectoryHandler(TrajectoryHandler):
     """Resets to a uniformly random (trajectory, sub-step) pair."""
 
-    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
-        key = carry.key
+    def sample_start(self, key, backend, traj_data):
         if backend == jnp:
             key, _k1, _k2 = jax.random.split(key, 3)
             traj_idx = jax.random.randint(_k1, shape=(1,), minval=0, maxval=self.n_trajectories(traj_data))
             subtraj_step_idx = jax.random.randint(_k2, shape=(1,), minval=0,
                                                   maxval=self.len_trajectory(traj_idx, traj_data))
-            new_traj_no, new_subtraj_step_no = traj_idx[0], subtraj_step_idx[0]
-        else:
-            new_traj_no = np.random.randint(0, self.n_trajectories(traj_data))
-            new_subtraj_step_no = np.random.randint(0, self.len_trajectory(new_traj_no, traj_data))
-        return data, carry.replace(
-            key=key,
-            traj_state=TrajState(new_traj_no, new_subtraj_step_no, new_subtraj_step_no),
-        )
+            return key, traj_idx[0], subtraj_step_idx[0]
+        traj_idx = np.random.randint(0, self.n_trajectories(traj_data))
+        return key, traj_idx, np.random.randint(0, self.len_trajectory(traj_idx, traj_data))
 
 
 class RandomTrajFixedStepTrajectoryHandler(TrajectoryHandler):
@@ -338,18 +358,12 @@ class RandomTrajFixedStepTrajectoryHandler(TrajectoryHandler):
                          max_n_samples=max_n_samples, max_n_trajs=max_n_trajs)
         self.fixed_step = int(fixed_step)
 
-    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
-        key = carry.key
+    def sample_start(self, key, backend, traj_data):
         if backend == jnp:
             key, _k = jax.random.split(key)
             traj_idx = jax.random.randint(_k, shape=(1,), minval=0, maxval=self.n_trajectories(traj_data))
-            new_traj_no = traj_idx[0]
-        else:
-            new_traj_no = np.random.randint(0, self.n_trajectories(traj_data))
-        return data, carry.replace(
-            key=key,
-            traj_state=TrajState(new_traj_no, self.fixed_step, self.fixed_step),
-        )
+            return key, traj_idx[0], self.fixed_step
+        return key, np.random.randint(0, self.n_trajectories(traj_data)), self.fixed_step
 
 
 class FixedStartTrajectoryHandler(TrajectoryHandler):
@@ -362,8 +376,5 @@ class FixedStartTrajectoryHandler(TrajectoryHandler):
                          max_n_samples=max_n_samples, max_n_trajs=max_n_trajs)
         self.start_conf = tuple(start_conf)
 
-    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
-        new_traj_no, new_subtraj_step_no = self.start_conf
-        return data, carry.replace(
-            traj_state=TrajState(new_traj_no, new_subtraj_step_no, new_subtraj_step_no),
-        )
+    def sample_start(self, key, backend, traj_data):
+        return key, *self.start_conf

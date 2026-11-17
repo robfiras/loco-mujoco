@@ -6,8 +6,8 @@ SkeletonTorque
 .. image:: ../../../imgs/skeleton_torque_2.gif
     :width: 49%
 
-.. automodule:: loco_mujoco.environments.humanoids.skeletons
-    :members: SkeletonTorque
+.. autoclass:: loco_mujoco.environments.humanoids.skeletons.SkeletonTorque
+    :members:
     :undoc-members:
     :private-members:
     :show-inheritance:

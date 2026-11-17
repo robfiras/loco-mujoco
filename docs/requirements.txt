@@ -1,4 +1,3 @@
-loco_mujoco
-wget
+sphinx
 m2r2
 sphinx_rtd_theme

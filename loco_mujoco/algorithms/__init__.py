@@ -4,3 +4,4 @@ from .ppo_jax import PPOJax
 from .gail_jax import GAILJax
 from .amp_jax import AMPJax
 from . import experimental
+from .supermimic_jax import SuperMimicJax

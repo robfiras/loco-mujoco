@@ -99,8 +99,29 @@ class PPOJax(JaxRLAlgorithmBase):
     def init_agent_conf(cls, env, config):
 
         with (open_dict(config.experiment)):
+            # Data parallelism. `num_envs` in the config is the GLOBAL env count;
+            # each of the n_devices replicas runs num_envs // n_devices of them.
+            # We rewrite config.num_envs to the PER-DEVICE value here, because
+            # _train_fn runs inside pmap and every use of it there (reset splits,
+            # reward-norm stats, the minibatch assert) is per-replica. The global
+            # figure is kept as num_envs_total for step accounting and logging.
+            n_devices = int(getattr(config.experiment, "n_devices", 1) or 1)
+            num_envs_total = int(config.experiment.num_envs)
+            if n_devices > 1:
+                if num_envs_total % n_devices != 0:
+                    raise ValueError(
+                        f"num_envs ({num_envs_total}) must be divisible by "
+                        f"n_devices ({n_devices}); pmap requires an equal split."
+                    )
+                config.experiment.num_envs = num_envs_total // n_devices
+            config.experiment.num_envs_total = num_envs_total
+
+            # num_updates is driven by the GLOBAL env count: n_devices replicas
+            # each stepping num_envs_per_device envs collect num_envs_total
+            # transitions per step, so the same total_timesteps is reached in
+            # 1/n_devices of the wall-clock updates a single device would need.
             config.experiment.num_updates = (
-                    config.experiment.total_timesteps // config.experiment.num_steps // config.experiment.num_envs)
+                    config.experiment.total_timesteps // config.experiment.num_steps // num_envs_total)
             config.experiment.minibatch_size = (
                     config.experiment.num_envs * config.experiment.num_steps // config.experiment.num_minibatches)
             config.experiment.validation_interval = config.experiment.num_updates // config.experiment.validation.num
@@ -120,11 +141,29 @@ class PPOJax(JaxRLAlgorithmBase):
         else:
             critic_obs_ind = jnp.arange(env.mdp_info.observation_space.shape[0])
         if hasattr(config.experiment, "len_obs_history") and config.experiment.len_obs_history > 1:
-            obs_len = env.info.observation_space.shape[0]
-            actor_obs_ind = jnp.concatenate([actor_obs_ind + i*obs_len
-                                             for i in range(config.experiment.len_obs_history)])
-            critic_obs_ind = jnp.concatenate([critic_obs_ind + i*obs_len
-                                              for i in range(config.experiment.len_obs_history)])
+            n_hist = int(config.experiment.len_obs_history)
+            hist_group = getattr(config.experiment, "obs_history_group", None)
+            if hist_group is None:
+                # Legacy: NStepWrapper stacks the WHOLE observation n_hist times, so the
+                # current frame is no longer at its original indices and every consumer
+                # has to be shifted -- including the critic, which is why a history used
+                # to inflate the value network too.
+                obs_len = env.info.observation_space.shape[0]
+                actor_obs_ind = jnp.concatenate([actor_obs_ind + i*obs_len
+                                                 for i in range(n_hist)])
+                critic_obs_ind = jnp.concatenate([critic_obs_ind + i*obs_len
+                                                  for i in range(n_hist)])
+            else:
+                # Group mode: layout is [current full obs][group @ t-1] ... so the
+                # current frame keeps its indices and ONLY the actor grows. The critic is
+                # untouched: its privileged observation has no history.
+                obs_len = env.info.observation_space.shape[0]
+                g_ind = jnp.asarray(
+                    env.obs_container.get_obs_ind_by_group(hist_group), dtype=int)
+                n_g = int(g_ind.size)
+                actor_obs_ind = jnp.concatenate(
+                    [actor_obs_ind]
+                    + [obs_len + i*n_g + jnp.arange(n_g) for i in range(n_hist - 1)])
         network = ActorCritic(
             env.info.action_space.shape[0],
             activation=config.experiment.activation,
@@ -194,6 +233,17 @@ class PPOJax(JaxRLAlgorithmBase):
         # extract static agent info
         config, network, tx =\
             (agent_conf.config.experiment, agent_conf.network, agent_conf.tx)
+
+        # Data-parallel axis name, set only when this function is wrapped in
+        # jax.pmap by a distributed driver. None => single-device, and every
+        # collective below is skipped, so the single-device path is unchanged.
+        #
+        # pmap rather than automatic NamedSharding sharding is deliberate: the
+        # env step enters through a mujoco_warp FFI custom call, which does not
+        # participate in XLA's sharding propagation. Under pmap each device runs
+        # its own instance over its own env batch, which the custom call handles
+        # correctly.
+        pmap_axis = getattr(config, "pmap_axis_name", None)
 
         env = cls._wrap_env(env, config)
         policy = PPOPolicy(network)
@@ -347,6 +397,15 @@ class PPOJax(JaxRLAlgorithmBase):
                     total_loss, grads = grad_fn(
                         train_state.params, traj_batch, advantages, targets
                     )
+                    if pmap_axis is not None:
+                        # Average gradients across devices before applying, so
+                        # every replica steps identically and the params stay in
+                        # sync. This is what makes the run equivalent to one
+                        # process with n_devices x num_envs environments.
+                        grads = jax.lax.pmean(grads, axis_name=pmap_axis)
+                        # Losses are logged from device 0, so reduce them too or
+                        # the reported numbers describe 1/n of the batch.
+                        total_loss = jax.lax.pmean(total_loss, axis_name=pmap_axis)
                     train_state = train_state.apply_gradients(grads=grads)
                     return train_state, total_loss
 
@@ -377,6 +436,10 @@ class PPOJax(JaxRLAlgorithmBase):
                 # Adaptive KL learning rate (RSL-style)
                 desired_kl = getattr(config, 'desired_kl', None)
                 if desired_kl is not None:
+                    # Under pmap this is already cross-device averaged, because
+                    # _update_minbatch pmeans total_loss. That matters: an
+                    # unsynced mean_kl would let each device pick a different
+                    # learning rate and the replicas would silently diverge.
                     mean_kl = jnp.mean(total_loss[1][3])  # avg old_approx_kl across minibatches
                     current_lr = train_state.opt_state.inner_state.hyperparams['learning_rate']
                     new_lr = jax.lax.cond(
@@ -688,7 +751,8 @@ class PPOJax(JaxRLAlgorithmBase):
     def _wrap_env(env, config):
 
         if "len_obs_history" in config and config.len_obs_history > 1:
-            env = NStepWrapper(env, config.len_obs_history)
+            env = NStepWrapper(env, config.len_obs_history,
+                               group=config.get("obs_history_group", None))
         env = LogWrapper(env)
         env = VecEnv(env)
         # reward normalization moved into _train_fn; stats live on the agent state

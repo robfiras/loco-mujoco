@@ -38,6 +38,15 @@ _ALL_RENDERERS = collections.OrderedDict(
 )
 
 
+
+def move_camera(model, action, reldx, reldy, scene, camera):
+    """Moves the camera with the mouse; ``mjv_moveCamera`` takes no scene argument from MuJoCo 4 on."""
+    try:
+        mujoco.mjv_moveCamera(model, action, reldx, reldy, scene, camera)
+    except TypeError:
+        mujoco.mjv_moveCamera(model, action, reldx, reldy, camera)
+
+
 class MujocoViewer:
     """
     Class that creates a viewer for mujoco environments.
@@ -239,7 +248,7 @@ class MujocoViewer:
         else:
             action = mujoco.mjtMouse.mjMOUSE_ZOOM
 
-        mujoco.mjv_moveCamera(self._model, action, dx / width, dy / height, self._scene, self._camera)
+        move_camera(self._model, action, dx / width, dy / height, self._scene, self._camera)
 
     def keyboard(self, window, key, scancode, act, mods):
         """
@@ -323,7 +332,7 @@ class MujocoViewer:
 
         """
 
-        mujoco.mjv_moveCamera(self._model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self._scene, self._camera)
+        move_camera(self._model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self._scene, self._camera)
 
     def _set_mujoco_buffers(self):
         self._context = mujoco.MjrContext(self._model, mujoco.mjtFontScale(self._font_scale))
@@ -665,8 +674,11 @@ class MujocoViewer:
             If record was True, the video is saved and the path is returned.
 
         """
-        if not self._headless:
+        # stop() runs twice when the user closes the window: once from the render loop and once more
+        # at interpreter exit. Destroying a window a second time crashes, so it is done only once.
+        if not self._headless and self._window is not None:
             glfw.destroy_window(self._window)
+            self._window = None
         if self._recorder:
             return self._recorder.stop()
         else:

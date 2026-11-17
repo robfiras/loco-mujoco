@@ -5,10 +5,18 @@ Installation
 --------------
 
 
+LocoMuJoCo requires **Python 3.10 or newer**. We recommend a fresh environment, for example with conda:
+
+.. code-block:: bash
+
+   conda create -n loco-mujoco python=3.11
+   conda activate loco-mujoco
+
 Clone the repo and install in editable mode:
 
 .. code-block:: bash
 
+   git clone https://github.com/robfiras/loco-mujoco.git
    cd loco-mujoco
    pip install -e .
 
@@ -16,7 +24,22 @@ To use **JAX with GPU**:
 
 .. code-block:: bash
 
-   pip install jax["cuda12"]
+   pip install "jax[cuda12]<=0.10.1,!=0.10.0"
+
+JAX 0.10.0 and 0.10.2 fail to compile SuperMimic's training function on the GPU, so LocoMuJoCo
+currently requires ``jax<=0.10.1,!=0.10.0``.
+
+The robot models (about 200 MB) are downloaded automatically the first time you create an
+environment and cached in ``~/.loco-mujoco-caches/robot_models``. On a cluster or in a container
+you can fetch them ahead of time:
+
+.. code-block:: bash
+
+   loco-mujoco-download-models
+
+To use a local copy instead, for example on a machine without network access, point
+``LOCOMUJOCO_ROBOT_MODELS_PATH`` to the ``loco_mujoco_models`` folder of the
+`models repository <https://github.com/robfiras/loco-mujoco-models>`_.
 
 .. note::
 
@@ -30,7 +53,7 @@ Datasets
 LocoMuJoCo provides three sources of mocap data: **default**, **LAFAN1**, and **AMASS**.
 The default and LAFAN1 datasets are downloaded automatically from the `HuggingFace dataset repository <https://huggingface.co/datasets/robfiras/loco-mujoco-datasets>`_.
 
-AMASS must be installed manually due to licensing—see the See :ref:`installation instructions <amass_installation>`.
+AMASS must be installed manually due to licensing—see the :ref:`installation instructions <amass_installation>`.
 
 
 Example usage:
@@ -39,7 +62,7 @@ Example usage:
 
    from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf, DefaultDatasetConf, AMASSDatasetConf
 
-   env = ImitationFactory.make(
+   env, traj = ImitationFactory.make(
        "UnitreeH1",
        default_dataset_conf=DefaultDatasetConf(["squat"]),
        lafan1_dataset_conf=LAFAN1DatasetConf(["dance2_subject4", "walk1_subject1"]),
@@ -51,7 +74,8 @@ Example usage:
 Speeding Up Dataset Loading
 ------------------------------
 
-To accelerate loading, you can cache the forward kinematics results:
+LocoMuJoCo only stores joint positions and velocities in its datasets. All other attributes are computed with forward
+kinematics upon loading. To accelerate loading, you can cache the results:
 
 .. code-block:: bash
 
@@ -62,6 +86,23 @@ Example:
 .. code-block:: bash
 
    loco-mujoco-set-all-caches --path "$HOME/.loco-mujoco-caches"
+
+Using MJX with the MjWarp Backend
+-----------------------------------
+
+MJX environments can run on the standard MJX backend or on the **MjWarp** backend, which can further accelerate
+parallel simulation on compatible GPUs. Pass ``use_mjwarp=True`` (and optionally ``nconmax`` and ``njmax``) when creating the
+environment:
+
+.. code-block:: python
+
+   from loco_mujoco import ImitationFactory
+
+   env, traj = ImitationFactory.make(
+       "MjxUnitreeG1",
+       default_dataset_conf=dict(task="stepinplace1"),
+       use_mjwarp=True,
+   )
 
 Environments
 --------------

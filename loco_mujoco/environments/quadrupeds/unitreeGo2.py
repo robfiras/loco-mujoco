@@ -18,7 +18,7 @@ class UnitreeGo2(BaseRobotQuadruped):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================= ================ ==================================== ============================== ===
     Index in Obs Name              ObservationType  Min                                  Max                            Dim
@@ -78,7 +78,7 @@ class UnitreeGo2(BaseRobotQuadruped):
 
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **DefaultControl**
 

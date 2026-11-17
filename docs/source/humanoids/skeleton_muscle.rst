@@ -6,8 +6,8 @@ SkeletonMuscle
 .. image:: ../../../imgs/skeleton_muscle_2.gif
     :width: 49%
 
-.. automodule:: loco_mujoco.environments.humanoids.skeletons
-   :members: SkeletonMuscle
-   :undoc-members:
-   :show-inheritance:
-
+.. autoclass:: loco_mujoco.environments.humanoids.skeletons.SkeletonMuscle
+    :members:
+    :undoc-members:
+    :private-members:
+    :show-inheritance:

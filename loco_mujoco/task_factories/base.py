@@ -1,4 +1,4 @@
-from typing import Dict, Type, Any
+from typing import Dict, Type, Any, Tuple
 from loco_mujoco.environments.base import LocoEnv
 
 
@@ -17,7 +17,7 @@ class TaskFactory:
     registered: Dict[str, Type["TaskFactory"]] = dict()
 
     @staticmethod
-    def make(env_name: str, **kwargs: Any) -> LocoEnv:
+    def make(env_name: str, **kwargs: Any) -> Tuple[LocoEnv, Any]:
         """
         Create an environment instance.
 
@@ -26,7 +26,7 @@ class TaskFactory:
             **kwargs (Any): Additional parameters required to initialize the environment.
 
         Returns:
-            LocoEnv: An instance of the requested environment.
+            Tuple[LocoEnv, Any]: The requested environment and its trajectory, if any.
 
         Raises:
             NotImplementedError: If the method is not implemented by a subclass.

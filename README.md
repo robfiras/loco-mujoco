@@ -2,10 +2,9 @@
   <img width="70%" src="https://github.com/robfiras/loco-mujoco/assets/69359729/bd2a219e-ddfd-4355-8024-d9af921fb92a">
 </p>
 
-![continous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
-[![Documentation Status](https://readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
+![continuous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
+[![Documentation Status](https://app.readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Join our Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white)](https://discord.gg/gEqR3xCVdn)
 
 [//]: # ([![PyPI]&#40;https://img.shields.io/pypi/v/loco-mujoco&#41;]&#40;https://pypi.org/project/loco-mujoco/&#41;)
 
@@ -28,12 +27,11 @@ making it suitable for pure reinforcement learning as well.
 ### Key Advantages 
 ✅ Supports **MuJoCo** (single environment) and **MJX/MJWarp** (parallel environments) \
 ✅ Includes **12 humanoid and 4 quadruped environments**, featuring 4 **biomechanical human models** \
-✅ Clean single-file JAX algorithms for quick benchmarking (**PPO**, **GAIL**, **AMP**, **DeepMimic**)\
+✅ Clean single-file JAX algorithms for quick benchmarking (**PPO**, **GAIL**, **AMP**, **DeepMimic**, **SuperMimic**)\
 ✅ Combined training and environment into one JIT‑compiled function for lightning‑fast training 🚀 \
-✅ **Over 22,000 motion capture datasets** (AMASS, LAFAN1, native LocoMuJoCo) retargeted for each humanoid \
+✅ **Motion capture datasets** (AMASS, LAFAN1, native LocoMuJoCo) retargeted for each humanoid \
 ✅ **Robot-to-robot retargeting** allows to retarget any existing dataset from one robot to another \
 ✅ Powerful **trajectory comparison metrics** including dynamic time warping and discrete Fréchet distance, all in JAX \
-✅ Interface for Gymnasium \
 ✅ Built-in **domain and terrain randomization** \
 ✅ Modular design: define, swap, and reuse components like observation types, reward functions, terminal state handlers, and domain randomization \
 ✅ [Documentation](https://loco-mujoco.readthedocs.io/)
@@ -54,18 +52,39 @@ making it suitable for pure reinforcement learning as well.
 [//]: # ()
 [//]: # (```)
 
+LocoMuJoCo requires **Python 3.10 or newer**. We recommend a fresh environment, for example with conda:
+
+```bash
+conda create -n loco-mujoco python=3.11
+conda activate loco-mujoco
+```
+
 Clone this repo and do an editable installation:
 
 ```bash
+git clone https://github.com/robfiras/loco-mujoco.git
 cd loco-mujoco
 pip install -e . 
 ```
 
-By default, both will install the CPU-version of Jax. If you want to use Jax on the GPU, you need to install the following:
+By default, this installs the CPU version of JAX. If you want to use JAX on the GPU, you need to install the following:
 
 ```bash
-pip install jax["cuda12"]
-````
+pip install "jax[cuda12]<=0.10.1,!=0.10.0"
+```
+
+JAX 0.10.0 and 0.10.2 fail to compile SuperMimic's training function on the GPU, so LocoMuJoCo
+currently requires `jax<=0.10.1,!=0.10.0`.
+
+The robot models (about 200 MB) are downloaded automatically the first time you create an environment
+and cached in `~/.loco-mujoco-caches/robot_models`. On a cluster or in a container you can fetch them ahead of time:
+
+```bash
+loco-mujoco-download-models
+```
+
+To use a local copy instead, for example on a machine without network access, point `LOCOMUJOCO_ROBOT_MODELS_PATH`
+to the `loco_mujoco_models` folder of the [models repository](https://github.com/robfiras/loco-mujoco-models).
 
 > [!NOTE]
 > If you want to run the **MyoSkeleton** environment, you need to additionally run
@@ -75,8 +94,8 @@ pip install jax["cuda12"]
 ### Datasets
 
 LocoMuJoCo provides three sources of motion capture (mocap) data for humanoid environments: default (provided by us), LAFAN1, and AMASS. The first two datasets
-are available on the [LocoMujoCo HuggingFace dataset repository](https://huggingface.co/datasets/robfiras/loco-mujoco-datasets)
-and will downloaded and cached automatically for you. AMASS needs to be downloaded and installed separately due to
+are available on the [LocoMuJoCo HuggingFace dataset repository](https://huggingface.co/datasets/robfiras/loco-mujoco-datasets)
+and will be downloaded and cached automatically for you. AMASS needs to be downloaded and installed separately due to
 their licensing. See [here](loco_mujoco/smpl) for more information about the installation.
 
 This is how you can visualize the datasets:
@@ -86,7 +105,7 @@ from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf, Defa
 
 
 # # example --> you can add as many datasets as you want in the lists!
-env = ImitationFactory.make("UnitreeH1",
+env, traj = ImitationFactory.make("UnitreeH1",
                             default_dataset_conf=DefaultDatasetConf(["squat"]),
                             lafan1_dataset_conf=LAFAN1DatasetConf(["dance2_subject4", "walk1_subject1"]),
                             # if SMPL and AMASS are installed, you can use the following:
@@ -108,7 +127,7 @@ loco-mujoco-set-all-caches --path <path to cache>
 For instance, you could run:
 ```bash
 loco-mujoco-set-all-caches --path "$HOME/.loco-mujoco-caches"
-````
+```
 
 ---
 
@@ -140,7 +159,7 @@ mjx_env = Mjx(
 ```python
 from loco_mujoco import ImitationFactory
 
-env = ImitationFactory.make(
+env, traj = ImitationFactory.make(
     "MjxUnitreeG1",
     default_dataset_conf=dict(task="stepinplace1"),
     use_mjwarp=True,

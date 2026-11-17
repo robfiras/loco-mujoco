@@ -124,6 +124,11 @@ class ReplayBuffer:
     Any of `next_obs` / `value_target` can be turned off at `create` time;
     disabled columns become zero-sized dummies (0 bytes). Flags are static
     metadata so `if self.store_*` branches are baked at trace time.
+
+    Optional Bernoulli sub-sampling at write time: with `add_subsample=True`
+    and `add_prob=p`, each transition in an incoming batch is kept with
+    probability p. Effective temporal coverage becomes ~capacity / p without
+    growing GPU memory. `add_batch` requires an `rng` when subsampling is on.
     """
     obs: jnp.ndarray
     next_obs: jnp.ndarray
@@ -135,11 +140,15 @@ class ReplayBuffer:
     size: int
     store_next_obs: bool = struct.field(pytree_node=False, default=True)
     store_value_target: bool = struct.field(pytree_node=False, default=False)
+    add_subsample: bool = struct.field(pytree_node=False, default=False)
+    add_prob: float = struct.field(pytree_node=False, default=1.0)
 
     @classmethod
     def create(cls, obs_dim: int, action_dim: int, capacity: int,
                store_next_obs: bool = True,
-               store_value_target: bool = False):
+               store_value_target: bool = False,
+               add_subsample: bool = False,
+               add_prob: float = 1.0):
         next_obs_shape = (capacity, obs_dim) if store_next_obs else (0, 0)
         value_shape = (capacity,) if store_value_target else (0,)
         return cls(
@@ -153,11 +162,52 @@ class ReplayBuffer:
             size=0,
             store_next_obs=store_next_obs,
             store_value_target=store_value_target,
+            add_subsample=bool(add_subsample),
+            add_prob=float(add_prob),
         )
 
-    def add_batch(self, obs, next_obs, action, reward, done, value_target=None):
+    def add_batch(self, obs, next_obs, action, reward, done,
+                  value_target=None, rng=None):
         capacity = self.obs.shape[0]
         batch_size = obs.shape[0]
+
+        if self.add_subsample:
+            assert rng is not None, (
+                "buffer was created with add_subsample=True but "
+                "add_batch received rng=None"
+            )
+            # Per-element Bernoulli keep mask.
+            keep = jax.random.uniform(rng, (batch_size,)) < self.add_prob
+            kept_cnt = jnp.sum(keep.astype(jnp.int32))
+            # Kept entries are written to consecutive slots; dropped entries get the
+            # out-of-range index `capacity`, which mode="drop" discards. They must not be
+            # routed to a real slot: a scatter with duplicate indices applies its updates
+            # in an unspecified order, so a dropped entry could overwrite a kept one.
+            offsets = jnp.cumsum(keep.astype(jnp.int32)) - 1
+            indices = jnp.where(keep, (self.ptr + offsets) % capacity, capacity)
+            if self.store_next_obs:
+                new_next_obs = self.next_obs.at[indices].set(next_obs, mode="drop")
+            else:
+                new_next_obs = self.next_obs
+            if self.store_value_target:
+                assert value_target is not None, (
+                    "buffer was created with store_value_target=True but "
+                    "add_batch received value_target=None"
+                )
+                new_value_target = self.value_target.at[indices].set(value_target, mode="drop")
+            else:
+                new_value_target = self.value_target
+            return self.replace(
+                obs=self.obs.at[indices].set(obs, mode="drop"),
+                next_obs=new_next_obs,
+                action=self.action.at[indices].set(action, mode="drop"),
+                reward=self.reward.at[indices].set(reward, mode="drop"),
+                done=self.done.at[indices].set(done.astype(jnp.float32), mode="drop"),
+                value_target=new_value_target,
+                ptr=(self.ptr + kept_cnt) % capacity,
+                size=jnp.minimum(self.size + kept_cnt, capacity),
+            )
+
         indices = (self.ptr + jnp.arange(batch_size)) % capacity
         new_next_obs = (self.next_obs.at[indices].set(next_obs)
                         if self.store_next_obs else self.next_obs)

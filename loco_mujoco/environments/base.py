@@ -53,6 +53,7 @@ class LocoEnv(Mjx):
                  default_camera_mode: str = "follow",
                  th_params: Dict = None,
                  traj_params: Dict = None,
+                 recenter_root_xy: bool = True,
                  **core_params):
         """
         Constructor.
@@ -60,9 +61,13 @@ class LocoEnv(Mjx):
         Args:
             th_params (Dict): Dictionary of parameters for the trajectory handler.
             traj_params (Dict): Dictionary of parameters to load trajectories.
+            recenter_root_xy (bool): If True, episodes start at the origin in xy. If False, they start at the
+                xy of the trajectory, so that the robot and the trajectory share a world frame.
             core_params (Dict): Dictionary of other core parameters.
 
         """
+
+        self._recenter_root_xy = recenter_root_xy
 
         if "geom_group_visualization_on_startup" not in core_params.keys():
             core_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
@@ -418,7 +423,10 @@ class LocoEnv(Mjx):
                         recorder_params: Dict = None,
                         callback_class=None,
                         quiet: bool = False,
-                        key: jax.random.PRNGKey = None) -> None:
+                        key: jax.random.PRNGKey = None,
+                        viser: bool = False,
+                        usd: bool = False,
+                        usd_params: Dict = None) -> None:
         """
         Plays a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
@@ -434,10 +442,32 @@ class LocoEnv(Mjx):
             callback_class: Object to be called at each step of the simulation.
             quiet (bool): If True, disable tqdm.
             key (jax.random.PRNGKey): Random key to use for the simulation.
+            viser (bool): If True, the browser-based viser viewer is used instead of the
+                OpenGL viewer. Recording then requires a connected browser. Keyword only in
+                practice: it is last so that existing positional callers keep working.
+            usd (bool): If True, collect the trajectory into an animated USD stage instead of
+                opening an interactive viewer.
+            usd_params (dict): Parameters passed to ``render_usd`` on its first frame.
 
         """
 
         assert self.th is not None
+
+        if viser and usd:
+            raise ValueError("viser and USD export cannot both be enabled.")
+        if usd and record:
+            raise ValueError(
+                "record=True is for framebuffer viewers and cannot be combined with USD export."
+            )
+        pending_usd_params = {} if usd_params is None else dict(usd_params)
+
+        def render_usd_frame(_record=False):
+            nonlocal pending_usd_params
+            self.render_usd(**pending_usd_params)
+            pending_usd_params = {}
+            return None
+
+        render_fn = render_usd_frame if usd else (self.render_viser if viser else self.render)
 
         if not TrajectoryHandler.is_numpy(self._traj.data):
             was_jax = True
@@ -473,8 +503,11 @@ class LocoEnv(Mjx):
         subtraj_step_no = 0
         traj_data_sample = self.th.get_current_traj_data(self._traj.data, self._additional_carry, np)
 
-        if render:
-            frame = self.render(record)
+        # Offline USD export starts inside the loop after the trajectory
+        # sample has been written to MjData. Rendering here would otherwise
+        # prepend the reset pose, which may be far from the trajectory origin.
+        if render and not usd:
+            frame = render_fn(record)
         else:
             frame = None
 
@@ -531,7 +564,7 @@ class LocoEnv(Mjx):
                 obs, self._additional_carry = self._create_observation(self._model, self._data, self._additional_carry)
 
                 if render:
-                    frame = self.render(record)
+                    frame = render_fn(record)
                 else:
                     frame = None
 
@@ -581,8 +614,10 @@ class LocoEnv(Mjx):
             category=DeprecationWarning,
             stacklevel=3
         )
-        self.play_trajectory(n_episodes, n_steps_per_episode, True, render,
-                             record, recorder_params, callback_class, quiet, key)
+        self.play_trajectory(n_episodes=n_episodes, n_steps_per_episode=n_steps_per_episode,
+                             from_velocity=True, render=render, record=record,
+                             recorder_params=recorder_params, callback_class=callback_class,
+                             quiet=quiet, key=key)
 
     def set_sim_state_from_traj_data(self, data, traj_data, carry) -> MjData:
         """
@@ -596,6 +631,8 @@ class LocoEnv(Mjx):
         Returns:
             MjData: The updated Mujoco data structure.
         """
+        if not self._recenter_root_xy:
+            return Mjx.set_sim_state_from_traj_data(data, traj_data, carry)
         robot_free_jnt_name = self.root_free_joint_xml_name
         robot_free_jnt_qpos_id_xy = np.array(mj_jntname2qposid(robot_free_jnt_name, self._model))[:2]
         all_free_jnt_qpos_id_xy = self.free_jnt_qpos_id[:, :2].reshape(-1)
@@ -619,6 +656,8 @@ class LocoEnv(Mjx):
         Returns:
             Data: Updated Mujoco data.
         """
+        if not self._recenter_root_xy:
+            return Mjx.mjx_set_sim_state_from_traj_data(data, traj_data, carry)
         if traj is None:
             traj = self._traj
         robot_free_jnt_name = self.root_free_joint_xml_name
@@ -763,10 +802,9 @@ class LocoEnv(Mjx):
 
         Args:
             task (str): Main task to solve.
-            dataset_type (str): "mocap" or "pretrained". "real" uses real motion capture data as the
-            reference trajectory. This data does not perfectly match the kinematics
-            and dynamics of this environment, hence it is more challenging. "perfect" uses
-            a perfect dataset.
+            dataset_type (str): Only "mocap" is available: motion capture data retargeted to the
+            robot. This data does not perfectly match the kinematics and dynamics of the
+            environment.
             debug (bool): If True, the smaller test datasets are used for debugging purposes.
             clip_trajectory_to_joint_ranges (bool): If True, trajectory is clipped to joint ranges.
 

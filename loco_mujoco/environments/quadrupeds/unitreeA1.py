@@ -19,7 +19,7 @@ class UnitreeA1(BaseRobotQuadruped):
     Mujoco environment of Unitree A1 model.
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================= ================ ==================================== ============================== ===
     Index in Obs Name              ObservationType  Min                                  Max                            Dim
@@ -79,7 +79,7 @@ class UnitreeA1(BaseRobotQuadruped):
 
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **DefaultControl**
 

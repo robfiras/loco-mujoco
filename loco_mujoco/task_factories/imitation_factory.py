@@ -1,5 +1,5 @@
 import os
-from typing import Union, Dict
+from typing import Union, Dict, Tuple
 from omegaconf import ListConfig, DictConfig
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
@@ -30,12 +30,7 @@ class ImitationFactory(TaskFactory):
     """
     A factory class for creating imitation learning environments with arbitrary trajectories.
 
-    Methods:
-        make(env_name: str, task: str, dataset_type: str, debug: bool = False, **kwargs) -> LocoEnv:
-            Creates an environment, loads a trajectory based on the task and dataset type, and returns the environment.
-
-        get_traj_path(env_cls, dataset_type: str, task: str, debug: bool) -> str:
-            Determines the path to the trajectory file based on the dataset type, task, and debug mode.
+    Use `make` to create an environment and load the trajectories of the given dataset configurations.
     """
 
     @classmethod
@@ -46,7 +41,7 @@ class ImitationFactory(TaskFactory):
              custom_dataset_conf: Union[CustomDatasetConf, Dict, DictConfig] = None,
              terminal_state_type: str = "RootPoseTrajTerminalStateHandler",
              init_state_type: str = "TrajInitialStateHandler",
-             **kwargs) -> LocoEnv:
+             **kwargs) -> Tuple[LocoEnv, Trajectory]:
         """
         Creates and returns an imitation learning environment given different configurations.
 
@@ -62,7 +57,8 @@ class ImitationFactory(TaskFactory):
             **kwargs: Additional keyword arguments to pass to the environment constructor.
 
         Returns:
-            LocoEnv: An instance of the requested imitation learning environment with the trajectory preloaded.
+            Tuple[LocoEnv, Trajectory]: The requested imitation learning environment with the trajectory
+                preloaded, and the processed trajectory.
 
         Raises:
             ValueError: If the `dataset_type` is unknown.

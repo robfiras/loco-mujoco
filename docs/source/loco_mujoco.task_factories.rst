@@ -1,3 +1,5 @@
+Task Factories
+===========================================
 
 .. automodule:: loco_mujoco.task_factories.base
     :members:

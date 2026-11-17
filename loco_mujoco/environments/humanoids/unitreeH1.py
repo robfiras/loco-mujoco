@@ -18,7 +18,7 @@ class UnitreeH1(BaseRobotHumanoid):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================== ================ ==================================== ============================== ===
     Index in Obs Name               ObservationType  Min                                  Max                            Dim
@@ -105,7 +105,7 @@ class UnitreeH1(BaseRobotHumanoid):
     ============ ================== ================ ==================================== ============================== ===
 
     Default Action Space
-    -----------------
+    --------------------
 
     Control function type: **DefaultControl**
 
@@ -199,7 +199,9 @@ class UnitreeH1(BaseRobotHumanoid):
             actuation_spec = self._get_action_specification(spec)
 
         # modify the specification if needed
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             spec = self._modify_spec_for_mjx(spec)
         if disable_arms or disable_back_joint:
             joints_to_remove, actuators_to_remove, equ_constraints_to_remove = self._get_spec_modifications()

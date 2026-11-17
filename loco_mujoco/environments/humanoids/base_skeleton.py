@@ -86,7 +86,9 @@ class BaseSkeleton(LocoEnv):
             if self._disable_arms:
                 spec = self._reorient_arms(spec)
 
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             assert use_box_feet
             spec = self._modify_spec_for_mjx(spec)
 
@@ -313,7 +315,10 @@ class BaseSkeleton(LocoEnv):
 
             for actuator in mjspec.actuators:
                 if "mot" not in actuator.name:
-                    actuator.force *= body_scaling ** 2
+                    # peak isometric force of a muscle: third muscle parameter (the `force`
+                    # attribute in the XML), stored in both the gain and the bias parameters
+                    actuator.gainprm[2] *= body_scaling ** 2
+                    actuator.biasprm[2] *= body_scaling ** 2
                 else:
                     actuator.gear *= body_scaling ** 2
         else:

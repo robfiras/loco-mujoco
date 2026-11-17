@@ -1,0 +1,74 @@
+experiment:
+  task_factory:
+    name: ImitationFactory
+    params:
+      default_dataset_conf:
+        task: balance
+  env_params:
+    env_name: MjxUnitreeH1
+    disable_arms: false
+    horizon: 1000
+    goal_type: GoalTrajMimic
+    reward_type: MimicReward
+    reward_params:
+      qpos_w_sum: 0.0
+      qvel_w_sum: 0.0
+      rpos_w_sum: 0.5
+      rquat_w_sum: 0.3
+      rvel_w_sum: 0.1
+      sites_for_mimic:
+        - upper_body_mimic
+        - left_hand_mimic
+        - left_foot_mimic
+        - right_hand_mimic
+        - right_foot_mimic
+  # policy / critic
+  hidden_layers: [32, 32]
+  critic_hidden_layers: [32, 32]
+  activation: silu
+  lr_actor: 2e-4
+  lr_critic: 2e-4
+  actor_max_grad_norm: 1.0
+  actor_max_grad_value: 0.1
+  actor_grad_spike_factor: 10.0
+  critic_max_grad_norm: 1.0
+  critic_epochs: 2
+  critic_minibatches: 2
+  # world model
+  wm_hidden_layers: [32, 32]
+  wm_term_hidden_layers: [16]
+  wm_activation: silu
+  lr_wm: 2e-4
+  wm_max_grad_norm: 1.0
+  wm_window: 3
+  wm_batch_size: 16
+  wm_batches_per_update: 2
+  wm_term_loss_weight: 1.0
+  wm_in_scale: [1.0, 1.0, 1.0, 2.0, 1.0, 5.0]
+  wm_out_scale: [0.3, 0.5, 2.0, 0.01, 0.02, 0.02]
+  wm_err_scale: [0.05, 0.1, 0.5, 1.0, 0.1, 2.0]
+  # imagination
+  imag_horizon: 4
+  imag_batch_size: 8
+  remat: true
+  gamma: 0.99
+  gae_lambda: 0.95
+  # schedule
+  num_envs: 4
+  total_timesteps: 64
+  updates_per_env_step: 0.5
+  warmup_steps: 4
+  lr_final_ratio: 0.03
+  lr_decay_fraction: 0.78
+  action_noise_std: 0.1
+  max_abs_qvel: 100.0
+  buffer_len: 16
+  start_buffer_len: 4
+  log_every: 4
+  n_seeds: 1
+  vmap_across_seeds: true
+  validation:
+    active: false
+    num_steps: 10
+    num_envs: 4
+    num: 1

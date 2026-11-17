@@ -211,7 +211,11 @@ class SACAgentState(OffPolicyAgentState):
                 apply_fn=lambda p, x: p["log_alpha"])
         )
 
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return cls(
             actor_state=actor_state,
@@ -302,7 +306,11 @@ class SACJax(OffPolicyBase):
         target_critic_run_stats = critic_params.get("run_stats", {})
 
         extra_state = cls._init_extra_state(rng_x, exp, alpha_tx=agent_conf.alpha_tx)
-        replay_buffer = ReplayBuffer.create(obs_dim, action_dim, int(exp.buffer_size))
+        replay_buffer = ReplayBuffer.create(
+            obs_dim, action_dim, int(exp.buffer_size),
+            add_subsample=bool(getattr(exp, 'buffer_add_subsample', False)),
+            add_prob=float(getattr(exp, 'buffer_add_prob', 1.0)),
+        )
 
         return SACAgentState(
             actor_state=actor_state,
@@ -371,11 +379,15 @@ class SACJax(OffPolicyBase):
         sampled_action, log_pi = _squashed_gaussian_sample_and_log_prob(
             mean_a, log_std_a, rng
         )
-        (q1_a, q2_a), _ = critic_apply_fn(
-            {"params": critic_st.params, "run_stats": critic_st.run_stats},
-            obs_b, sampled_action, mutable=["run_stats"],
+        actor_bundle = critic_st.run_stats
+        actor_mutables = list(actor_bundle.keys())
+        qs_a, _ = critic_apply_fn(
+            {"params": critic_st.params, **actor_bundle},
+            obs_b, sampled_action, mutable=actor_mutables, training=False,
         )
-        q_a = jnp.minimum(q1_a, q2_a)
+        # min over the critic ensemble; identical to jnp.minimum(q1, q2) at the
+        # default num_critics=2.
+        q_a = jnp.min(jnp.stack(qs_a, axis=0), axis=0)
         alpha = jnp.exp(extra_state.train_state.params["log_alpha"])
         loss = jnp.mean(alpha * log_pi - q_a)
         return loss, {

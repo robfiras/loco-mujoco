@@ -18,7 +18,7 @@ class BDSpot(BaseRobotQuadruped):
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ======== ================ ==================================== ============================== ===
     Index in Obs Name     ObservationType  Min                                  Max                            Dim
@@ -78,7 +78,7 @@ class BDSpot(BaseRobotQuadruped):
 
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **PDControl**
 

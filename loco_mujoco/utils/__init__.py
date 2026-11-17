@@ -7,3 +7,4 @@ from .dataset import (set_amass_path, set_smpl_model_path, set_converted_amass_p
 from .retarget_for_env import retarget_for_new_env_cli
 from .metrics import MetricsHandler, ValidationSummary
 from .logging import setup_logger
+from loco_mujoco.core.utils.models import download_models_cli

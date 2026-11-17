@@ -1,3 +1,5 @@
+from typing import Tuple
+
 from .base import TaskFactory
 from loco_mujoco.environments.base import LocoEnv
 
@@ -6,9 +8,7 @@ class RLFactory(TaskFactory):
     """
     A factory class to create reinforcement learning (RL) environments.
 
-    Methods:
-        make(env: str, **kwargs) -> LocoEnv:
-            Creates and returns an RL environment based on the specified environment name.
+    Use `make` to create an RL environment based on the specified environment name.
     """
 
     @staticmethod
@@ -17,7 +17,7 @@ class RLFactory(TaskFactory):
              terminal_state_type: str = "HeightBasedTerminalStateHandler",
              goal_type: str = "GoalRandomRootVelocity",
              reward_type: str = "TargetVelocityGoalReward",
-             **kwargs) -> LocoEnv:
+             **kwargs) -> Tuple[LocoEnv, None]:
         """
         Creates and returns an RL environment based on the specified environment name.
 
@@ -31,7 +31,7 @@ class RLFactory(TaskFactory):
             **kwargs: Additional keyword arguments to pass to the environment constructor.
 
         Returns:
-            LocoEnv: An instance of the requested RL environment.
+            Tuple[LocoEnv, None]: The requested RL environment and None, as RL tasks have no trajectory.
 
         Raises:
             KeyError: If the specified environment is not registered in `Mujoco.registered_envs`.
