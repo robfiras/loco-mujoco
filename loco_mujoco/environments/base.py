@@ -59,7 +59,8 @@ class LocoEnv(Mjx):
         Constructor.
 
         Args:
-            th_params (Dict): Dictionary of parameters for the trajectory handler.
+            th_params (Dict): Parameters for the trajectory handler: ``name``, a registered TrajectoryHandler
+                (default "RandomStartTrajectoryHandler"), and the keyword arguments of that class.
             traj_params (Dict): Dictionary of parameters to load trajectories.
             recenter_root_xy (bool): If True, episodes start at the origin in xy. If False, they start at the
                 xy of the trajectory, so that the robot and the trajectory share a world frame.
@@ -124,7 +125,7 @@ class LocoEnv(Mjx):
         processed_traj = traj.replace(data=traj_data, info=traj_info)
 
         # create or validate TrajectoryHandler using _th_params
-        th_params = dict(self._th_params) if self._th_params is not None else {}
+        th_params = _resolve_legacy_th_params(dict(self._th_params) if self._th_params is not None else {})
         th_name = th_params.pop("name", "RandomStartTrajectoryHandler")
 
         if self.th is None:
@@ -961,3 +962,32 @@ class LocoEnv(Mjx):
                 spec.delete(equality)
 
         return spec
+
+
+def _resolve_legacy_th_params(th_params: Dict) -> Dict:
+    """
+    Map the trajectory handler parameters of earlier versions (``random_start``, ``fixed_start_conf``) to the
+    handler classes, with a DeprecationWarning.
+
+    Args:
+        th_params (Dict): The ``th_params`` given to the environment (a copy, changed in place).
+
+    Returns:
+        Dict: Parameters with ``name`` and the class's keyword arguments.
+    """
+    if "name" in th_params or not {"random_start", "fixed_start_conf"} & th_params.keys():
+        return th_params
+    random_start = th_params.pop("random_start", True)
+    fixed_start_conf = th_params.pop("fixed_start_conf", None)
+    if fixed_start_conf is not None:
+        th_params.update(name="FixedStartTrajectoryHandler", start_conf=fixed_start_conf)
+        new = 'name="FixedStartTrajectoryHandler", start_conf=...'
+    elif random_start:
+        th_params.update(name="RandomStartTrajectoryHandler")
+        new = 'name="RandomStartTrajectoryHandler" (the default)'
+    else:
+        raise ValueError("th_params: random_start=False needs a fixed_start_conf (use "
+                         "name=\"FixedStartTrajectoryHandler\", start_conf=...).")
+    warnings.warn(f"th_params random_start / fixed_start_conf are deprecated, use {new}.", DeprecationWarning,
+                  stacklevel=3)
+    return th_params

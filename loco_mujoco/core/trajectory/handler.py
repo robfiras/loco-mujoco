@@ -1,3 +1,4 @@
+import warnings
 from dataclasses import replace
 from typing import Dict, List, Tuple
 import mujoco
@@ -378,3 +379,16 @@ class FixedStartTrajectoryHandler(TrajectoryHandler):
 
     def sample_start(self, key, backend, traj_data):
         return key, *self.start_conf
+
+    @property
+    def fixed_start_conf(self) -> Tuple[int, int]:
+        """Deprecated name of ``start_conf``."""
+        warnings.warn("TrajectoryHandler.fixed_start_conf is deprecated, use start_conf.", DeprecationWarning,
+                      stacklevel=2)
+        return self.start_conf
+
+    @fixed_start_conf.setter
+    def fixed_start_conf(self, value: Tuple[int, int]) -> None:
+        warnings.warn("TrajectoryHandler.fixed_start_conf is deprecated, use start_conf.", DeprecationWarning,
+                      stacklevel=2)
+        self.start_conf = tuple(value)
