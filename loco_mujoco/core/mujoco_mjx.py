@@ -93,15 +93,6 @@ class Mjx(Mujoco):
         self._use_mjwarp = use_mjwarp
         self._refresh_kinematics = refresh_kinematics
         if self._use_mjwarp:
-            import warnings
-            import time
-            # todo: fix once mjwarp is stable
-            warnings.warn(
-                "mjwarp is experimental and may not work with all environments. "
-                "Resetting is error prone. Training might work, but will not be optimal.",
-                UserWarning
-            )
-            time.sleep(3)
             self.sys = mjx.put_model(self._model, impl='warp')
             # `nconmax` is the deprecated name of `naconmax`; MJX 4 no longer accepts it
             naconmax = nconmax if naconmax is None else naconmax
@@ -173,10 +164,9 @@ class Mjx(Mujoco):
 
         # reset data
         if self._use_mjwarp:
-            # todo: this is not a good way of resetting the data, all other entities should be reset as well!
-            # there is an issue with the warp backend that does not allow to reset the data properly
-            data = state.data.replace(qpos=jnp.zeros_like(state.data.qpos),
-                                qvel=jnp.zeros_like(state.data.qvel))
+            # MjWarp keeps its contact and constraint buffers in one block shared by all worlds, which cannot
+            # be reset for a single world. They are rebuilt by the next step, so everything else is reset.
+            data = self._first_data.replace(_impl=state.data._impl)
         else:
             data = self._first_data
 

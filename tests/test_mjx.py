@@ -111,3 +111,42 @@ def test_mjx_warp_backend_smoke():
     key, subkey = jax.random.split(key)
     action = env.sample_action_space(subkey)
     _ = env.mjx_step(state, action)
+
+
+def test_mjx_warp_reset_in_step():
+    """
+    An episode that ends under MjWarp has to restart from the same state as a fresh reset, and creating
+    the environment must not warn about the backend.
+    """
+    pytest.importorskip("mujoco_warp")
+    import dataclasses
+    import warnings
+
+    horizon = 5
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        env = DummyHumamoidEnv(enable_mjx=True, use_mjwarp=True, horizon=horizon, gamma=0.99, n_envs=1)
+
+    key = jax.random.PRNGKey(0)
+    fresh = env.mjx_reset(key)
+    step = jax.jit(env.mjx_step)
+    action = jnp.zeros(env.info.action_space.shape)
+
+    state = fresh
+    for _ in range(horizon + 1):
+        state = step(state, action)
+        if bool(state.done):
+            break
+    assert bool(state.done), "the episode should end at the horizon"
+
+    # every field outside the buffers MjWarp shares between worlds is back at its initial value
+    for field in dataclasses.fields(state.data):
+        value = getattr(state.data, field.name)
+        if field.name != "_impl" and hasattr(value, "shape"):
+            np.testing.assert_allclose(np.asarray(value), np.asarray(getattr(fresh.data, field.name)),
+                                       atol=1e-6, err_msg=field.name)
+
+    # and the next episode runs instead of ending again right away
+    state = step(state, action)
+    assert not bool(state.done)
+    assert int(state.additional_carry.cur_step_in_episode) == 2
