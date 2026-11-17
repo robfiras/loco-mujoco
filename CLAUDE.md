@@ -12,7 +12,7 @@ LocoMuJoCo is an imitation learning benchmark for whole-body locomotion control,
 ```bash
 pip install -e .
 # GPU JAX support (optional):
-pip install jax["cuda12"]
+pip install "jax[cuda12]<=0.10.1,!=0.10.0"
 # SMPL/AMASS retargeting support (optional; needs an editable install):
 pip install -e '.[smpl]'
 # MyoSkeleton model (optional; asks you to accept its license):

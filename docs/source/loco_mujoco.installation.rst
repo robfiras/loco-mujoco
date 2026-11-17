@@ -24,7 +24,10 @@ To use **JAX with GPU**:
 
 .. code-block:: bash
 
-   pip install jax["cuda12"]
+   pip install "jax[cuda12]<=0.10.1,!=0.10.0"
+
+JAX 0.10.0 and 0.10.2 fail to compile SuperMimic's training function on the GPU, so LocoMuJoCo
+currently requires ``jax<=0.10.1,!=0.10.0``.
 
 The robot models (about 200 MB) are downloaded automatically the first time you create an
 environment and cached in ``~/.loco-mujoco-caches/robot_models``. On a cluster or in a container

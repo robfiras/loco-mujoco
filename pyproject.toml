@@ -10,7 +10,9 @@ dependencies = [
     "mujoco-mjx>=3.5.0",
     "mujoco-warp>=3.5.0",
     "hydra-core",
-    "jax",
+    # JAX 0.10.0 and 0.10.2 fail to compile the SuperMimic training function on GPU (they work on CPU);
+    # raise the upper bound only after a newer release has been tested on GPU
+    "jax<=0.10.1,!=0.10.0",
     "flax",
     "orbax",
     "distrax",
