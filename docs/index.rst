@@ -11,12 +11,10 @@ Welcome to LocoMuJoCo!
    :align: center
 
 .. image:: https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev
-.. image:: https://readthedocs.org/projects/loco-mujoco/badge/?version=latest
+.. image:: https://app.readthedocs.org/projects/loco-mujoco/badge/?version=latest
    :target: https://loco-mujoco.readthedocs.io/en/latest/?badge=latest
 .. image:: https://img.shields.io/badge/License-MIT-yellow.svg
    :target: https://opensource.org/licenses/MIT
-.. image:: https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white
-   :target: https://discord.gg/gEqR3xCVdn
 
 Latest News
 ===========

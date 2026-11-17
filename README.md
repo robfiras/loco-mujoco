@@ -3,9 +3,8 @@
 </p>
 
 ![continuous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
-[![Documentation Status](https://readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://app.readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Join our Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?style=flat&logo=discord&logoColor=white)](https://discord.gg/gEqR3xCVdn)
 
 [//]: # ([![PyPI]&#40;https://img.shields.io/pypi/v/loco-mujoco&#41;]&#40;https://pypi.org/project/loco-mujoco/&#41;)
 
@@ -28,12 +27,11 @@ making it suitable for pure reinforcement learning as well.
 ### Key Advantages 
 ✅ Supports **MuJoCo** (single environment) and **MJX/MJWarp** (parallel environments) \
 ✅ Includes **12 humanoid and 4 quadruped environments**, featuring 4 **biomechanical human models** \
-✅ Clean single-file JAX algorithms for quick benchmarking (**PPO**, **GAIL**, **AMP**, **DeepMimic**)\
+✅ Clean single-file JAX algorithms for quick benchmarking (**PPO**, **GAIL**, **AMP**, **DeepMimic**, **SuperMimic**)\
 ✅ Combined training and environment into one JIT‑compiled function for lightning‑fast training 🚀 \
-✅ **Over 22,000 motion capture datasets** (AMASS, LAFAN1, native LocoMuJoCo) retargeted for each humanoid \
+✅ **Motion capture datasets** (AMASS, LAFAN1, native LocoMuJoCo) retargeted for each humanoid \
 ✅ **Robot-to-robot retargeting** allows to retarget any existing dataset from one robot to another \
 ✅ Powerful **trajectory comparison metrics** including dynamic time warping and discrete Fréchet distance, all in JAX \
-✅ Interface for Gymnasium \
 ✅ Built-in **domain and terrain randomization** \
 ✅ Modular design: define, swap, and reuse components like observation types, reward functions, terminal state handlers, and domain randomization \
 ✅ [Documentation](https://loco-mujoco.readthedocs.io/)
