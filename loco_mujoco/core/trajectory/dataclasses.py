@@ -1250,22 +1250,31 @@ def interpolate_trajectories(traj_data: TrajectoryData, traj_info: TrajectoryInf
         qpos_free_joint_quat_ids_flat = [item for sublist in qpos_free_joint_quat_ids for item in sublist]
         qpos_other_ids = backend.array([i for i in range(traj_data.qpos.shape[-1])
                                     if i not in qpos_free_joint_quat_ids_flat])
-        qpos = jnp.zeros((x_new.shape[0], traj_data_slice.qpos.shape[-1]))
-        qpos = qpos.at[:, qpos_other_ids].set(interp1d(x, traj_data_slice.qpos[:, qpos_other_ids], kind="cubic", axis=0)(x_new))
-        for quat_ids in qpos_free_joint_quat_ids:
-            quat_ids = backend.array(quat_ids)
-            qpos = qpos.at[:, quat_ids].set(slerp_batch(traj_data_slice.qpos[:, quat_ids], x, x_new))
+        if backend is np:
+            # numpy backend: avoid dispatching JAX ops (safe for background threads)
+            qpos = np.zeros((x_new.shape[0], traj_data_slice.qpos.shape[-1]))
+            qpos[:, qpos_other_ids] = interp1d(x, traj_data_slice.qpos[:, qpos_other_ids], kind="cubic", axis=0)(x_new)
+            for quat_ids in qpos_free_joint_quat_ids:
+                quat_ids = np.array(quat_ids)
+                qpos[:, quat_ids] = slerp_batch(traj_data_slice.qpos[:, quat_ids], x, x_new)
+        else:
+            # jnp backend: original behavior
+            qpos = jnp.zeros((x_new.shape[0], traj_data_slice.qpos.shape[-1]))
+            qpos = qpos.at[:, qpos_other_ids].set(interp1d(x, traj_data_slice.qpos[:, qpos_other_ids], kind="cubic", axis=0)(x_new))
+            for quat_ids in qpos_free_joint_quat_ids:
+                quat_ids = backend.array(quat_ids)
+                qpos = qpos.at[:, quat_ids].set(slerp_batch(traj_data_slice.qpos[:, quat_ids], x, x_new))
 
         # interpolate the rest of the data
         qvel_interpolated = interp1d(x, traj_data_slice.qvel, kind="cubic", axis=0)(x_new)
         xpos_interpolated = interp1d(x, traj_data_slice.xpos, kind="cubic", axis=0)(x_new) \
-            if traj_data_slice.xpos.size > 0 else jnp.empty(0)
+            if traj_data_slice.xpos.size > 0 else backend.empty(0)
         cvel_interpolated = interp1d(x, traj_data_slice.cvel, kind="cubic", axis=0)(x_new) \
-            if traj_data_slice.cvel.size > 0 else jnp.empty(0)
+            if traj_data_slice.cvel.size > 0 else backend.empty(0)
         site_xpos_interpolated = interp1d(x, traj_data_slice.site_xpos, kind="cubic", axis=0)(x_new) \
-            if traj_data_slice.site_xpos.size > 0 else jnp.empty(0)
+            if traj_data_slice.site_xpos.size > 0 else backend.empty(0)
         subtree_com_interpolated = interp1d(x, traj_data_slice.subtree_com, kind="cubic", axis=0)(x_new) \
-            if traj_data_slice.subtree_com.size > 0 else jnp.empty(0)
+            if traj_data_slice.subtree_com.size > 0 else backend.empty(0)
 
         traj_data_slice = traj_data_slice.replace(
             qpos=qpos,
