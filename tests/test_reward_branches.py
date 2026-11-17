@@ -22,7 +22,7 @@ from test_conf.dummy_humanoid_env import DummyHumamoidEnv
 jax.config.update('jax_platform_name', 'cpu')
 
 DEFAULTS = {"horizon": 1000, "gamma": 0.99, "n_envs": 1,
-            "th_params": {"random_start": False, "fixed_start_conf": (0, 0)}}
+            "th_params": {"name": "FixedStartTrajectoryHandler", "start_conf": (0, 0)}}
 
 
 class QuadFootDummyEnv(DummyHumamoidEnv):

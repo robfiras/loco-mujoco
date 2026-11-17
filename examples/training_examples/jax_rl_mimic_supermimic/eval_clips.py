@@ -22,6 +22,7 @@ for a in sys.argv[1:]:
 
 from loco_mujoco import TaskFactory
 from loco_mujoco.algorithms import SuperMimicJax
+from loco_mujoco.core.trajectory import FixedStartTrajectoryHandler
 
 run, ckpt = Path(args[0]), args[1]
 exp = OmegaConf.load(run / "config.yaml").experiment
@@ -53,12 +54,14 @@ else:
     max_step_reward = float(sum(rp[w] for w in weights)) * env.dt
 n_steps = jnp.array([int(env.th.len_trajectory(i, traj.data)) - 1 for i in range(len(names))])
 
-# reset outside of jit: per-env start frames set inside jit do not reach the reset correctly
-env.th.random_start, env.th.use_fixed_start = False, True
+# every clip from its first frame: a fixed-start handler on the same trajectories, with each env's clip set in reset
+th = env.th
+env.th = FixedStartTrajectoryHandler(th.traj_info, control_dt=th.control_dt, max_n_samples=th.max_n_samples,
+                                     max_n_trajs=th.max_n_trajs)
 
 
 def reset(key, clip):
-    env.th.fixed_start_conf = (clip, 0)
+    env.th.start_conf = (clip, 0)
     return env.mjx_reset(key, traj)
 
 
