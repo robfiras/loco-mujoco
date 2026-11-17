@@ -1,4 +1,5 @@
-from .base import Observation, ObservationIndexContainer, ObservationContainer, ObservationType, StatefulObservation
+from .base import (Observation, ObservationIndexContainer, ObservationContainer, ObservationType,
+                   StatefulObservation, HeightScan)
 from .goals import *
 
 # register all goals

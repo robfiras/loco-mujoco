@@ -230,6 +230,12 @@ class MimicReward(TrajectoryBasedReward):
                 if model.jnt_type[i] == mujoco.mjtJoint.mjJNT_FREE:
                     quat_in_qpos.append(qposid[3:])
         self._qpos_ind = np.concatenate(qpos_ind)
+
+        # free-joint x/y entries in qpos_ind; used to undo per-env terrain origins before comparing to the trajectory
+        free_x = [mj_jntid2qposid(i, model)[0] for i in range(model.njnt)
+                  if model.jnt_type[i] == mujoco.mjtJoint.mjJNT_FREE]
+        self._free_x_in_qpos = np.isin(self._qpos_ind, free_x)
+        self._free_y_in_qpos = np.isin(self._qpos_ind, np.array(free_x, dtype=int) + 1)
         self._qvel_ind = np.concatenate(qvel_ind)
         quat_in_qpos = np.concatenate(quat_in_qpos)
         self._quat_in_qpos = np.array([True if q in quat_in_qpos else False for q in self._qpos_ind])
@@ -343,6 +349,9 @@ class MimicReward(TrajectoryBasedReward):
 
         # get all quantities from the current data
         qpos, qvel = data.qpos[self._qpos_ind], data.qvel[self._qvel_ind]
+        if env._terrain.has_env_origins:
+            origin = env._terrain.get_env_origin_xy(carry, backend)
+            qpos = qpos - self._free_x_in_qpos * origin[0] - self._free_y_in_qpos * origin[1]
         qpos_quat = qpos[self._quat_in_qpos].reshape(-1, 4)
         if len(self._rel_site_ids) > 1:
             site_rpos, site_rangles, site_rvel = (

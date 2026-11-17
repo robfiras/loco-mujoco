@@ -53,7 +53,7 @@ class LocoEnv(Mjx):
                  default_camera_mode: str = "follow",
                  th_params: Dict = None,
                  traj_params: Dict = None,
-                 recenter_root_xy: bool = True,
+                 recenter_root_xy: Union[bool, None] = None,
                  **core_params):
         """
         Constructor.
@@ -62,13 +62,17 @@ class LocoEnv(Mjx):
             th_params (Dict): Parameters for the trajectory handler: ``name``, a registered TrajectoryHandler
                 (default "RandomStartTrajectoryHandler"), and the keyword arguments of that class.
             traj_params (Dict): Dictionary of parameters to load trajectories.
-            recenter_root_xy (bool): If True, episodes start at the origin in xy. If False, they start at the
-                xy of the trajectory, so that the robot and the trajectory share a world frame.
+            recenter_root_xy (Union[bool, None]): If True, episodes start at the origin in xy (or at the env's
+                origin on terrains that place envs, e.g. SharedTerrain). If False, they start at the xy of the
+                trajectory, so that the robot and the trajectory share a world frame. None (default): False on
+                terrains built around the dataset's clips (``trajectories_in_world_frame``, e.g. HeightmapTerrain),
+                True otherwise.
             core_params (Dict): Dictionary of other core parameters.
 
         """
 
-        self._recenter_root_xy = recenter_root_xy
+        # resolved against the terrain once it exists (see _resolve_recenter_root_xy)
+        self._recenter_root_xy = True if recenter_root_xy is None else recenter_root_xy
 
         if "geom_group_visualization_on_startup" not in core_params.keys():
             core_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
@@ -85,6 +89,8 @@ class LocoEnv(Mjx):
             # call grandparent constructor (Mujoco (CPU) environment)
             super(Mjx, self).__init__(**core_params)
 
+        self._recenter_root_xy = self._resolve_recenter_root_xy(recenter_root_xy)
+
         # dataset dummy
         self._dataset = None
 
@@ -99,6 +105,52 @@ class LocoEnv(Mjx):
                 traj = Trajectory.load(traj_path)
             if traj is not None:
                 self.process_trajectory(traj)
+
+    def _resolve_recenter_root_xy(self, recenter_root_xy: Union[bool, None]) -> bool:
+        """
+        Whether episodes are recentered in xy, given the constructor argument and the terrain.
+
+        Args:
+            recenter_root_xy (Union[bool, None]): The constructor argument.
+
+        Returns:
+            bool: True if trajectories are moved to the origin (plus the env's terrain origin) on reset.
+
+        Raises:
+            ValueError: If the argument contradicts the terrain's placement of the robot.
+        """
+        terrain = self._terrain
+        if recenter_root_xy is None:
+            return not terrain.trajectories_in_world_frame
+        if recenter_root_xy and terrain.trajectories_in_world_frame:
+            raise ValueError(f"{terrain.get_name()} is built around the dataset's clips, so episodes have to start "
+                             f"where their clip is: use recenter_root_xy=False (or leave it at None).")
+        if not recenter_root_xy and terrain.has_env_origins:
+            raise ValueError(f"{terrain.get_name()} places every env at its own origin, which needs recentered "
+                             f"trajectories: use recenter_root_xy=True (or leave it at None).")
+        return recenter_root_xy
+
+    def get_traj_offset_xy(self, carry: Any, backend: ModuleType, traj: Trajectory = None):
+        """
+        Offset from the current trajectory's xy to the world xy of the env: the reference root is at
+        ``trajectory xy + offset`` in the world. It is the env's terrain origin minus the trajectory's start when
+        episodes are recentered, and zero otherwise.
+
+        Args:
+            carry (Any): Carry instance with the trajectory state.
+            backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory): Trajectory to use. Defaults to the env's trajectory.
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: The xy offset, shape (2,).
+        """
+        if not self._recenter_root_xy:
+            return backend.zeros(2)
+        traj_data = (traj if traj is not None else self._traj).data
+        traj_state = carry.traj_state
+        qpos_init = traj_data.get_qpos(traj_state.traj_no, traj_state.subtraj_step_no_init, backend)
+        root_xy = np.array(mj_jntname2qposid(self.root_free_joint_xml_name, self._model))[:2]
+        return self._terrain.get_env_origin_xy(carry, backend) - qpos_init[root_xy]
 
     def process_trajectory(self, traj: Trajectory) -> Trajectory:
         """
