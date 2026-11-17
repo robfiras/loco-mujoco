@@ -100,7 +100,8 @@ class Mjx(Mujoco):
             # MjWarp shares hfield_data across all worlds: per-env heightfields written into the model are
             # flattened by the FFI layer and every world collides with env 0's terrain.
             raise ValueError(f"{self._terrain.get_name()} writes a per-env heightfield, which MjWarp does not "
-                             f"support (all worlds would use env 0's terrain). Use SharedTerrain instead.")
+                             f"support (all worlds would use env 0's terrain). Use SharedTerrain or HeightmapTerrain "
+                             f"instead.")
         if self._use_mjwarp:
             self.sys = mjx.put_model(self._model, impl='warp')
             # `nconmax` is the deprecated name of `naconmax`; MJX 4 no longer accepts it

@@ -985,41 +985,6 @@ class ModelInfo(StatefulObservation):
         return backend.concatenate(obs), carry
 
 
-class HeightMatrix(StatefulObservation):
-
-    def __init__(self, obs_name: str, **kwargs):
-        super().__init__(obs_name, **kwargs)
-        self.matrix_config = dict()  # todo: setup the matrix configuration
-        self.dim = 0 # todo: implement this. It should be the flattened size of the matrix
-
-    def _init_from_mj(self, env, model, data, current_obs_size):
-        self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim # todo
-        self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
-        self._initialized_from_mj = True
-
-    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
-        """
-        Get the observation and update the state.
-
-        Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            carry: The state carry.
-            backend: The backend to use, either np or jnp.
-            traj: Trajectory to use (optional).
-
-        Returns:
-            The observation and the updated state.
-
-        """
-
-        # configure the matrix
-        matrix = env._terrain.get_height_matrix(env, self.matrix_config, env, model, data, carry, backend)
-
-        return backend.ravel(matrix), carry
-
-
 class RelativeSiteQuantaties(StatefulObservation):
     """
     Observation Type holding the position, rotation and velocity of all sites for mimic relatively to the main site.

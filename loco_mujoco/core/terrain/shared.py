@@ -1,5 +1,5 @@
 from types import ModuleType
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -10,6 +10,7 @@ from mujoco import MjData, MjModel, MjSpec
 from mujoco.mjx import Data, Model
 from scipy.ndimage import zoom
 
+from loco_mujoco.core.terrain.base import hfield_surface_height
 from loco_mujoco.core.terrain.static import StaticTerrain
 from loco_mujoco.core.utils.backend import assert_backend_is_supported
 
@@ -285,20 +286,10 @@ class SharedTerrain(StaticTerrain):
 
     # ------------------------------------------------------------------ queries
 
-    def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType,
-                      env: Any = None) -> Union[np.ndarray, jnp.ndarray]:
-        """Bilinear terrain height at world points ``xy`` of shape (..., 2). ``env`` is unused (same interface as
-        HeightmapTerrain)."""
+    def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType, env: Any = None,
+                      carry: Any = None) -> Union[np.ndarray, jnp.ndarray]:
+        """Height of the heightfield surface at world points ``xy`` of shape (..., 2)."""
         H = self._heights_jnp if backend == jnp else self.heights
-        fx = backend.clip((xy[..., 0] + self.half_x) / self.hs, 0, self.ncol - 1.001)
-        fy = backend.clip((xy[..., 1] + self.half_y) / self.hs, 0, self.nrow - 1.001)
-        c0, r0 = backend.floor(fx).astype(int), backend.floor(fy).astype(int)
-        tx, ty = fx - c0, fy - r0
-        h00, h01 = H[r0, c0], H[r0, c0 + 1]
-        h10, h11 = H[r0 + 1, c0], H[r0 + 1, c0 + 1]
-        return (h00 * (1 - tx) + h01 * tx) * (1 - ty) + (h10 * (1 - tx) + h11 * tx) * ty
-
-    def get_height_matrix(self, matrix_config: Dict[str, Any], env: Any, model: Union[MjModel, Model],
-                          data: Union[MjData, Data], carry: Any,
-                          backend: ModuleType) -> Union[np.ndarray, jnp.ndarray]:
-        raise NotImplementedError("HeightMatrix observation is not implemented yet; use get_height_at().")
+        fx = (xy[..., 0] + self.half_x) / self.hs
+        fy = (xy[..., 1] + self.half_y) / self.hs
+        return hfield_surface_height(H, fx, fy, self.nrow, self.ncol, backend)

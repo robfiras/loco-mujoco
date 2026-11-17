@@ -13,6 +13,26 @@ from loco_mujoco.core.utils.backend import assert_backend_is_supported
 class Terrain(StatefulObject):
     """
     Base interface for all terrain classes.
+
+    The environment drives a terrain through these hooks, identically on MuJoCo (CPU, NumPy backend) and on MJX /
+    MuJoCo Warp (JAX backend, one env per vmapped world):
+
+        - ``modify_spec``: once, while the model is built. Adds the terrain's assets and geoms.
+        - ``init_state``: per env, when the carry is created. Returns the terrain's per-env state
+          (``carry.terrain_state``).
+        - ``reset``: per env, on every reset, after the trajectory state has been reset and before the initial state
+          is set. May change the data and the carry, not the model.
+        - ``shift_to_env_origin`` (if ``has_env_origins``) and ``ground_robot`` (if ``grounds_robot``): per env, on
+          every reset, after the initial state has been set.
+        - ``update``: per env, before every physics step. The model is not stored per env: the env passes the same
+          base model every step, so a terrain that changes the model per env (e.g. a heightfield or geoms of its
+          own) re-applies the change here from its state in the carry, as the domain randomizer does.
+        - ``get_height_at``: terrain height at world points, for observations (``HeightScan``) and reset logic.
+
+    Placement of the robot: by default every episode starts at the world origin in xy (the environment recenters
+    the trajectory, ``recenter_root_xy``). A terrain that spreads envs over the map returns ``has_env_origins``
+    and moves each env to its own origin in ``shift_to_env_origin``. A terrain whose map is built around the clips
+    of a dataset returns ``trajectories_in_world_frame``, and episodes then start where the clip is.
     """
 
     registered: Dict[str, type] = dict()
@@ -30,7 +50,7 @@ class Terrain(StatefulObject):
         """
         self.terrain_conf = terrain_config
 
-        # To be specified from spec
+        # The heightfield the viewer re-uploads for dynamic terrains (see ``is_dynamic``). Set in ``modify_spec``.
         self.hfield_id: Union[int, None] = None
 
     def reset(self, env: Any,
@@ -48,6 +68,7 @@ class Terrain(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj: The trajectory in use, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -65,7 +86,8 @@ class Terrain(StatefulObject):
                backend: ModuleType,
                traj=None) -> Tuple[Union[MjModel, Model], Union[MjData, Data], Any]:
         """
-        Update the terrain.
+        Update the terrain before a physics step. Per-env changes of the model have to be applied here, every step
+        (see the class docstring).
 
         Args:
             env (Any): The environment instance.
@@ -73,6 +95,7 @@ class Terrain(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj: The trajectory in use, if any.
 
         Returns:
             Tuple[Union[MjModel, Model], Union[MjData, Data], Any]: The updated simulation model, data, and carry.
@@ -98,31 +121,24 @@ class Terrain(StatefulObject):
         """
         raise NotImplementedError
 
-    def get_height_matrix(self,
-                          matrix_config: Dict[str, Any],
-                          env: Any, model: Union[MjModel, Model],
-                          data: Union[MjData, Data],
-                          carry: Any,
-                          backend: ModuleType) -> Union[np.ndarray, jnp.ndarray]:
+    def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType, env: Any = None,
+                      carry: Any = None) -> Union[np.ndarray, jnp.ndarray]:
         """
-        Get the height matrix for the terrain.
+        Height of the terrain's collision surface at world points.
 
         Args:
-            matrix_config (Dict[str, Any]): Configuration for the height matrix.
-            env (Any): The environment instance.
-            model (Union[MjModel, Model]): The simulation model.
-            data (Union[MjData, Data]): The simulation data.
-            carry (Any): Carry instance with additional state information.
+            xy (Union[np.ndarray, jnp.ndarray]): World xy points, shape (..., 2).
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            env (Any): The environment instance. Terrains may read their data from its model.
+            carry (Any): Carry instance of the env. Needed by terrains that differ per env.
 
         Returns:
-            Union[np.ndarray, jnp.ndarray]: The height matrix.
+            Union[np.ndarray, jnp.ndarray]: The heights, shape (...).
 
         Raises:
-            NotImplementedError: If not implemented in a subclass.
+            NotImplementedError: If the terrain does not provide heights.
         """
-        assert_backend_is_supported(backend)
-        raise NotImplementedError
+        raise NotImplementedError(f"{self.get_name()} does not provide terrain heights.")
 
     @property
     def has_env_origins(self) -> bool:
@@ -164,6 +180,18 @@ class Terrain(StatefulObject):
         return data
 
     @property
+    def trajectories_in_world_frame(self) -> bool:
+        """
+        Whether the terrain is built around the clips of a dataset, each clip already placed on its part of the map.
+        Episodes then start where their clip is instead of at the world origin (the environment does not recenter
+        the trajectory, see ``recenter_root_xy`` of ``LocoEnv``).
+
+        Returns:
+            bool: False by default.
+        """
+        return False
+
+    @property
     def grounds_robot(self) -> bool:
         """
         Whether the terrain lifts the robot out of the ground after the initial state has been set on reset (see
@@ -189,7 +217,9 @@ class Terrain(StatefulObject):
     @property
     def is_dynamic(self) -> bool:
         """
-        Check if the terrain is dynamic.
+        Whether the terrain writes heightfield data per env at runtime (``hfield_data``). The viewer then re-uploads
+        the heightfield ``hfield_id``, and MuJoCo Warp, which keeps one ``hfield_data`` for all worlds, refuses the
+        terrain. Terrains that change other model fields per env (e.g. geoms) are not dynamic in this sense.
 
         Returns:
             bool: True if the terrain is dynamic, False otherwise.
@@ -268,3 +298,39 @@ class Terrain(StatefulObject):
         else:
             setattr(model, attribute, value)
         return model
+
+
+def hfield_surface_height(H: Union[np.ndarray, jnp.ndarray], fx: Union[np.ndarray, jnp.ndarray],
+                          fy: Union[np.ndarray, jnp.ndarray], nrow: int, ncol: int, backend: ModuleType,
+                          adr: Union[int, np.ndarray, jnp.ndarray] = 0,
+                          nearest: bool = False) -> Union[np.ndarray, jnp.ndarray]:
+    """
+    Surface of a MuJoCo heightfield at fractional sample coordinates.
+
+    MuJoCo collides with (and ray-casts against) two triangles per heightfield cell, split along the diagonal from
+    sample (r, c) to (r + 1, c + 1); this interpolates on those triangles, so it is exact, unlike bilinear
+    interpolation.
+
+    Args:
+        H: Flat row-major samples; row r runs along y, column c along x.
+        fx, fy: Fractional column and row coordinates of the points, shape (...). Clamped to the heightfield.
+        nrow, ncol: Rows and columns of the heightfield (both at least 2).
+        backend: numpy or jax.numpy.
+        adr: Index of sample (0, 0) in H (a scalar, or one per point).
+        nearest: Return the nearest sample instead.
+
+    Returns:
+        The interpolated sample values, shape (...).
+    """
+    H = H.reshape(-1)
+    fx = backend.clip(fx, 0.0, ncol - 1.0)
+    fy = backend.clip(fy, 0.0, nrow - 1.0)
+    c0 = backend.clip(backend.floor(fx).astype(int), 0, ncol - 2)
+    r0 = backend.clip(backend.floor(fy).astype(int), 0, nrow - 2)
+    tx, ty = fx - c0, fy - r0
+    if nearest:
+        tx, ty = backend.round(tx), backend.round(ty)
+    i = adr + r0 * ncol + c0
+    h00, h01, h10, h11 = H[i], H[i + 1], H[i + ncol], H[i + ncol + 1]
+    return backend.where(tx >= ty, h00 + tx * (h01 - h00) + ty * (h11 - h01),
+                         h00 + ty * (h10 - h00) + tx * (h11 - h10))
