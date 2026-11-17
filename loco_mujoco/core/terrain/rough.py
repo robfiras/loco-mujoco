@@ -1,5 +1,5 @@
 from types import ModuleType
-from typing import Any, Union, Dict, Tuple
+from typing import Any, Union, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +13,7 @@ import scipy as np_scipy
 import jax.scipy as jnp_scipy
 
 from loco_mujoco.core.terrain import DynamicTerrain
+from loco_mujoco.core.terrain.base import hfield_surface_height
 from loco_mujoco.core.utils import mj_jntname2qposid
 from loco_mujoco.core.utils.backend import assert_backend_is_supported
 
@@ -36,6 +37,8 @@ class RoughTerrain(DynamicTerrain):
     """
 
     viewer_needs_to_update_hfield: bool = True
+
+    FLOOR_Z = -0.06  # height of the heightfield geom's frame
 
     def __init__(self, env: Any,
                  inner_platform_size_in_meters: float = 1.0,
@@ -139,7 +142,7 @@ class RoughTerrain(DynamicTerrain):
 
         wb = spec.worldbody
         wb.add_geom(name='floor', type=mujoco.mjtGeom.mjGEOM_HFIELD, hfieldname='rough_terrain', group=2,
-                    pos=(0, 0, -0.06), material="MatPlane", rgba=(0.8, 0.9, 0.8, 1))
+                    pos=(0, 0, self.FLOOR_Z), material="MatPlane", rgba=(0.8, 0.9, 0.8, 1))
 
         return spec
 
@@ -201,31 +204,21 @@ class RoughTerrain(DynamicTerrain):
         data = self._reset_on_edge(data, backend)
         return model, data, carry
 
-    def get_height_matrix(self, matrix_config: Dict[str, Any],
-                          env: Any,
-                          model: Union[MjModel, Model],
-                          data: Union[MjData, Data],
-                          carry: Any,
-                          backend: ModuleType) -> Union[np.ndarray, jnp.ndarray]:
+    def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType, env: Any = None,
+                      carry: Any = None) -> Union[np.ndarray, jnp.ndarray]:
         """
-        Get the height matrix of the terrain.
-
-        Args:
-            matrix_config (Dict[str, Any]): The matrix configuration.
-            env (Any): The environment instance.
-            model (Union[MjModel, Model]): The simulation model.
-            data (Union[MjData, Data]): The simulation data.
-            carry (Any): Carry instance with additional state information.
-            backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
-
-        Returns:
-            Union[np.ndarray, jnp.ndarray]: The height matrix of the terrain.
-
-        Raises:
-            NotImplementedError: If the method is not implemented.
+        Height of the env's current rough terrain at world points ``xy`` of shape (..., 2). The terrain differs per
+        env, so ``carry`` (holding its heightfield) is required. Points outside the heightfield get the height of
+        its border.
         """
         assert_backend_is_supported(backend)
-        raise NotImplementedError
+        assert carry is not None, "RoughTerrain differs per env: get_height_at needs the env's carry"
+        sx, sy, sz = self.hfield_size[:3]
+        n = self.hfield_length
+        fx = (xy[..., 0] + sx) / (2 * sx) * (n - 1)
+        fy = (xy[..., 1] + sy) / (2 * sy) * (n - 1)
+        h = hfield_surface_height(carry.terrain_state.height_field_raw, fx, fy, n, n, backend)
+        return self.FLOOR_Z + sz * h
 
     def isaac_hf_to_mujoco_hf(self,
                               isaac_hf: Union[np.ndarray, jnp.ndarray],

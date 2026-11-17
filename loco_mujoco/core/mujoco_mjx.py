@@ -68,6 +68,9 @@ class Mjx(Mujoco):
         njmax (int): maximum number of constraints to allocate for warp across all worlds.
         refresh_kinematics (bool): If True, derived quantities like body poses are recomputed after each control
             step. Otherwise they lag qpos and qvel by one simulation step.
+        naccdmax (int): maximum number of CCD (convex, e.g. heightfield-vs-mesh) contacts across all worlds.
+            Defaults to ``naconmax``, MuJoCo Warp's own default. MJX creates the data with ``nworld=1``, so without
+            this the CCD budget is a single world's and hfield contacts overflow (and are dropped) once vmapped.
         **kwargs: Additional arguments to pass to the Mujoco base class.
 
     """
@@ -81,6 +84,7 @@ class Mjx(Mujoco):
                  naconmax=None,
                  njmax=None,
                  refresh_kinematics=False,
+                 naccdmax=None,
                  **kwargs):
 
         # call base mujoco env
@@ -92,6 +96,12 @@ class Mjx(Mujoco):
         # time put model and data
         self._use_mjwarp = use_mjwarp
         self._refresh_kinematics = refresh_kinematics
+        if self._use_mjwarp and self._terrain.is_dynamic:
+            # MjWarp shares hfield_data across all worlds: per-env heightfields written into the model are
+            # flattened by the FFI layer and every world collides with env 0's terrain.
+            raise ValueError(f"{self._terrain.get_name()} writes a per-env heightfield, which MjWarp does not "
+                             f"support (all worlds would use env 0's terrain). Use SharedTerrain or HeightmapTerrain "
+                             f"instead.")
         if self._use_mjwarp:
             self.sys = mjx.put_model(self._model, impl='warp')
             # `nconmax` is the deprecated name of `naconmax`; MJX 4 no longer accepts it
@@ -99,6 +109,9 @@ class Mjx(Mujoco):
             self._first_data = mjx.make_data(self._model, impl='warp', naconmax=naconmax, njmax=njmax)
             self._kin_sys = mjx.put_model(self._model, impl='jax')
             self._kin_data = mjx.make_data(self._model, impl='jax')
+            impl = self._first_data._impl
+            naccdmax = impl.naconmax if naccdmax is None else naccdmax
+            self._first_data = self._first_data.replace(_impl=impl.replace(naccdmax=naccdmax))
         else:
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
@@ -565,6 +578,10 @@ class Mjx(Mujoco):
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, jnp, traj)
         data, carry = self._terrain.reset(self, model, data, carry, jnp, traj)
         data, carry = self._init_state_handler.reset(self, model, data, carry, jnp, traj)
+        if self._terrain.has_env_origins:
+            data = self._terrain.shift_to_env_origin(self, data, carry, jnp)
+        if self._terrain.grounds_robot:
+            data = self._terrain.ground_robot(self, data, jnp)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp, traj)
         data, carry = self._reward_function.reset(self, model, data, carry, jnp, traj)
         data, carry = self._control_func.reset(self, model, data, carry, jnp, traj)
