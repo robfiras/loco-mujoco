@@ -1080,10 +1080,12 @@ class TrajectoryData(SingleData):
         n_sp = self.split_points.shape[0]  # n_traj + 1 (before any padding)
         assert n_samp <= max_n_samples, (
             f"Trajectory has {n_samp} samples but max_n_samples={max_n_samples}. "
-            "Increase max_n_samples.")
+            "Increase the limit by passing th_params=dict(max_n_samples=...) to the environment or the task "
+            "factory (trajectory handler parameter max_n_samples).")
         assert n_sp - 1 <= max_n_trajs, (
             f"Trajectory has {n_sp - 1} sub-trajectories but max_n_trajs={max_n_trajs}. "
-            "Increase max_n_trajs.")
+            "Increase the limit by passing th_params=dict(max_n_trajs=...) to the environment or the task "
+            "factory (trajectory handler parameter max_n_trajs).")
 
         pad_samples = max_n_samples - n_samp
         pad_sp = (max_n_trajs + 1) - n_sp
