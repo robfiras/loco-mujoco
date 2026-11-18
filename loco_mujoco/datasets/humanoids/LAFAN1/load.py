@@ -91,7 +91,8 @@ def load_lafan1_trajectory(
 
     Args:
         env_name (str): The name of the environment.
-        dataset_name (Union[str, List[str]]): The name of the dataset(s) to load.
+        dataset_name (Union[str, List[str]]): The name of the dataset(s) to load, with or without
+            the extension ``.npz`` (a ``.csv`` extension is removed as well).
         max_steps (int, optional): The maximum number of steps to optimize for collisions. Defaults to 100.
         source_env (str, optional): Source env used when `env_name`'s LAFAN1 dataset
             is not on HuggingFace and retargeting on-the-fly is needed.
@@ -125,8 +126,10 @@ def load_lafan1_trajectory(
 
         # Strip the .npz suffix once up-front so it's consistent throughout
         # the loop (and for the recursive retargeting call).
-        if d_name.endswith(".npz"):
-            d_name = d_name[:-len(".npz")]
+        # (also accept the .csv suffix of the original Unitree-retargeted files)
+        for suffix in (".npz", ".csv"):
+            if d_name.endswith(suffix):
+                d_name = d_name[:-len(suffix)]
 
         if path_to_convert_lafan1_datasets:
             target_path_dataset = os.path.join(path_to_convert_lafan1_datasets, env_name, f"{d_name}.npz")
