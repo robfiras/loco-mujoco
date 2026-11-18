@@ -48,4 +48,4 @@ CPU and MJX simulation states can also be collected into a portable animated USD
    )
 
 More details on the viser appearance options and the USD export are available in the
-`core README <https://github.com/robfiras/loco-mujoco/tree/dev/loco_mujoco/core>`__.
+`core README <https://github.com/robfiras/loco-mujoco/tree/master/loco_mujoco/core>`__.

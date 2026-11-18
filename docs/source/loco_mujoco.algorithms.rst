@@ -1,6 +1,12 @@
 Algorithms
 ===========================================
 
+.. automodule:: loco_mujoco.algorithms.supermimic_jax
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+
 .. automodule:: loco_mujoco.algorithms.ppo_jax
     :members:
     :undoc-members:

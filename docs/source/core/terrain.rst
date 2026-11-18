@@ -26,3 +26,17 @@
     :undoc-members:
     :private-members:
     :show-inheritance:
+
+
+.. automodule:: loco_mujoco.core.terrain.shared
+    :members:
+    :undoc-members:
+    :private-members:
+    :show-inheritance:
+
+
+.. automodule:: loco_mujoco.core.terrain.heightmap
+    :members:
+    :undoc-members:
+    :private-members:
+    :show-inheritance:
