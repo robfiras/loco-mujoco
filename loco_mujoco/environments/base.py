@@ -19,7 +19,7 @@ from loco_mujoco.core.stateful_object import EmptyState
 from loco_mujoco.core.observations import Observation
 from loco_mujoco.core.mujoco_mjx import Mjx, MjxAdditionalCarry, MjxState
 from loco_mujoco.core.visuals import VideoRecorder
-from loco_mujoco.core.trajectory import TrajectoryHandler
+from loco_mujoco.core.trajectory import TrajectoryHandler, FixedStartTrajectoryHandler
 from loco_mujoco.core.utils import info_property
 from loco_mujoco.core.utils.mujoco import mj_jntname2qposid
 from loco_mujoco.core.trajectory import Trajectory, TrajState, TrajectoryTransitions
@@ -59,7 +59,8 @@ class LocoEnv(Mjx):
         Constructor.
 
         Args:
-            th_params (Dict): Dictionary of parameters for the trajectory handler.
+            th_params (Dict): Parameters for the trajectory handler: ``name``, a registered TrajectoryHandler
+                (default "RandomStartTrajectoryHandler"), and the keyword arguments of that class.
             traj_params (Dict): Dictionary of parameters to load trajectories.
             recenter_root_xy (Union[bool, None]): If True, episodes start at the origin in xy (or at the env's
                 origin on terrains that place envs, e.g. SharedTerrain). If False, they start at the xy of the
@@ -176,20 +177,17 @@ class LocoEnv(Mjx):
         processed_traj = traj.replace(data=traj_data, info=traj_info)
 
         # create or validate TrajectoryHandler using _th_params
-        th_params = self._th_params if self._th_params is not None else {}
-        random_start = th_params.get("random_start", True)
-        fixed_start_conf = th_params.get("fixed_start_conf", None)
-        max_n_samples = th_params.get("max_n_samples", 100_000)
-        max_n_trajs = th_params.get("max_n_trajs", 100)
-        if fixed_start_conf is not None:
-            random_start = False
+        th_params = _resolve_legacy_th_params(dict(self._th_params) if self._th_params is not None else {})
+        th_name = th_params.pop("name", "RandomStartTrajectoryHandler")
 
         if self.th is None:
-            self.th = TrajectoryHandler(traj_info, control_dt=self.dt,
-                                        random_start=(fixed_start_conf is None and random_start),
-                                        fixed_start_conf=fixed_start_conf,
-                                        max_n_samples=max_n_samples,
-                                        max_n_trajs=max_n_trajs)
+            if th_name not in TrajectoryHandler.registered:
+                raise ValueError(
+                    f"Unknown TrajectoryHandler '{th_name}'. "
+                    f"Registered: {TrajectoryHandler.list_registered()}"
+                )
+            th_cls = TrajectoryHandler.registered[th_name]
+            self.th = th_cls(traj_info, control_dt=self.dt, **th_params)
         else:
             assert self.th.traj_info == traj_info, (
                 "New trajectory has incompatible structure with existing trajectory handler. "
@@ -378,7 +376,7 @@ class LocoEnv(Mjx):
                 data = deepcopy(self._traj.data)
                 data = data.to_numpy()
                 tmp_traj = Trajectory(info=info, data=data)
-                tmp_th = TrajectoryHandler(info, control_dt=self.dt, random_start=False, fixed_start_conf=(0, 0))
+                tmp_th = FixedStartTrajectoryHandler(info, control_dt=self.dt, start_conf=(0, 0))
 
                 # set trajectory handler and store old ones for later
                 orig_th = self.th
@@ -400,7 +398,7 @@ class LocoEnv(Mjx):
                 for i in tqdm(range(self.th.n_trajectories(self._traj.data)), desc="Creating Transition Dataset"):
 
                     # set configuration to the first state of the current trajectory
-                    self.th.fixed_start_conf = (i, 0)
+                    self.th.start_conf = (i, 0)
 
                     # do a reset
                     key, subkey = jax.random.split(rng_key)
@@ -1016,3 +1014,32 @@ class LocoEnv(Mjx):
                 spec.delete(equality)
 
         return spec
+
+
+def _resolve_legacy_th_params(th_params: Dict) -> Dict:
+    """
+    Map the trajectory handler parameters of earlier versions (``random_start``, ``fixed_start_conf``) to the
+    handler classes, with a DeprecationWarning.
+
+    Args:
+        th_params (Dict): The ``th_params`` given to the environment (a copy, changed in place).
+
+    Returns:
+        Dict: Parameters with ``name`` and the class's keyword arguments.
+    """
+    if "name" in th_params or not {"random_start", "fixed_start_conf"} & th_params.keys():
+        return th_params
+    random_start = th_params.pop("random_start", True)
+    fixed_start_conf = th_params.pop("fixed_start_conf", None)
+    if fixed_start_conf is not None:
+        th_params.update(name="FixedStartTrajectoryHandler", start_conf=fixed_start_conf)
+        new = 'name="FixedStartTrajectoryHandler", start_conf=...'
+    elif random_start:
+        th_params.update(name="RandomStartTrajectoryHandler")
+        new = 'name="RandomStartTrajectoryHandler" (the default)'
+    else:
+        raise ValueError("th_params: random_start=False needs a fixed_start_conf (use "
+                         "name=\"FixedStartTrajectoryHandler\", start_conf=...).")
+    warnings.warn(f"th_params random_start / fixed_start_conf are deprecated, use {new}.", DeprecationWarning,
+                  stacklevel=3)
+    return th_params

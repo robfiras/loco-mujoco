@@ -262,11 +262,11 @@ def test_reference_and_robot_share_the_world_frame(name, map_file):
     the offset agree on every terrain."""
     env = make_env(name, map_file, init_state_type="TrajInitialStateHandler",
                    terminal_state_type="RootPoseTrajTerminalStateHandler",
-                   th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+                   th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
     traj = clip_trajectory(env)
     env.process_trajectory(traj)
     for k in range(len(CLIP_PATHS)):
-        env.th.fixed_start_conf = (k, 0)
+        env.th.start_conf = (k, 0)
         env.reset()
         carry = env._additional_carry
         ref_xy = np.asarray(traj.data.qpos)[np.asarray(traj.data.split_points)[k], :2]
@@ -299,7 +299,7 @@ def test_heightmap_lifts_the_robot_out_of_the_stairs(map_file):
     """A clip whose root height ignores the stairs is lifted on reset, so no terrain-colliding geom starts inside a
     step."""
     env = make_env("HeightmapTerrain-boxes", map_file, init_state_type="TrajInitialStateHandler",
-                   th_params=dict(random_start=False, fixed_start_conf=(0, 40)))
+                   th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 40)))
     env.process_trajectory(clip_trajectory(env))
     t = env._terrain
     env.reset()                                               # frame 40 of clip 0 is on the stairs
@@ -359,11 +359,11 @@ def test_pool_file_lists_the_boxes_near_each_clip(map_file, tmp_path):
 
 
 def test_pool_gives_the_full_map_contacts_near_the_clip(map_file, tmp_path):
-    env, traj, base = pool_env(map_file, tmp_path, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+    env, traj, base = pool_env(map_file, tmp_path, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
     env.process_trajectory(traj)
     rng = np.random.default_rng(3)
     for k, ((x0, y0), (x1, y1)) in enumerate(CLIP_PATHS):
-        env.th.fixed_start_conf = (k, 0)
+        env.th.start_conf = (k, 0)
         env.reset()
         env.step(np.zeros(env.info.action_space.shape))      # the slots are written in update()
         m, d = robot_out_of_the_way(env)
@@ -396,7 +396,7 @@ def test_pool_mjx_writes_each_envs_own_boxes(map_file, tmp_path):
 
 def test_pool_errors(map_file, tmp_path):
     env, traj, _ = pool_env(map_file, tmp_path, n_traj=2,
-                            th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+                            th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)))
     env.process_trajectory(traj)
     with pytest.raises(ValueError, match="has boxes for 6 trajectories, the dataset has 3"):
         env.reset()
@@ -417,7 +417,7 @@ def test_pool_steps_like_the_full_box_map(map_file, tmp_path):
     """MuJoCo (float64): from a pose pushed 1 cm into the stairs, 20 steps with a pool that holds every box the
     falling robot can reach give the state of 20 steps with every box of the map. The starts switch between the
     clips, so the slots (and MuJoCo's bounding volume tree of the world body) must follow the trajectory."""
-    th = dict(random_start=False, fixed_start_conf=(0, 0))
+    th = dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0))
     boxes = make_env("HeightmapTerrain-boxes", map_file, init_state_type="TrajInitialStateHandler", th_params=th)
     traj = clip_trajectory(boxes)
     boxes.process_trajectory(traj)
@@ -428,7 +428,7 @@ def test_pool_steps_like_the_full_box_map(map_file, tmp_path):
     for start in [(0, 30), (0, 45), (1, 40), (2, 30), (0, 10)]:     # on the stairs and next to the round platform
         out = []
         for env in (boxes, pool):
-            env.th.fixed_start_conf = start
+            env.th.start_conf = start
             env.reset()
             env._data.qpos[2] -= 0.01
             env.step(act)

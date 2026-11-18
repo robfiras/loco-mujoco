@@ -114,7 +114,7 @@ def _prepare_assets(args):
     env_cls = LocoEnv.registered_envs[args.env]
     env = env_cls(
         **conf.env_params,
-        th_params=dict(random_start=False, fixed_start_conf=(0, 0)),
+        th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
     )
     to_t_pose(env, conf)
     qpos = env._data.qpos.copy()

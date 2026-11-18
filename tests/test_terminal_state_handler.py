@@ -89,7 +89,7 @@ def test_absorbing_prob_matches_hard_check(standing_trajectory, falling_trajecto
     # the smooth probability agrees with the hard check away from the thresholds and has finite gradients,
     # also on the reference itself (equal rotations)
     env = DummyHumamoidEnv(enable_mjx=True, terminal_state_type=terminal_state_type, horizon=1000, gamma=0.99,
-                           n_envs=1, th_params={"random_start": False, "fixed_start_conf": (0, 0)})
+                           n_envs=1, th_params={"name": "FixedStartTrajectoryHandler", "start_conf": (0, 0)})
     env.process_trajectory(standing_trajectory)
     traj = env._traj
     state = env.mjx_reset(jax.random.PRNGKey(0), traj)

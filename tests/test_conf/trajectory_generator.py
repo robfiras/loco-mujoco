@@ -4,7 +4,7 @@ import numpy.random
 from .dummy_humanoid_env import DummyHumamoidEnv
 
 DEFAULTS = {"horizon": 1000, "gamma": 0.99, "n_envs": 1,
-            "th_params": {"random_start": False, "fixed_start_conf": (0, 0)}}
+            "th_params": {"name": "FixedStartTrajectoryHandler", "start_conf": (0, 0)}}
 
 
 def generate_test_trajectories(expert_traj, nominal_traj, backend, horizon=None, **kwargs):
