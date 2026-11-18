@@ -178,6 +178,10 @@ For a complete example, see `examples/tutorials/02_creating_mjx_env.py`.
 
 ## Real Robot Deployment
 
+<div align="center">
+  <img width="80%" src="https://raw.githubusercontent.com/robfiras/loco-mujoco-real/main/assets/x2_sim2real.gif" alt="The AgiBot X2 Ultra running a tracking policy, on the robot and in simulation"/>
+</div>
+
 [LocoMuJoCo Real](https://github.com/robfiras/loco-mujoco-real) is the companion repository for taking
 policies trained in LocoMuJoCo to a real robot. It currently covers the **Unitree G1** and the **AgiBot X2 Ultra**
 and provides:
@@ -192,6 +196,11 @@ and provides:
 python training/<robot>/train.py             # PPO
 python training/<robot>/train_supermimic.py  # SuperMimic
 ```
+
+The video shows a SuperMimic tracking policy on the AgiBot X2 Ultra, on the robot and in simulation. The configs for
+training such a policy are in that repository, for the X2
+([`training/x2/supermimic.yaml`](https://github.com/robfiras/loco-mujoco-real/blob/main/training/x2/supermimic.yaml))
+and for the G1 ([`training/g1/supermimic.yaml`](https://github.com/robfiras/loco-mujoco-real/blob/main/training/g1/supermimic.yaml)).
 
 The [real robot deployment tutorial](https://loco-mujoco.readthedocs.io/en/latest/source/tutorials/real_robot_deployment.html)
 explains the stages from training to the robot.
