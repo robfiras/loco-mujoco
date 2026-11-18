@@ -101,6 +101,9 @@ are available on the [LocoMuJoCo HuggingFace dataset repository](https://hugging
 and will be downloaded and cached automatically for you. AMASS needs to be downloaded and installed separately due to
 their licensing. See [here](loco_mujoco/smpl) for more information about the installation.
 
+Other datasets can be used as well. [LocoMuJoCo Real](https://github.com/robfiras/loco-mujoco-real#motion-data) shows
+how to load your own trajectories and how to convert and train on [BONES-SEED](https://huggingface.co/datasets/bones-studio/seed).
+
 This is how you can visualize the datasets:
 
 ```python

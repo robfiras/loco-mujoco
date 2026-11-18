@@ -55,6 +55,9 @@ The default and LAFAN1 datasets are downloaded automatically from the `HuggingFa
 
 AMASS must be installed manually due to licensing—see the :ref:`installation instructions <amass_installation>`.
 
+Other datasets can be used as well. `LocoMuJoCo Real <https://github.com/robfiras/loco-mujoco-real#motion-data>`__ shows
+how to load your own trajectories and how to convert and train on `BONES-SEED <https://huggingface.co/datasets/bones-studio/seed>`__.
+
 
 Example usage:
 
