@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://loco-mujoco.readthedocs.io
+    about: Installation, user guide, training pages and the API reference. Please check here before opening an issue.
+  - name: Contributing guide
+    url: https://github.com/robfiras/loco-mujoco/blob/master/CONTRIBUTING.md
+    about: How to set up a development environment and what a pull request should contain.
