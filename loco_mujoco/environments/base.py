@@ -63,7 +63,7 @@ class LocoEnv(Mjx):
                 (default "RandomStartTrajectoryHandler"), and the keyword arguments of that class.
             traj_params (Dict): Dictionary of parameters to load trajectories.
             recenter_root_xy (Union[bool, None]): If True, episodes start at the origin in xy (or at the env's
-                origin on terrains that place envs, e.g. SharedTerrain). If False, they start at the xy of the
+                origin on terrains that place envs). If False, they start at the xy of the
                 trajectory, so that the robot and the trajectory share a world frame. None (default): False on
                 terrains built around the dataset's clips (``trajectories_in_world_frame``, e.g. HeightmapTerrain),
                 True otherwise.

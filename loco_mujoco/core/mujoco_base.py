@@ -129,7 +129,7 @@ class Mujoco:
         terminal_state_params (Dict, optional): Parameters for the terminal state handler. Defaults to None.
         domain_randomization_type (str, optional): Type of domain randomization. Defaults to "NoDomainRandomization".
         domain_randomization_params (Dict, optional): Parameters for domain randomization. Defaults to None.
-        terrain_type (str, optional): The type of terrain used. Defaults to "StaticTerrain".
+        terrain_type (str, optional): The type of terrain used. Defaults to "FlatTerrain", a flat floor.
         terrain_params (Dict, optional): Parameters for the terrain configuration. Defaults to None.
         init_state_type (str, optional): Initial state handler type. Defaults to "DefaultInitialStateHandler".
         init_state_params (Dict, optional): Parameters for the initial state handler. Defaults to None.
@@ -168,7 +168,7 @@ class Mujoco:
                  terminal_state_params: Dict = None,
                  domain_randomization_type: str = "NoDomainRandomization",
                  domain_randomization_params: Dict = None,
-                 terrain_type: str = "StaticTerrain",
+                 terrain_type: str = "FlatTerrain",
                  terrain_params: Dict = None,
                  init_state_type: str = "DefaultInitialStateHandler",
                  init_state_params: Dict = None,

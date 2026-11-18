@@ -90,3 +90,11 @@ class StaticTerrain(Terrain):
         """
         assert_backend_is_supported(backend)
         return backend.zeros(xy.shape[:-1])
+
+
+class FlatTerrain(StaticTerrain):
+    """
+    The default terrain: the model's own floor, a plane at z = 0. It is a :class:`StaticTerrain` under the name of
+    what it looks like. ``terrain_type="StaticTerrain"`` selects the same terrain.
+
+    """

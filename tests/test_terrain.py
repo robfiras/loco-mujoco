@@ -2,7 +2,7 @@
 
 Every built-in terrain is checked against MuJoCo's own collision surface (ray casts), on MuJoCo (CPU) and MJX, and
 for the robot's placement on reset. HeightmapTerrain additionally gets its box contact, the per-env box pool and the
-reset grounding checked; SharedTerrain its env origins. Everything runs on the offline test humanoid. MuJoCo Warp
+reset grounding checked. Everything runs on the offline test humanoid. MuJoCo Warp
 checks run only where a GPU and mujoco_warp are available.
 """
 import copy
@@ -62,8 +62,6 @@ def terrain_conf(name: str, map_file=None, **extra):
         file, cache = map_file
         params = dict(file=file, cache_dir=cache, tile_size=3.0, contact=name.split("-")[1])
         return "HeightmapTerrain", {**params, **extra}
-    if name == "SharedTerrain":
-        return name, dict(num_rows=2, num_cols=7, tile_size=4.0, border_width=2.0, init_max_level=1, **extra)
     return name, dict(extra)
 
 
@@ -138,14 +136,12 @@ def sample_points(env, name, n, rng):
     if name.startswith("HeightmapTerrain"):
         ij = np.stack([rng.integers(0, NX, n), rng.integers(0, NY, n)], -1)
         return ORIGIN + np.clip(ij + rng.uniform(-0.4, 0.4, (n, 2)), 0, [NX - 1, NY - 1]) * CELL
-    if name == "SharedTerrain":
-        return rng.uniform(-1, 1, (n, 2)) * np.array([t.half_x, t.half_y]) * 0.99
     if name == "RoughTerrain":
         return rng.uniform(-3.9, 3.9, (n, 2))
     return rng.uniform(-5, 5, (n, 2))
 
 
-ALL = ["StaticTerrain", "RoughTerrain", "SharedTerrain", "HeightmapTerrain-hfield", "HeightmapTerrain-boxes"]
+ALL = ["StaticTerrain", "FlatTerrain", "RoughTerrain", "HeightmapTerrain-hfield", "HeightmapTerrain-boxes"]
 
 
 def test_every_registered_terrain_is_tested():
@@ -222,7 +218,7 @@ def test_dynamic_terrains_are_refused_on_mjwarp():
 SCAN_XY = {"RoughTerrain": np.array([2.0, 1.5]), "HeightmapTerrain-boxes": ORIGIN + np.array([4.0, 2.0])}
 
 
-@pytest.mark.parametrize("name", ["StaticTerrain", "RoughTerrain", "SharedTerrain", "HeightmapTerrain-boxes"])
+@pytest.mark.parametrize("name", ["StaticTerrain", "RoughTerrain", "HeightmapTerrain-boxes"])
 def test_height_scan_reads_the_terrain(name, map_file):
     env = make_env(name, map_file)
     env.reset()
@@ -247,16 +243,13 @@ def test_height_scan_reads_the_terrain(name, map_file):
 
 def test_recenter_root_xy_follows_the_terrain(map_file):
     assert make_env("StaticTerrain")._recenter_root_xy
-    assert make_env("SharedTerrain")._recenter_root_xy
     assert not make_env("HeightmapTerrain-boxes", map_file)._recenter_root_xy
     assert not make_env("StaticTerrain", recenter_root_xy=False)._recenter_root_xy
     with pytest.raises(ValueError, match="recenter_root_xy=False"):
         make_env("HeightmapTerrain-boxes", map_file, recenter_root_xy=True)
-    with pytest.raises(ValueError, match="recenter_root_xy=True"):
-        make_env("SharedTerrain", recenter_root_xy=False)
 
 
-@pytest.mark.parametrize("name", ["StaticTerrain", "SharedTerrain", "HeightmapTerrain-boxes"])
+@pytest.mark.parametrize("name", ["StaticTerrain", "HeightmapTerrain-boxes"])
 def test_reference_and_robot_share_the_world_frame(name, map_file):
     """On reset the robot starts at the reference root (trajectory xy + offset); the trajectory terminal check and
     the offset agree on every terrain."""
@@ -274,25 +267,11 @@ def test_reference_and_robot_share_the_world_frame(name, map_file):
         np.testing.assert_allclose(env._data.qpos[:2], ref_xy + offset, atol=1e-6)
         if name == "HeightmapTerrain-boxes":
             np.testing.assert_allclose(offset, 0.0)            # clips start where they are on the map
-        elif name == "StaticTerrain":
-            np.testing.assert_allclose(env._data.qpos[:2], 0.0, atol=1e-6)
         else:
-            np.testing.assert_allclose(env._data.qpos[:2], carry.terrain_state.origin_xy, atol=1e-6)
+            np.testing.assert_allclose(env._data.qpos[:2], 0.0, atol=1e-6)
         excess_pos = env._terminal_state_handler._violations(env, env._data, carry, np, env._traj)[0][0]
         assert excess_pos + env._terminal_state_handler.max_root_pos_deviation < 1e-6
     env.stop()
-
-
-def test_shared_terrain_spreads_envs_over_flat_platforms():
-    env = make_env("SharedTerrain", enable_mjx=True)
-    t = env._terrain
-    offsets = np.linspace(-t.platform_size / 2 + 0.1, t.platform_size / 2 - 0.1, 5)
-    pts = t.tile_centers[:, :, None, None, :] + np.stack(np.meshgrid(offsets, offsets, indexing="ij"), -1)
-    assert np.abs(t.get_height_at(pts.reshape(-1, 2), np)).max() < 1e-9
-    state = jax.jit(jax.vmap(env.mjx_reset))(jax.random.split(jax.random.PRNGKey(0), 32))
-    origin = np.asarray(state.additional_carry.terrain_state.origin_xy)
-    np.testing.assert_allclose(np.asarray(state.data.qpos[:, :2]), origin + env._init_model.qpos0[:2], atol=1e-5)
-    assert len(np.unique(origin, axis=0)) > 5
 
 
 def test_heightmap_lifts_the_robot_out_of_the_stairs(map_file):
