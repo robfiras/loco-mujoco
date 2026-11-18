@@ -10,7 +10,7 @@ Within this directory, you can find different imitation and reinforcement learni
 - `jax_rl_mimic_supermimic`: SuperMimic imitation learning example.
 - `jax_distill`: Vanilla DAgger distillation example.
 
-The remaining `jax_rl_mimic_*` directories (`bptt`, `history`, `s2pg`, `s2pg4`, `sac`, `td3`) contain
+The remaining `jax_rl_mimic_*` directories (`bptt`, `history`, `s2pg`, `sac`, `td3`) contain
 examples of the experimental algorithms in `loco_mujoco/algorithms/experimental`.
 
 We use WandB to log the training process and results. So you have to install this dependency to run the training examples:
