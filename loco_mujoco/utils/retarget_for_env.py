@@ -1,17 +1,16 @@
 """
-CLI: loco-mujoco-retarget-for-new-env
+Command-line tool ``loco-mujoco-retarget-for-new-env``.
 
-Retargets every default + LAFAN1 mocap clip available on the HuggingFace
-dataset repo for a single target environment. Useful when you add a new
-custom env and want to avoid the per-run "retarget-on-first-access" cost
-(which also makes GPU memory management annoying — see the JAX/PyTorch
-preallocation issue in retargeting).
+Retargets every default and LAFAN1 motion capture clip available on the HuggingFace dataset repository for a single
+target environment. Useful when you add a new custom environment and want to avoid the cost of retargeting on
+first access in every run (which also makes GPU memory management difficult, since the PyTorch-based SMPL fitting
+competes with the memory pre-allocation of JAX).
 
-The source envs are read from the env's `default_dataset_source_env` /
-`lafan1_dataset_source_env` info properties, with module-level fallbacks.
+The source environments are read from the ``default_dataset_source_env`` and ``lafan1_dataset_source_env`` info
+properties of the target environment, with module-level fallbacks.
 
-Retargeted clips land in LOCOMUJOCO_CONVERTED_DEFAULT_PATH / LOCOMUJOCO_CONVERTED_LAFAN1_PATH,
-same layout that `ImitationFactory.make(...)` reads from.
+Retargeted clips are stored in ``LOCOMUJOCO_CONVERTED_DEFAULT_PATH`` and ``LOCOMUJOCO_CONVERTED_LAFAN1_PATH``, in
+the same layout that :meth:`~loco_mujoco.task_factories.imitation_factory.ImitationFactory.make` reads from.
 """
 # JAX's default 75% GPU pre-allocation starves the PyTorch-based SMPL fitting.
 # Must be set before any JAX import.
@@ -43,6 +42,10 @@ def _list_lafan1_clips(source_env: str):
 
 
 def _get_cached_default_path(dataset_type: str, env_name: str, task: str):
+    """
+    Path of the cached (retargeted) default dataset file of a task for an environment.
+
+    """
     import loco_mujoco
     base = loco_mujoco.get_variable("LOCOMUJOCO_CONVERTED_DEFAULT_PATH")
     if not base:
@@ -52,6 +55,10 @@ def _get_cached_default_path(dataset_type: str, env_name: str, task: str):
 
 
 def _get_cached_lafan1_path(env_name: str, clip: str):
+    """
+    Path of the cached (retargeted) LAFAN1 clip for an environment.
+
+    """
     import loco_mujoco
     base = loco_mujoco.get_variable("LOCOMUJOCO_CONVERTED_LAFAN1_PATH")
     if not base:
@@ -86,8 +93,10 @@ def _resolve_source_envs(env_name_target: str):
 
 
 def _extend_if_needed(traj, env_name_target):
-    """Fill in xpos/xquat/cvel/site_xpos/... so the cached file is 'complete'
-    and future loads don't re-extend on every run."""
+    """
+    Fill in xpos/xquat/cvel/site_xpos/... so the cached file is complete and later loads do not extend it again.
+
+    """
     from loco_mujoco.smpl.retargeting import load_robot_conf_file
     from loco_mujoco.datasets.humanoids.LAFAN1.load import extend_motion
     if traj.data.is_complete:
@@ -99,6 +108,23 @@ def _extend_if_needed(traj, env_name_target):
 
 def retarget_all_default(env_name_target: str, source_env: str,
                          dataset_type: str = "mocap", skip_existing: bool = True):
+    """
+    Retarget all default dataset tasks of a source environment to a target environment.
+
+    The tasks available for the source environment are listed on the HuggingFace dataset repository, downloaded,
+    retargeted with :func:`~loco_mujoco.smpl.retargeting.retarget_traj_from_robot_to_robot`, extended with the
+    model-specific quantities (body and site poses, velocities), and saved in ``LOCOMUJOCO_CONVERTED_DEFAULT_PATH``.
+
+    Args:
+        env_name_target (str): Name of the registered target environment.
+        source_env (str): Name of the environment whose datasets are used as the source.
+        dataset_type (str): Type of the default datasets; only ``"mocap"`` is available.
+        skip_existing (bool): If True, tasks for which a cached file already exists are skipped.
+
+    Raises:
+        RuntimeError: If ``LOCOMUJOCO_CONVERTED_DEFAULT_PATH`` is not set.
+
+    """
     from huggingface_hub import hf_hub_download
     from loco_mujoco.core.trajectory import Trajectory
     from loco_mujoco.smpl.retargeting import retarget_traj_from_robot_to_robot
@@ -124,6 +150,22 @@ def retarget_all_default(env_name_target: str, source_env: str,
 
 
 def retarget_all_lafan1(env_name_target: str, source_env: str, skip_existing: bool = True):
+    """
+    Retarget all LAFAN1 clips of a source environment to a target environment.
+
+    The clips available for the source environment are listed on the HuggingFace dataset repository, loaded,
+    retargeted with :func:`~loco_mujoco.smpl.retargeting.retarget_traj_from_robot_to_robot`, extended with the
+    model-specific quantities (body and site poses, velocities), and saved in ``LOCOMUJOCO_CONVERTED_LAFAN1_PATH``.
+
+    Args:
+        env_name_target (str): Name of the registered target environment.
+        source_env (str): Name of the environment whose LAFAN1 datasets are used as the source.
+        skip_existing (bool): If True, clips for which a cached file already exists are skipped.
+
+    Raises:
+        RuntimeError: If ``LOCOMUJOCO_CONVERTED_LAFAN1_PATH`` is not set.
+
+    """
     from loco_mujoco.datasets.humanoids.LAFAN1 import load_lafan1_trajectory
     from loco_mujoco.smpl.retargeting import retarget_traj_from_robot_to_robot
 
@@ -143,6 +185,19 @@ def retarget_all_lafan1(env_name_target: str, source_env: str, skip_existing: bo
 
 
 def retarget_for_new_env_cli():
+    """
+    Entry point of the command-line tool ``loco-mujoco-retarget-for-new-env``.
+
+    Arguments:
+
+    - ``--env``: Name of the registered target environment (required).
+    - ``--dataset-types``: Which datasets to retarget, ``default`` and/or ``lafan1`` (both by default).
+    - ``--default-dataset-type``: Type of the default datasets (``mocap``).
+    - ``--overwrite``: Retarget clips again even if a cached file exists.
+    - ``--import-module``: Python module(s) to import first, so that environments defined in an external package
+      are registered.
+
+    """
     parser = argparse.ArgumentParser(
         description="Retarget all HuggingFace default + LAFAN1 clips to a new target env.")
     parser.add_argument("--env", type=str, required=True,

@@ -1,3 +1,12 @@
+"""
+CPU simulation base class.
+
+:class:`Mujoco` wraps a MuJoCo model and data in a Gymnasium-like environment and assembles it from the modular
+components of this package (observations, goal, reward, control function, terrain, domain randomizer, initial
+and terminal state handlers). The state of all components is kept in an :class:`AdditionalCarry`.
+
+"""
+
 import atexit
 from copy import deepcopy
 from typing import Union, List, Dict, Tuple, Optional
@@ -85,6 +94,32 @@ def current_world_index(backend: ModuleType):
 
 @struct.dataclass
 class AdditionalCarry:
+    """
+    State of an environment besides the simulation data.
+
+    The environments are functional: everything that changes from step to step and is not part of the MuJoCo data
+    lives in this dataclass, which is passed through all components and returned updated.
+
+    Attributes:
+        key (jax.Array): JAX random key.
+        cur_step_in_episode (int): Number of the current step in the episode, starting at 1 after a reset.
+        global_step (int): Number of steps taken since the carry was created, across episodes (only counted in the
+            MJX environment).
+        curriculum_cur_max (int): Counter reserved for curricula; initialized to 0.
+        env_id (Union[int, jax.Array]): Index of this environment's world, used to attribute entries in MjWarp's
+            shared contact buffer. 0 for the CPU environment.
+        last_action (Union[np.ndarray, jax.Array]): Action of the previous step, shape ``(action_dim,)``.
+        observation_states (struct.PyTreeNode): States of the stateful observations, one field per observation.
+        reward_state (struct.PyTreeNode): State of the reward function.
+        domain_randomizer_state (struct.PyTreeNode): State of the domain randomizer.
+        terrain_state (struct.PyTreeNode): State of the terrain.
+        init_state_handler_state (struct.PyTreeNode): State of the initial state handler.
+        terminal_state_handler_state (struct.PyTreeNode): State of the terminal state handler.
+        control_func_state (struct.PyTreeNode): State of the control function.
+        user_scene (MjvScene): Visual geoms the components draw for the viewer.
+
+    """
+
     key: jax.Array
     cur_step_in_episode: int
     global_step: int
@@ -135,6 +170,9 @@ class Mujoco:
         init_state_params (Dict, optional): Parameters for the initial state handler. Defaults to None.
         control_type (str, optional): Type of control function. Defaults to "DefaultControl".
         control_params (Dict, optional): Parameters for the control function. Defaults to None.
+        max_num_samples_traj (int, optional): Stored on the environment; not used by this class. Defaults to 10000.
+        print_obs_summary (bool, optional): If True, a summary of the observation space is printed when the
+            environment is created. Defaults to True.
         **viewer_params: Additional parameters for the Mujoco viewer.
 
         """
@@ -147,6 +185,13 @@ class Mujoco:
         Return absolute path to a robot model file, e.g. ``get_model_path("unitree_h1", "h1.xml")``.
 
         The model files are downloaded on first use; see ``loco_mujoco.core.utils.models``.
+
+        Args:
+            *relative_parts (str): Path components relative to the directory of the robot models.
+
+        Returns:
+            str: The absolute path.
+
         """
         return str(get_models_dir().joinpath(*relative_parts))
 
@@ -500,6 +545,12 @@ class Mujoco:
             ...
             env.render_usd()
             usd_path = env.stop_usd()
+
+        Args:
+            **exporter_params: Parameters of
+                :class:`~loco_mujoco.core.visuals.usd_exporter.UsdTrajectoryExporter`, which override the defaults
+                of the environment. Only used on the first call.
+
         """
         if self._terrain.is_dynamic:
             terrain_state = self._additional_carry.terrain_state
@@ -517,7 +568,13 @@ class Mujoco:
         self._usd_exporter.render(self._data, self._additional_carry)
 
     def stop_usd(self) -> Optional[str]:
-        """Finalize the offline USD export and return its path."""
+        """
+        Finalize the offline USD export and return its path.
+
+        Returns:
+            Optional[str]: Path of the written USD file, or None if nothing was exported.
+
+        """
         if self._usd_exporter is None:
             return self._usd_output_path
         self._usd_output_path = self._usd_exporter.stop()

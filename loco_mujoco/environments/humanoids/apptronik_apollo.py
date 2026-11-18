@@ -1,3 +1,7 @@
+"""
+Environment of the Apptronik Apollo humanoid robot (CPU MuJoCo backend).
+"""
+
 from typing import Union, List, Tuple
 import mujoco
 from mujoco import MjSpec
@@ -11,11 +15,16 @@ from loco_mujoco.core.utils import info_property
 class Apollo(BaseRobotHumanoid):
 
     """
-
     Description
     ------------
-    Environment of the Apollo robot. Apollo is a humanoid robot developed by Apptronik.
 
+    Mujoco environment of the Apollo robot. Apollo is a humanoid robot developed by Apptronik.
+
+    The robot has a floating base and 32 actuated joints: 3 neck joints, 3 torso joints, 6 joints per leg and
+    7 joints per arm. By default, the observation consists of the pose of the floating base without its x-y
+    position (height and orientation quaternion), all joint positions, the linear and angular velocity of the
+    floating base, and all joint velocities. The action contains one target per actuated joint, which is
+    tracked by a PD controller, unless another ``control_type`` is passed.
 
 
     Default Observation Space
@@ -248,11 +257,18 @@ class Apollo(BaseRobotHumanoid):
         Constructor.
 
         Args:
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            observation_spec (List[Observation]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments
+            spec (Union[str, MjSpec]): Model to simulate, either a path to a MuJoCo XML file or an ``MjSpec``
+                object. If None, the default model of this environment is used.
+            observation_spec (List[Observation]): Observations that make up the observation vector, given as
+                observation objects or as dictionaries with a ``type`` key naming the observation type and its
+                parameters as the remaining keys. If None, the default observation space is used.
+            actuation_spec (List[str]): Names of the actuators in the model that are controlled by the action.
+                If None, the default action space is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. If no
+                ``control_type`` is given, ``PDControl`` with the gains :attr:`p_gains` and :attr:`d_gains` is
+                used. The extra key ``mjx_reduced_contacts`` (bool, default True) only affects the Mjx variant:
+                if True, the contacts are reduced by ``_modify_spec_for_mjx``; if False, the collision
+                geometries of the model are kept.
 
         """
 
@@ -294,7 +310,7 @@ class Apollo(BaseRobotHumanoid):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of observations.
+            List[Observation]: List of observations.
 
         """
         observation_spec = [
@@ -380,7 +396,7 @@ class Apollo(BaseRobotHumanoid):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of actuator names.
+            List[str]: List of actuator names.
 
         """
 
@@ -398,6 +414,9 @@ class Apollo(BaseRobotHumanoid):
         """
         Returns the default path to the xml file of the environment.
 
+        Returns:
+            str: Path to the default xml file.
+
         """
         return cls.get_model_path("apptronik_apollo", "apptronik_apollo.xml")
 
@@ -405,6 +424,10 @@ class Apollo(BaseRobotHumanoid):
     def p_gains(self) -> Union[float, List[float]]:
         """
         Returns the proportional gains for the default PD controller.
+
+        Returns:
+            Union[float, List[float]]: One proportional gain per actuator, in the order of the default action
+            specification.
 
         """
         return [28, 9, 8, 1525, 2052, 600, 595, 1880, 1047, 606, 420, 882, 595, 1880, 1047, 606, 420, 882, 395, 530,
@@ -415,13 +438,19 @@ class Apollo(BaseRobotHumanoid):
         """
         Returns the derivative gain used for the default PD controller.
 
+        Returns:
+            Union[float, List[float]]: Derivative gain, here a single value used for all joints.
+
         """
         return 0.0
 
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body.
+        Returns the name of the upper body in the Mujoco xml.
+
+        Returns:
+            str: Name of the upper body.
 
         """
         return "torso_link"
@@ -431,6 +460,9 @@ class Apollo(BaseRobotHumanoid):
         """
         Returns the name of the free joint of the root set in the Mujoco xml.
 
+        Returns:
+            str: Name of the free joint.
+
         """
         return "floating_base"
 
@@ -438,6 +470,9 @@ class Apollo(BaseRobotHumanoid):
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
         Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
 
         """
         return (0.6, 1.5)

@@ -1,3 +1,7 @@
+"""
+Environment of the MyoSkeleton, a biomechanical full-body human model (CPU MuJoCo backend).
+"""
+
 import os
 from typing import Union, List, Tuple, Dict
 
@@ -14,9 +18,20 @@ class MyoSkeleton(LocoEnv):
     Description
     ------------
 
-    MuJoCo simulation of the MyoSkeleton with one position controller per joint. This is a biomechanical
+    MuJoCo simulation of the MyoSkeleton with one torque actuator per joint. This is a biomechanical
     humanoid model with many degrees of freedom (151 joints) to accurately simulate human movement. The model
     extends the simple humanoid by a spine, hands with fingers, realistic knees, and feet with toes.
+
+    The MyoSkeleton model is not shipped with LocoMuJoCo. It is distributed under its own license and has to
+    be downloaded once with the command ``loco-mujoco-myomodel-init``. On construction, the original model is
+    adapted to LocoMuJoCo: the floor and the lights are replaced by the common LocoMuJoCo scene, mimic sites
+    are attached to the bodies listed in :attr:`body2sites_for_mimic`, and an actuator is added to every
+    joint except the free joint of the root.
+
+    By default, the observation consists of the pose of the free joint without its x-y position (height and
+    orientation quaternion), the positions of all other joints, the linear and angular velocity of the free
+    joint, and the velocities of all other joints. The action contains one command per actuator, normalized to
+    [-1, 1] and rescaled to the control range of the actuator (default control function).
 
 
     Default Observation Space
@@ -364,12 +379,20 @@ class MyoSkeleton(LocoEnv):
         Constructor.
 
         Args:
-            disable_fingers (bool): If True, the fingers are disabled.
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            observation_spec (List[Observation]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments
+            disable_fingers (bool): Flag meant to remove the finger joints (see
+                :attr:`finger_and_hand_joints`) from the model.
+            spec (Union[str, MjSpec]): Model to simulate, either a path to a MuJoCo XML file or an ``MjSpec``
+                object. If None, the downloaded MyoSkeleton model is used; if it has not been downloaded yet,
+                a message is printed and the program exits.
+            observation_spec (List[Observation]): Observations that make up the observation vector, given as
+                observation objects or as dictionaries with a ``type`` key naming the observation type and its
+                parameters as the remaining keys. If None, the default observation space is used.
+            actuation_spec (List[str]): Names of the actuators in the model that are controlled by the action.
+                If None, all actuators of the model are used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. The
+                extra key ``mjx_reduced_contacts`` (bool, default True) only affects the Mjx variant: if True,
+                the contacts are reduced by ``_modify_spec_for_mjx``; if False, the collision geometries of the
+                model are kept.
 
         """
         
@@ -415,6 +438,9 @@ class MyoSkeleton(LocoEnv):
         the prefix ``q_`` for the joint positions and ``dq_`` for the joint velocities. It also adds the free joint
         position (disregarding the x and y position) and velocity.
 
+        Args:
+            spec (MjSpec): Specification of the environment.
+
         Returns:
             List[Observation]: List of observations.
 
@@ -442,11 +468,13 @@ class MyoSkeleton(LocoEnv):
     def _get_action_specification(self, spec: MjSpec) -> List[str]:
         """
         Getter for the action space specification. This function adds all actuator names found in the spec, which
-        are the ones added in the _add_actuators method.
+        are the ones added in the ``_add_actuators`` method.
+
+        Args:
+            spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: A list of tuples containing the specification of each action
-            space entry.
+            List[str]: List of actuator names.
 
         """
         action_spec = []
@@ -457,6 +485,9 @@ class MyoSkeleton(LocoEnv):
     def _apply_spec_changes(self, spec: MjSpec) -> MjSpec:
         """
         This function reads the original myo_model spec and applies some changes to make it align with LocoMuJoCo.
+
+        The floor, lights and visual settings are replaced by the ones of the common LocoMuJoCo scene, the
+        mimic sites and a spotlight tracking the pelvis are added, and the actuators are added.
 
         Args:
             spec (MjSpec): Mujoco specification.
@@ -533,6 +564,9 @@ class MyoSkeleton(LocoEnv):
     def _add_actuators(self, spec: MjSpec) -> MjSpec:
         """
         Adds a generic actuator to each joint.
+
+        Every joint except the free joint of the root gets a joint actuator whose control range is limited
+        to the maximum joint force defined in this method (50 for joints that are not listed).
 
         Args:
             spec (MjSpec): Mujoco specification.
@@ -654,6 +688,12 @@ class MyoSkeleton(LocoEnv):
         """
         Returns the default path to the xml file of the environment.
 
+        The model is expected in the directory for custom models (``PATH_TO_CUSTOM_MODELS``), where it is
+        placed by ``loco-mujoco-myomodel-init``.
+
+        Returns:
+            str: Path to the default xml file.
+
         """
         return (PATH_TO_CUSTOM_MODELS / "myo_model" / "myoskeleton" / "myoskeleton.xml").as_posix()
 
@@ -661,6 +701,9 @@ class MyoSkeleton(LocoEnv):
     def upper_body_xml_name(self) -> str:
         """
         Returns the name of the upper body in the Mujoco xml file.
+
+        Returns:
+            str: Name of the upper body.
 
         """
         return "thoracic_spine"
@@ -670,6 +713,9 @@ class MyoSkeleton(LocoEnv):
         """
         Returns the name of the free joint in the Mujoco xml file.
 
+        Returns:
+            str: Name of the free joint.
+
         """
         return "myoskeleton_root"
 
@@ -678,6 +724,9 @@ class MyoSkeleton(LocoEnv):
         """
         Returns the name of the root body in the Mujoco xml file.
 
+        Returns:
+            str: Name of the root body.
+
         """
         return "myoskeleton_root"
 
@@ -685,6 +734,9 @@ class MyoSkeleton(LocoEnv):
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
         Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
 
         """
         return (0.6, 1.5)
@@ -786,13 +838,20 @@ class MyoSkeleton(LocoEnv):
         """
         Returns a list of all mimic sites.
 
+        Returns:
+            List[str]: List of site names.
+
         """
         return list(self.body2sites_for_mimic.values())
 
     @info_property
     def goal_visualization_arrow_offset(self) -> List[float]:
         """
-        Returns the offset for the goal visualization arrow.
+        Returns the offset for the goal visualization arrow. This corresponds to the offset from the
+        root body of the model.
+
+        Returns:
+            List[float]: Offset ``[x, y, z]`` in meters.
 
         """
         return [0, 0, 0.4]

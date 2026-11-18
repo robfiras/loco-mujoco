@@ -1,3 +1,8 @@
+"""
+Utilities: path and variable management for the command-line tools, trajectory-similarity metrics for validation,
+running statistics, logging, video conversion and the MyoSkeleton model download.
+"""
+
 from .video import video2gif
 from .myomodel_init import fetch_myoskeleton, clear_myoskeleton
 from .running_stats import *

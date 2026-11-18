@@ -1,3 +1,5 @@
+"""Reward functions that compare the robot to a reference trajectory."""
+
 from types import ModuleType
 from typing import Any, Dict, Tuple, Union
 
@@ -22,6 +24,16 @@ from loco_mujoco.core.reward.utils import out_of_bounds_action_cost
 def check_traj_provided(method):
     """
     Decorator to check if trajectory handler is None. Raises ValueError if not provided.
+
+    The decorated method has to receive the environment as the keyword argument ``env`` or as its sixth positional
+    argument.
+
+    Args:
+        method (Callable): The method to wrap.
+
+    Returns:
+        Callable: The wrapped method.
+
     """
     def wrapper(self, *args, **kwargs):
         env = kwargs.get('env', None) if 'env' in kwargs else args[5]  # Assumes 'env' is the 6th positional argument
@@ -41,6 +53,13 @@ class TrajectoryBasedReward(Reward):
 
     @property
     def requires_trajectory(self) -> bool:
+        """
+        Whether the reward needs a trajectory.
+
+        Returns:
+            bool: Always True.
+
+        """
         return True
 
 
@@ -99,6 +118,7 @@ class TargetVelocityTrajReward(TrajectoryBasedReward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.
@@ -260,6 +280,7 @@ class MimicReward(TrajectoryBasedReward):
             model (Union[MjModel, Model]): The simulation model.
             data (Union[MjData, Data]): The simulation data.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             MimicRewardState: The initialized reward state.
@@ -323,6 +344,7 @@ class MimicReward(TrajectoryBasedReward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.
@@ -442,6 +464,10 @@ class MimicReward(TrajectoryBasedReward):
 class SiteTrackingRewardState:
     """
     State of SiteTrackingReward.
+
+    Attributes:
+        last_action (Union[np.ndarray, jnp.ndarray]): Action of the previous step.
+
     """
     last_action: Union[np.ndarray, jnp.ndarray]
 
@@ -481,10 +507,18 @@ class SiteTrackingReward(TrajectoryBasedReward):
         Args:
             env (Any): Environment instance.
             sites_for_mimic (List[str], optional): Sites to track, the main site first. Defaults to None, taking all.
-            main_pos_std, main_ori_std, site_pos_std, site_ori_std, site_lin_vel_std, site_ang_vel_std (float):
-                Width of each tracking term.
-            w_main_pos, w_main_ori, w_site_pos, w_site_ori, w_site_lin_vel, w_site_ang_vel (float): Weight of each
-                tracking term.
+            main_pos_std (float): Width of the tracking term of the main site position.
+            main_ori_std (float): Width of the tracking term of the main site orientation.
+            site_pos_std (float): Width of the tracking term of the site positions.
+            site_ori_std (float): Width of the tracking term of the site orientations.
+            site_lin_vel_std (float): Width of the tracking term of the linear site velocities.
+            site_ang_vel_std (float): Width of the tracking term of the angular site velocities.
+            w_main_pos (float): Weight of the tracking term of the main site position.
+            w_main_ori (float): Weight of the tracking term of the main site orientation.
+            w_site_pos (float): Weight of the tracking term of the site positions.
+            w_site_ori (float): Weight of the tracking term of the site orientations.
+            w_site_lin_vel (float): Weight of the tracking term of the linear site velocities.
+            w_site_ang_vel (float): Weight of the tracking term of the angular site velocities.
             w_action_rate (float): Weight of the squared action difference.
             w_joint_limit (float): Weight of the distance of the joint positions to their soft limits.
             soft_joint_pos_limit_factor (float): Part of each joint range, around its center, that is not penalized.
@@ -537,6 +571,7 @@ class SiteTrackingReward(TrajectoryBasedReward):
             model (Union[MjModel, Model]): The simulation model.
             data (Union[MjData, Data]): The simulation data.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             SiteTrackingRewardState: The initialized reward state.
@@ -596,6 +631,7 @@ class SiteTrackingReward(TrajectoryBasedReward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.

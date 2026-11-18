@@ -1,3 +1,5 @@
+"""Base class of the terminal state handlers."""
+
 from typing import Dict, Any, Optional, Union, Tuple
 from types import ModuleType
 
@@ -44,6 +46,7 @@ class TerminalStateHandler(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -70,6 +73,7 @@ class TerminalStateHandler(StatefulObject):
             info (Dict[str, Any]): The info dictionary.
             data (MjData): The Mujoco data structure.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -95,6 +99,7 @@ class TerminalStateHandler(StatefulObject):
             info (Dict[str, Any]): The info dictionary.
             data (Data): The Mujoco data structure for Mjx.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -153,6 +158,14 @@ class TerminalStateHandler(StatefulObject):
     def hard_any(violations, backend: ModuleType):
         """
         ``any(excess > 0)`` over (excess, temperature) pairs.
+
+        Args:
+            violations (Iterable): (excess, temperature) pairs; the excess is positive past the threshold.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: Boolean scalar, True if any excess is positive.
+
         """
         is_absorbing = backend.array(False)
         for excess, _ in violations:
@@ -177,6 +190,7 @@ class TerminalStateHandler(StatefulObject):
             data (Union[MjData, Data]): The Mujoco data structure.
             carry (Any): Additional carry information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.

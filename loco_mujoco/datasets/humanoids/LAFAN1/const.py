@@ -1,3 +1,11 @@
+"""
+Names of the LAFAN1 clips available in LocoMuJoCo.
+
+``LAFAN1_LOCOMOTION_DATASETS`` lists the walking and running clips, ``LAFAN1_DANCE_DATASETS`` the dance clips and
+``LAFAN1_ALL_DATASETS`` all available clips. The names can be used in
+:class:`~loco_mujoco.task_factories.dataset_confs.LAFAN1DatasetConf`.
+"""
+
 LAFAN1_LOCOMOTION_DATASETS = [
     'run2_subject1.csv',
     'run1_subject2.csv',

@@ -1,3 +1,13 @@
+"""
+Parsers for the SMPL and SMPL-H body models.
+
+The classes extend the models of the ``smplx`` package by the joint names used in LocoMuJoCo and by methods
+returning joint positions, joint offsets and global joint transformations, which the retargeting pipeline builds
+on. The module requires the optional ``smpl`` dependencies (``torch`` and ``smplx``).
+
+Borrowed and extended from https://github.com/nkolot/SPIN/blob/master/models/hmr.py.
+"""
+
 # This script is borrowed and extended from https://github.com/nkolot/SPIN/blob/master/models/hmr.py
 # Adhere to their licence to use this script
 
@@ -28,7 +38,20 @@ except ImportError:
 
 
 def match_dim(x, batch_size):
-    """Repeats a single-row tensor along the batch dimension."""
+    """
+    Repeat a single-row tensor along the batch dimension.
+
+    Args:
+        x (torch.Tensor): Tensor of shape ``(1, dim)`` or ``(batch_size, dim)``.
+        batch_size (int): Desired batch size.
+
+    Returns:
+        torch.Tensor: Tensor of shape ``(batch_size, dim)``.
+
+    Raises:
+        ValueError: If the first dimension of ``x`` is neither 1 nor ``batch_size``.
+
+    """
     if x.shape[0] == batch_size:
         return x
     if x.shape[0] == 1:
@@ -72,55 +95,38 @@ def _batch_defaults(model, names, given):
 
 
 class SMPL_Parser(_SMPL):
+    """
+    SMPL body model with the joint names and helper methods used in LocoMuJoCo.
+
+    Extends ``smplx.SMPL``. All shape coefficients stored in the model file are used (``smplx`` itself keeps the
+    first 10), and pose and shape arguments that are not passed to :meth:`forward` are filled with the model's
+    defaults, repeated to the batch size. A pose is an axis-angle vector of 72 entries: 3 for the global orientation
+    followed by 3 for each of the 23 body joints, in the order of ``SMPL_BONE_ORDER_NAMES``.
+
+    Attributes:
+        joint_names (List[str]): Names of the 24 SMPL joints.
+        joint_axes (dict): Joint axes per joint name, a 3x3 identity matrix each.
+        joint_dofs (dict): Names of the degrees of freedom per joint name.
+        joint_range (dict): Joint range per joint name, shape ``(3, 2)``.
+        contype (dict): Contact type mapped to joint names.
+        conaffinity (dict): Contact affinity mapped to joint names.
+        zero_pose (torch.Tensor): Pose with all joint rotations set to zero, shape ``(1, 72)``.
+
+    """
 
     def __init__(self, create_transl=False, *args, **kwargs):
-        """SMPL model constructor
-        Parameters
-        ----------
-        model_path: str
-            The path to the folder or to the file where the model
-            parameters are stored
-        data_struct: Strct
-            A struct object. If given, then the parameters of the model are
-            read from the object. Otherwise, the model tries to read the
-            parameters from the given `model_path`. (default = None)
-        create_global_orient: bool, optional
-            Flag for creating a member variable for the global orientation
-            of the body. (default = True)
-        global_orient: torch.tensor, optional, Bx3
-            The default value for the global orientation variable.
-            (default = None)
-        create_body_pose: bool, optional
-            Flag for creating a member variable for the pose of the body.
-            (default = True)
-        body_pose: torch.tensor, optional, Bx(Body Joints * 3)
-            The default value for the body pose variable.
-            (default = None)
-        create_betas: bool, optional
-            Flag for creating a member variable for the shape space
-            (default = True).
-        betas: torch.tensor, optional, Bx10
-            The default value for the shape member variable.
-            (default = None)
-        create_transl: bool, optional
-            Flag for creating a member variable for the translation
-            of the body. (default = True)
-        transl: torch.tensor, optional, Bx3
-            The default value for the transl variable.
-            (default = None)
-        dtype: torch.dtype, optional
-            The data type for the created variables
-        batch_size: int, optional
-            The batch size used for creating the member variables
-        joint_mapper: object, optional
-            An object that re-maps the joints. Useful if one wants to
-            re-order the SMPL joints to some other convention (e.g. MSCOCO)
-            (default = None)
-        gender: str, optional
-            Which gender to load
-        vertex_ids: dict, optional
-            A dictionary containing the indices of the extra vertices that
-            will be selected
+        """
+        SMPL model constructor.
+
+        Args:
+            create_transl (bool): Not used.
+            *args: Positional arguments passed to ``smplx.SMPL``.
+            **kwargs: Keyword arguments passed to ``smplx.SMPL``. The most relevant ones are ``model_path`` (str, path
+                to the folder or to the file where the model parameters are stored), ``gender`` (str, which gender to
+                load), ``data_struct`` (a struct object to read the model parameters from instead of ``model_path``),
+                ``batch_size`` (int, batch size used for creating the member variables) and ``dtype`` (data type of
+                the created variables). See the documentation of ``smplx.SMPL`` for the complete list.
+
         """
         super(SMPL_Parser, self).__init__(*args, **kwargs)
         _use_all_shape_coefficients(self, "SMPL", args, kwargs)
@@ -141,6 +147,22 @@ class SMPL_Parser(_SMPL):
         self.zero_pose = torch.zeros(1, 72).float()
 
     def forward(self, betas=None, body_pose=None, global_orient=None, **kwargs):
+        """
+        Run the SMPL model.
+
+        Arguments that are not given are replaced by the model's default values, repeated to the batch size of the
+        given arguments.
+
+        Args:
+            betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``.
+            body_pose (torch.Tensor): Axis-angle rotations of the body joints, shape ``(batch_size, 69)``.
+            global_orient (torch.Tensor): Axis-angle global orientation, shape ``(batch_size, 3)``.
+            **kwargs: Further keyword arguments of ``smplx.SMPL.forward``, e.g. ``transl``.
+
+        Returns:
+            The output of ``smplx.SMPL.forward``, with the fields ``vertices`` and ``joints``.
+
+        """
         defaults = _batch_defaults(self, ("betas", "body_pose", "global_orient"),
                                    dict(betas=betas, body_pose=body_pose, global_orient=global_orient))
         smpl_output = super(SMPL_Parser, self).forward(**defaults, **kwargs)
@@ -148,7 +170,18 @@ class SMPL_Parser(_SMPL):
 
     def get_joints_verts(self, pose, th_betas=None, th_trans=None):
         """
-        Pose should be batch_size x 72
+        Compute the mesh vertices and the joint positions for a batch of poses.
+
+        Args:
+            pose (torch.Tensor): Axis-angle poses, shape ``(batch_size, 72)`` or reshapeable to it.
+            th_betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``. If 16 coefficients are
+                given, only the first 10 are used. Defaults to the model's shape.
+            th_trans (torch.Tensor): Root translations, shape ``(batch_size, 3)``.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: The vertices, shape ``(batch_size, n_vertices, 3)``, and the positions
+            of the 24 joints, shape ``(batch_size, 24, 3)``.
+
         """
         if pose.shape[1] != 72:
             pose = pose.reshape(-1, 72)
@@ -173,6 +206,23 @@ class SMPL_Parser(_SMPL):
         return vertices, joints
 
     def get_offsets(self, v_template=None, zero_pose=None, betas=None):
+        """
+        Get the rest-pose skeleton of the model for a body shape.
+
+        Args:
+            v_template: Not used.
+            zero_pose (torch.Tensor): Pose in which the skeleton is evaluated, shape ``(1, 72)``. Defaults to the zero
+                pose.
+            betas (torch.Tensor): Shape coefficients, shape ``(1, n_betas)``. Defaults to zeros (the mean shape).
+
+        Returns:
+            tuple: A tuple of eight elements: the vertices of the mesh, shape ``(n_vertices, 3)``; the joint
+            positions, shape ``(n_joints, 3)``; the linear blend skinning weights, shape ``(n_vertices, n_joints)``; the
+            joint names; a dictionary mapping each joint name to its position relative to its parent (the absolute
+            position for the root); a dictionary mapping each joint name to the name of its parent; the rotation
+            channel order ``["z", "y", "x"]``; and the dictionary of joint ranges.
+
+        """
 
         if betas is None:
             betas = torch.zeros(1, 10).float()
@@ -205,6 +255,33 @@ class SMPL_Parser(_SMPL):
                     self.joint_range)
 
     def get_mesh_offsets(self, zero_pose=None, betas=None, flatfoot=False):
+        """
+        Get the mesh, the skeleton and the joint properties of the model for a body shape.
+
+        Args:
+            zero_pose (torch.Tensor): Pose in which the model is evaluated, shape ``(1, 72)``. Defaults to the zero
+                pose.
+            betas (torch.Tensor): Shape coefficients, shape ``(1, n_betas)``. Defaults to zeros (the mean shape).
+            flatfoot (bool): If True, the lowest vertices of the mesh (within 1 cm of the minimum along the y-axis) are
+                moved to a common height, which flattens the soles.
+
+        Returns:
+            tuple: A tuple of eleven elements:
+
+            - ``verts``: Vertices of the mesh, shape ``(n_vertices, 3)``.
+            - ``joint_pos``: Joint positions, shape ``(n_joints, 3)``.
+            - ``skin_weights``: Linear blend skinning weights, shape ``(n_vertices, n_joints)``.
+            - ``joint_names``: Names of the joints.
+            - ``joint_offsets``: Dictionary mapping each joint name to its position relative to its parent (the
+              absolute position for the root).
+            - ``joint_parents``: Dictionary mapping each joint name to the name of its parent (``None`` for the root).
+            - ``joint_axes``: Dictionary mapping each joint name to its joint axes, a 3x3 identity matrix.
+            - ``joint_dofs``: Dictionary mapping each joint name to the names of its degrees of freedom.
+            - ``joint_range``: Dictionary mapping each joint name to its joint range, shape ``(3, 2)``.
+            - ``contype``: Dictionary mapping the contact type ``1`` to the joint names.
+            - ``conaffinity``: Dictionary mapping the contact affinity ``1`` to the joint names.
+
+        """
         if betas is None:
             betas = torch.zeros(1, 10)
 
@@ -246,6 +323,35 @@ class SMPL_Parser(_SMPL):
             )
 
     def get_mesh_offsets_batch(self, betas=None, flatfoot=False):
+        """
+        Get the mesh, the skeleton and the joint properties of the model in the zero pose for a batch of body shapes.
+
+        Args:
+            betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``. Defaults to zeros (the mean
+                shape).
+            flatfoot (bool): If True, the lowest vertices of the mesh (within 1 cm of the minimum along the y-axis) are
+                moved to a common height, which flattens the soles.
+
+        Returns:
+            tuple: A tuple of eleven elements:
+
+            - ``verts``: Vertices of the mesh of the first body shape, shape ``(n_vertices, 3)``.
+            - ``joint_pos``: Joint positions, shape ``(batch_size, n_joints, 3)``.
+            - ``skin_weights``: Linear blend skinning weights, shape ``(n_vertices, n_joints)``.
+            - ``joint_names``: Names of the joints.
+            - ``joint_offsets``: Dictionary mapping each joint name to its position relative to its parent (the
+              absolute position for the root).
+            - ``joint_parents``: Dictionary mapping each joint name to the name of its parent (``None`` for the root).
+            - ``joint_axes``: Dictionary mapping each joint name to its joint axes, a 3x3 identity matrix.
+            - ``joint_dofs``: Dictionary mapping each joint name to the names of its degrees of freedom.
+            - ``joint_range``: Dictionary mapping each joint name to its joint range, shape ``(3, 2)``.
+            - ``contype``: Dictionary mapping the contact type ``1`` to the joint names.
+            - ``conaffinity``: Dictionary mapping the contact affinity ``1`` to the joint names.
+
+        Unlike in :meth:`get_mesh_offsets`, the joint positions, the joint offsets and the skinning weights are
+        torch tensors, and the joint offsets have a leading batch dimension.
+
+        """
         if betas is None:
             betas = torch.zeros(1, 10)
 
@@ -283,8 +389,36 @@ class SMPL_Parser(_SMPL):
 
 
 class SMPLH_Parser(_SMPLH):
+    """
+    SMPL-H body model (SMPL with articulated hands) with the joint names and helper methods used in LocoMuJoCo.
+
+    Extends ``smplx.SMPLH`` and is the body model of the retargeting pipeline. All shape coefficients stored in the
+    model file are used (``smplx`` itself keeps the first 10), and pose and shape arguments that are not passed to
+    :meth:`forward` are filled with the model's defaults, repeated to the batch size. A pose is an axis-angle vector
+    of 156 entries: 3 for the global orientation, 63 for the 21 body joints and 45 for each hand, in the order of
+    ``SMPLH_BONE_ORDER_NAMES``.
+
+    Attributes:
+        joint_names (List[str]): Names of the 52 SMPL-H joints.
+        joint_axes (dict): Joint axes per joint name, a 3x3 identity matrix each.
+        joint_dofs (dict): Names of the degrees of freedom per joint name.
+        joint_range (dict): Joint range per joint name, shape ``(3, 2)``.
+        contype (dict): Contact type mapped to joint names.
+        conaffinity (dict): Contact affinity mapped to joint names.
+        zero_pose (torch.Tensor): Pose with all joint rotations set to zero, shape ``(1, 156)``.
+
+    """
 
     def __init__(self, *args, **kwargs):
+        """
+        SMPL-H model constructor.
+
+        Args:
+            *args: Positional arguments passed to ``smplx.SMPLH``.
+            **kwargs: Keyword arguments passed to ``smplx.SMPLH``, e.g. ``model_path`` (str, path to the folder or to
+                the file where the model parameters are stored) and ``gender`` (str, which gender to load).
+
+        """
         super(SMPLH_Parser, self).__init__(*args, **kwargs)
         _use_all_shape_coefficients(self, "SMPLH", args, kwargs)
         self.device = next(self.parameters()).device
@@ -301,6 +435,24 @@ class SMPLH_Parser(_SMPLH):
 
     def forward(self, betas=None, body_pose=None, global_orient=None, left_hand_pose=None, right_hand_pose=None,
                 **kwargs):
+        """
+        Run the SMPL-H model.
+
+        Arguments that are not given are replaced by the model's default values, repeated to the batch size of the
+        given arguments.
+
+        Args:
+            betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``.
+            body_pose (torch.Tensor): Axis-angle rotations of the body joints, shape ``(batch_size, 63)``.
+            global_orient (torch.Tensor): Axis-angle global orientation, shape ``(batch_size, 3)``.
+            left_hand_pose (torch.Tensor): Pose of the left hand in the representation expected by ``smplx.SMPLH``.
+            right_hand_pose (torch.Tensor): Pose of the right hand in the representation expected by ``smplx.SMPLH``.
+            **kwargs: Further keyword arguments of ``smplx.SMPLH.forward``, e.g. ``transl``.
+
+        Returns:
+            The output of ``smplx.SMPLH.forward``, with the fields ``vertices`` and ``joints``.
+
+        """
         names = ("betas", "body_pose", "global_orient", "left_hand_pose", "right_hand_pose")
         defaults = _batch_defaults(self, names, dict(betas=betas, body_pose=body_pose, global_orient=global_orient,
                                                      left_hand_pose=left_hand_pose, right_hand_pose=right_hand_pose))
@@ -309,7 +461,20 @@ class SMPLH_Parser(_SMPLH):
 
     def get_joints_verts(self, pose, th_betas=None, th_trans=None):
         """
-        Pose should be batch_size x 156
+        Compute the mesh vertices and the joint positions for a batch of poses.
+
+        The global orientation and the body pose are taken from the first 66 entries of ``pose``.
+
+        Args:
+            pose (torch.Tensor): Axis-angle poses, shape ``(batch_size, 156)`` or reshapeable to it.
+            th_betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``. Defaults to the model's
+                shape.
+            th_trans (torch.Tensor): Root translations, shape ``(batch_size, 3)``.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: The vertices, shape ``(batch_size, n_vertices, 3)``, and the joint
+            positions as returned by ``smplx.SMPLH``, shape ``(batch_size, n_joints, 3)``.
+
         """
 
         if pose.shape[1] != 156:
@@ -332,6 +497,27 @@ class SMPLH_Parser(_SMPLH):
         return vertices, joints
 
     def get_joint_transformations(self, pose, th_betas=None, th_trans=None):
+        """
+        Compute the global rigid transformations of all joints for a batch of poses.
+
+        This is the forward kinematics of the SMPL-H skeleton without skinning the mesh. The retargeting pipeline uses
+        the resulting joint positions and orientations as targets for the mimic sites of a robot. The global orientation
+        and the body pose are taken from the first 66 entries of ``pose``.
+
+        Args:
+            pose (torch.Tensor): Axis-angle poses, shape ``(batch_size, 156)`` or reshapeable to it, e.g.
+                ``(batch_size, 52, 3)``.
+            th_betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``. Defaults to the model's
+                shape.
+            th_trans (torch.Tensor): Root translations, shape ``(batch_size, 3)``, added to the position of every
+                joint.
+
+        Returns:
+            torch.Tensor: Homogeneous transformations from each joint frame to the world frame, shape
+            ``(batch_size, 52, 4, 4)``. The upper left 3x3 block is the global rotation and the last column the global
+            position of the joint.
+
+        """
 
         if pose.shape[1] != 156:
             pose = pose.reshape(-1, 156)
@@ -365,6 +551,29 @@ class SMPLH_Parser(_SMPLH):
                     return_full_pose: bool = False,
                     pose2rot: bool = True,
                     **kwargs):
+            """
+            Compute the global joint transformations from shape and pose parameters.
+
+            Follows the first steps of ``smplx.SMPLH.forward`` (shape blend shapes, joint regression, conversion of the pose
+            to rotation matrices) and then chains the transformations along the kinematic tree instead of skinning the mesh.
+            Arguments that are not given are replaced by the model's default values. The translation is not applied here.
+
+            Args:
+                betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``.
+                global_orient (torch.Tensor): Axis-angle global orientation, shape ``(batch_size, 3)``.
+                body_pose (torch.Tensor): Axis-angle rotations of the body joints, shape ``(batch_size, 63)``.
+                left_hand_pose (torch.Tensor): Pose of the left hand in the representation expected by ``smplx.SMPLH``.
+                right_hand_pose (torch.Tensor): Pose of the right hand in the representation expected by ``smplx.SMPLH``.
+                transl (torch.Tensor): Not applied.
+                return_verts (bool): Not used.
+                return_full_pose (bool): Not used.
+                pose2rot (bool): If True, the pose is given as axis-angle vectors; otherwise as rotation matrices.
+                **kwargs: Ignored.
+
+            Returns:
+                torch.Tensor: Global joint transformations, shape ``(batch_size, n_joints, 4, 4)``.
+
+            """
 
             # If no shape and pose parameters are passed along, then use the
             # ones from the module
@@ -434,7 +643,17 @@ class SMPLH_Parser(_SMPLH):
             dtype=torch.float32
     ):
         """
-        Applies a batch of rigid transformations to the joints
+        Compute the global rigid transformations of the joints of a kinematic tree.
+
+        Args:
+            rot_mats (torch.Tensor): Local rotation matrices of the joints, shape ``(batch_size, n_joints, 3, 3)``.
+            joints (torch.Tensor): Joint positions in the rest pose, shape ``(batch_size, n_joints, 3)``.
+            parents (torch.Tensor): Index of the parent of each joint, shape ``(n_joints,)``.
+            dtype (torch.dtype): Not used.
+
+        Returns:
+            torch.Tensor: Homogeneous transformations from each joint frame to the world frame, shape
+            ``(batch_size, n_joints, 4, 4)``.
 
         """
 
@@ -460,6 +679,24 @@ class SMPLH_Parser(_SMPLH):
         return transforms
 
     def get_offsets(self, v_template=None, zero_pose=None, betas=torch.zeros(1, 10), flatfoot=False):
+        """
+        Get the rest-pose skeleton of the model for a body shape.
+
+        Args:
+            v_template: Not used.
+            zero_pose (torch.Tensor): Pose in which the skeleton is evaluated, shape ``(1, 156)``. Defaults to the
+                zero pose.
+            betas (torch.Tensor): Shape coefficients, shape ``(1, n_betas)``. Defaults to zeros (the mean shape).
+            flatfoot (bool): Not used.
+
+        Returns:
+            tuple: A tuple of eight elements: the vertices of the mesh, shape ``(n_vertices, 3)``; the joint
+            positions, shape ``(n_joints, 3)``; the linear blend skinning weights, shape ``(n_vertices, n_joints)``; the
+            joint names; a dictionary mapping each joint name to its position relative to its parent (the absolute
+            position for the root); a dictionary mapping each joint name to the name of its parent; the rotation
+            channel order ``["z", "y", "x"]``; and the dictionary of joint ranges.
+
+        """
         with torch.no_grad():
             joint_names = self.joint_names
             if zero_pose is None:
@@ -485,6 +722,33 @@ class SMPLH_Parser(_SMPLH):
                     self.joint_range)
 
     def get_mesh_offsets(self, zero_pose=None, betas=torch.zeros(1, 10), flatfoot=False):
+        """
+        Get the mesh, the skeleton and the joint properties of the model for a body shape.
+
+        Args:
+            zero_pose (torch.Tensor): Pose in which the model is evaluated, shape ``(1, 156)``. Defaults to the zero
+                pose.
+            betas (torch.Tensor): Shape coefficients, shape ``(1, n_betas)``. Defaults to zeros (the mean shape).
+            flatfoot (bool): If True, the lowest vertices of the mesh (within 1 cm of the minimum along the y-axis) are
+                moved to a common height, which flattens the soles.
+
+        Returns:
+            tuple: A tuple of eleven elements:
+
+            - ``verts``: Vertices of the mesh, shape ``(n_vertices, 3)``.
+            - ``joint_pos``: Joint positions, shape ``(n_joints, 3)``.
+            - ``skin_weights``: Linear blend skinning weights, shape ``(n_vertices, n_joints)``.
+            - ``joint_names``: Names of the joints.
+            - ``joint_offsets``: Dictionary mapping each joint name to its position relative to its parent (the
+              absolute position for the root).
+            - ``joint_parents``: Dictionary mapping each joint name to the name of its parent (``None`` for the root).
+            - ``joint_axes``: Dictionary mapping each joint name to its joint axes, a 3x3 identity matrix.
+            - ``joint_dofs``: Dictionary mapping each joint name to the names of its degrees of freedom.
+            - ``joint_range``: Dictionary mapping each joint name to its joint range, shape ``(3, 2)``.
+            - ``contype``: Dictionary mapping the contact type ``1`` to the joint names.
+            - ``conaffinity``: Dictionary mapping the contact affinity ``1`` to the joint names.
+
+        """
         with torch.no_grad():
             joint_names = self.joint_names
             if zero_pose is None:
@@ -522,6 +786,35 @@ class SMPLH_Parser(_SMPLH):
             )
 
     def get_mesh_offsets_batch(self, betas=torch.zeros(1, 10), flatfoot=False):
+        """
+        Get the mesh, the skeleton and the joint properties of the model in the zero pose for a batch of body shapes.
+
+        Args:
+            betas (torch.Tensor): Shape coefficients, shape ``(batch_size, n_betas)``. Defaults to zeros (the mean
+                shape).
+            flatfoot (bool): If True, the lowest vertices of the mesh (within 1 cm of the minimum along the y-axis) are
+                moved to a common height, which flattens the soles.
+
+        Returns:
+            tuple: A tuple of eleven elements:
+
+            - ``verts``: Vertices of the mesh of the first body shape, shape ``(n_vertices, 3)``.
+            - ``joint_pos``: Joint positions, shape ``(batch_size, n_joints, 3)``.
+            - ``skin_weights``: Linear blend skinning weights, shape ``(n_vertices, n_joints)``.
+            - ``joint_names``: Names of the joints.
+            - ``joint_offsets``: Dictionary mapping each joint name to its position relative to its parent (the
+              absolute position for the root).
+            - ``joint_parents``: Dictionary mapping each joint name to the name of its parent (``None`` for the root).
+            - ``joint_axes``: Dictionary mapping each joint name to its joint axes, a 3x3 identity matrix.
+            - ``joint_dofs``: Dictionary mapping each joint name to the names of its degrees of freedom.
+            - ``joint_range``: Dictionary mapping each joint name to its joint range, shape ``(3, 2)``.
+            - ``contype``: Dictionary mapping the contact type ``1`` to the joint names.
+            - ``conaffinity``: Dictionary mapping the contact affinity ``1`` to the joint names.
+
+        Unlike in :meth:`get_mesh_offsets`, the joint positions, the joint offsets and the skinning weights are
+        torch tensors, and the joint offsets have a leading batch dimension.
+
+        """
         with torch.no_grad():
             joint_names = self.joint_names
             verts, Jtr = self.get_joints_verts(self.zero_pose.repeat(betas.shape[0], 1), th_betas=betas)

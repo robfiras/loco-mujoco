@@ -1,3 +1,16 @@
+"""
+PPO with backpropagation through time (BPTT-PPO) for recurrent policies in JAX.
+
+A variant of :class:`~loco_mujoco.algorithms.ppo_jax.PPOJax` whose actor carries a deterministic recurrent
+hidden state (GRU, LSTM or an MLP-based recurrence). During the policy update the stored rollout is replayed
+from the hidden state at the start of the rollout with ``jax.lax.scan``, so that gradients flow through the
+whole rollout of ``num_steps`` steps. Minibatches are therefore formed over environments instead of over
+individual time steps.
+
+This algorithm is experimental. Example: ``examples/training_examples/jax_rl_mimic_bptt``.
+
+"""
+
 import ast
 import warnings
 from omegaconf import open_dict
@@ -39,37 +52,42 @@ def _stored_hidden_dim(hidden_state_dim: int, rnn_type: str) -> int:
 
 class ActorCriticBPTT(nn.Module):
     """
-    Network for BPTT-PPO.
+    Recurrent actor-critic network for BPTT-PPO.
 
-    Actor
-    -----
-    *rnn_type = "gru" or "lstm"* (default):
-      1. Embed obs and prev_action separately.
-      2. Feed concat([obs_embed, prev_action_embed]) into a GRU / LSTM cell
-         whose initial carry is the current hidden state ``h``.
-      3. The RNN carry output is the deterministic new hidden state h'.
-      4. A post-RNN obs re-embedding + RNN output → action mean.
+    **Actor.** With ``rnn_type`` set to ``"gru"`` or ``"lstm"``:
 
-    *rnn_type = "vanilla"*:
-      Embed obs and prev_action separately via Dense(n_features), concat with
-      hidden_state → MLP → (action_mean, new_hidden).
+    1. The normalized observation and the previous action are embedded separately by a dense layer of width
+       ``n_features``.
+    2. The concatenated embeddings are fed into a GRU / LSTM cell whose carry is the current hidden state.
+    3. The new carry is the (deterministic) new hidden state.
+    4. A second embedding of the observation is concatenated with the RNN output and mapped linearly to the
+       action mean.
 
-    The actor returns a distrax.MultivariateNormalDiag over actions only.
-    The new hidden state is returned deterministically (no distribution).
+    With ``rnn_type="vanilla"`` the two embeddings are concatenated with the hidden state and passed through an
+    MLP that outputs the action mean and the new hidden state.
 
-    Critic
-    ------
-    MLP over concat([obs, h, prev_action]) → scalar V(s, h, a_prev).
+    The actor yields a diagonal Gaussian over actions with a state-independent standard deviation
+    (parameter ``log_std_a``); the new hidden state is returned deterministically.
 
-    Inputs
-    ------
-    obs:          (..., obs_dim)
-    hidden_state: (..., stored_hidden_dim)   # for LSTM: concat(h, c)
-    prev_action:  (..., action_dim)
+    **Critic.** An MLP over the concatenation of the normalized observation, the hidden state and the previous
+    action, i.e. ``V(s, h, a_prev)``.
 
-    Returns
-    -------
-    (pi, value, new_hidden)
+    The network has a ``run_stats`` variable collection (observation normalization) and has to be applied with
+    ``mutable=["run_stats"]``.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        hidden_state_dim (int): Size of the RNN hidden state. For an LSTM the stored hidden state is the
+            concatenation of ``h`` and ``c`` and thus twice as large.
+        rnn_type (str): ``"gru"``, ``"lstm"`` or ``"vanilla"``.
+        n_features (int): Width of the embeddings before and after the RNN.
+        activation (str): Name of the activation function in ``flax.linen``.
+        init_std_a (float): Initial standard deviation of the action distribution.
+        learnable_std (bool): If False, the gradient with respect to ``log_std_a`` is stopped.
+        hidden_layer_dims (Sequence[int]): Hidden layers of the critic MLP and of the ``"vanilla"`` actor MLP.
+        ema_coef (float): Exponential smoothing of the hidden-state transition,
+            ``h' = (1 - ema_coef) * h + ema_coef * f(obs, h, a_prev)``. The default ``1.0`` disables smoothing.
+
     """
 
     action_dim: int
@@ -83,10 +101,29 @@ class ActorCriticBPTT(nn.Module):
     ema_coef: float = 1.0           # exponential smoothing for hidden state transition
 
     def setup(self):
+        """Resolve the activation function from its name."""
         self.activation_fn = get_activation_fn(self.activation)
 
     @nn.compact
     def __call__(self, obs, hidden_state, prev_action):
+        """
+        Compute the action distribution, the value estimate and the next hidden state.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(batch, obs_dim)``.
+            hidden_state (jax.Array): Current hidden states, shape ``(batch, stored_hidden_dim)``, where
+                ``stored_hidden_dim`` is ``2 * hidden_state_dim`` for an LSTM (``h`` and ``c`` concatenated) and
+                ``hidden_state_dim`` otherwise.
+            prev_action (jax.Array): Previous actions, shape ``(batch, action_dim)``.
+
+        Returns:
+            Tuple[distrax.MultivariateNormalDiag, jax.Array, jax.Array]: The action distribution, the value
+            estimates of shape ``(batch,)`` and the new hidden states of shape ``(batch, stored_hidden_dim)``.
+
+        Raises:
+            ValueError: If ``rnn_type`` is unknown.
+
+        """
         obs_norm = RunningMeanStd()(obs)
 
         stored_z_dim = _stored_hidden_dim(self.hidden_state_dim, self.rnn_type)
@@ -166,21 +203,41 @@ class BPTTPolicy:
     """
     Policy wrapper for BPTT-PPO.
 
-    All methods take obs, hidden_state, and prev_action as separate arguments.
-    The hidden state is propagated deterministically (no stochastic transition).
+    All methods take the observation, the hidden state and the previous action as separate arguments. The hidden
+    state is propagated deterministically (there is no stochastic transition).
+
     """
 
     def __init__(self, network: nn.Module, action_dim: int):
+        """
+        Initialize the policy wrapper.
+
+        Args:
+            network (nn.Module): The :class:`ActorCriticBPTT` network.
+            action_dim (int): Dimension of the action space.
+
+        """
         self.network = network
         self.action_dim = action_dim
 
     def get_action(
         self, obs, hidden_state, prev_action, train_state, rng
     ):
-        """Sample action and return new hidden state.
+        """
+        Sample an action and compute the next hidden state.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(n_envs, obs_dim)``.
+            hidden_state (jax.Array): Current hidden states, shape ``(n_envs, stored_hidden_dim)``.
+            prev_action (jax.Array): Previous actions, shape ``(n_envs, action_dim)``.
+            train_state (TrainState): Current train state with parameters and running statistics.
+            rng (jax.Array): PRNG key used for action sampling.
 
         Returns:
-            (action, new_hidden, log_prob, value, updated_train_state)
+            Tuple[jax.Array, jax.Array, jax.Array, jax.Array, TrainState]: The sampled actions, the new hidden
+            states, the log probabilities of the actions, the value estimates and the train state with updated
+            running statistics.
+
         """
         pi, value, new_hidden, train_state = self._forward_pass(obs, hidden_state, prev_action, train_state)
         action = pi.sample(seed=rng)
@@ -188,9 +245,24 @@ class BPTTPolicy:
         return action, new_hidden, log_prob, value, train_state
 
     def get_dist_and_value(self, obs, hidden_state, prev_action, train_state):
+        """
+        Compute the action distribution, the value estimate and the next hidden state.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(n_envs, obs_dim)``.
+            hidden_state (jax.Array): Current hidden states, shape ``(n_envs, stored_hidden_dim)``.
+            prev_action (jax.Array): Previous actions, shape ``(n_envs, action_dim)``.
+            train_state (TrainState): Current train state with parameters and running statistics.
+
+        Returns:
+            Tuple[distrax.Distribution, jax.Array, jax.Array, TrainState]: The action distribution, the value
+            estimates, the new hidden states and the train state with updated running statistics.
+
+        """
         return self._forward_pass(obs, hidden_state, prev_action, train_state)
 
     def _forward_pass(self, obs, hidden_state, prev_action, train_state):
+        """Run a forward pass of the network and write the updated running statistics to the train state."""
         (pi, value, new_hidden), updates = self.network.apply(
             {"params": train_state.params, "run_stats": train_state.run_stats},
             obs, hidden_state, prev_action,
@@ -204,7 +276,26 @@ class BPTTPolicy:
 # ---------------------------------------------------------------------------
 
 class BPTTTransition(NamedTuple):
-    """Transition for BPTT-PPO — no per-step hidden_state needed in the batch."""
+    """
+    One step of experience collected by BPTT-PPO.
+
+    The hidden state is not stored per step; it is recomputed during the update by replaying the sequence from
+    the hidden state at the start of the rollout.
+
+    Attributes:
+        done (jax.Array): Whether the episode ended at this step.
+        absorbing (jax.Array): Whether the state reached at this step is absorbing.
+        action (jax.Array): Action ``a_t`` applied to the environment.
+        prev_action (jax.Array): Previous action ``a_{t-1}`` (zeros at the start of an episode).
+        value (jax.Array): Critic estimate at this step.
+        reward (jax.Array): Reward received.
+        log_prob (jax.Array): Log probability of ``action`` under the data-collecting policy.
+        obs (jax.Array): Raw environment observation the action was computed from.
+        info (dict): Info dictionary returned by the environment step.
+        traj_state (TrajState): Trajectory state of the environment after the step.
+        metrics (Metrics): Episode statistics of the :class:`~loco_mujoco.core.wrappers.mjx.LogWrapper`.
+
+    """
     done: jnp.ndarray
     absorbing: jnp.ndarray
     action: jnp.ndarray         # env action a_t
@@ -224,17 +315,44 @@ class BPTTTransition(NamedTuple):
 
 @dataclass(frozen=True)
 class BPTTAgentConf(AgentConfBase):
+    """
+    Static configuration of a BPTT-PPO agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        network (ActorCriticBPTT): The recurrent actor-critic network definition.
+        tx (optax.GradientTransformation): The optimizer.
+
+    """
     config: DictConfig
     network: ActorCriticBPTT
     tx: Any
 
     def serialize(self):
+        """
+        Serialize the agent configuration and the network definition.
+
+        Returns:
+            dict: Dictionary with the keys ``"config"`` (the resolved configuration as a plain container) and
+            ``"network"`` (the state dictionary of the network definition).
+
+        """
         conf_dict = OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True)
         serialized_network = flax.serialization.to_state_dict(self.network)
         return {"config": conf_dict, "network": serialized_network}
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            BPTTAgentConf: The restored configuration with a newly built optimizer.
+
+        """
         config = OmegaConf.create(d["config"])
         tx = BPTTPPOJax._get_optimizer(config)
         return cls(config=config,
@@ -244,6 +362,19 @@ class BPTTAgentConf(AgentConfBase):
 
 @struct.dataclass
 class BPTTAgentState(AgentStateBase):
+    """
+    Dynamic state of a BPTT-PPO agent.
+
+    Attributes:
+        train_state (TrainState): Parameters, optimizer state and running observation statistics of the network.
+        env_state: Environment state at the end of the last training chunk; not saved to disk.
+        last_obs (jax.Array): Last observations of the previous training chunk; not saved to disk.
+        hidden_state (jax.Array): Hidden states at the end of the last training chunk, shape
+            ``(num_envs, stored_hidden_dim)``; not saved to disk.
+        prev_action (jax.Array): Last actions of the previous training chunk, shape ``(num_envs, action_dim)``;
+            not saved to disk.
+
+    """
     train_state: TrainState
     env_state: Any = None
     last_obs: Any = None
@@ -251,10 +382,29 @@ class BPTTAgentState(AgentStateBase):
     prev_action: Any = None     # a_{t-1} carried across chunks
 
     def serialize(self):
+        """
+        Serialize the agent state.
+
+        Returns:
+            dict: Dictionary with the key ``"train_state"``; the carried environment state, observation, hidden
+            state and previous action are dropped.
+
+        """
         return {"train_state": flax.serialization.to_state_dict(self.train_state)}
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+            agent_conf (BPTTAgentConf): Agent configuration providing the network and the optimizer.
+
+        Returns:
+            BPTTAgentState: The restored state, including the optimizer state.
+
+        """
         train_state = TrainState.create(
             apply_fn=agent_conf.network.apply,
             tx=agent_conf.tx,
@@ -273,20 +423,25 @@ class BPTTAgentState(AgentStateBase):
 
 class BPTTPPOJax(PPOJax):
     """
-    BPTT-PPO: Proximal Policy Optimization with Backpropagation Through Time.
+    BPTT-PPO: Proximal Policy Optimization with backpropagation through time.
 
-    Key properties
-    --------------
-    * The policy uses a GRU/LSTM/vanilla RNN to maintain a deterministic hidden
-      state; the IS ratio is only over actions (standard PPO).
-    * Gradients flow through time via jax.lax.scan over the sequence during
-      the update step.
-    * Minibatches are over environments (not individual timesteps) so sequences
-      stay intact during the gradient computation.
-    * h_init (hidden state at start of each rollout) is saved and used to seed
-      the BPTT replay scan.
+    Key properties:
 
-    Supported rnn_type values: "gru" (default), "lstm", "vanilla" (MLP fallback).
+    * The policy uses a GRU, an LSTM or an MLP-based recurrence to maintain a deterministic hidden state; the
+      importance-sampling ratio is over actions only, as in standard PPO.
+    * During the update the rollout is replayed with ``jax.lax.scan`` so that gradients flow through time over
+      the whole rollout (``num_steps`` steps).
+    * Minibatches are formed over environments (not over individual time steps), so sequences stay intact during
+      the gradient computation. ``num_envs`` must be divisible by ``num_minibatches``.
+    * The hidden state at the start of each rollout is saved and used to seed the replay; hidden state and
+      previous action are reset to zero when an episode ends.
+
+    Supported ``rnn_type`` values: ``"gru"`` (default), ``"lstm"`` and ``"vanilla"`` (MLP fallback).
+
+    The interface is that of :class:`~loco_mujoco.algorithms.ppo_jax.PPOJax`; see
+    ``examples/training_examples/jax_rl_mimic_bptt`` for a training script. Reward normalization
+    (``normalize_env``) is not applied by this algorithm.
+
     """
 
     _agent_conf = BPTTAgentConf
@@ -294,6 +449,30 @@ class BPTTPPOJax(PPOJax):
 
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived hyperparameters, the network and the optimizer.
+
+        In addition to the PPO hyperparameters (see :meth:`PPOJax.init_agent_conf
+        <loco_mujoco.algorithms.ppo_jax.PPOJax.init_agent_conf>`), the following keys are read from
+        ``config.experiment``:
+
+        - ``hidden_state_dim``: size of the RNN hidden state.
+        - ``rnn_type`` (optional, default ``"gru"``): ``"gru"``, ``"lstm"`` or ``"vanilla"``.
+        - ``n_features`` (optional, default 256): width of the embeddings before and after the RNN.
+        - ``ema_coef`` (optional, default 1.0): exponential smoothing of the hidden-state transition.
+
+        The keys ``num_updates``, ``minibatch_size``, ``validation_interval``, ``action_dim`` and a recomputed
+        ``validation.num`` are written to ``config.experiment`` in place. Here ``minibatch_size`` is the number of
+        environments (i.e. sequences) per minibatch, ``num_envs // num_minibatches``.
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            BPTTAgentConf: The agent configuration.
+
+        """
         with open_dict(config.experiment):
             config.experiment.num_updates = (
                 config.experiment.total_timesteps // config.experiment.num_steps // config.experiment.num_envs)
@@ -330,6 +509,19 @@ class BPTTPPOJax(PPOJax):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf: BPTTAgentConf, rng) -> BPTTAgentState:
+        """
+        Initialize the agent state (network parameters, running statistics and optimizer state).
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            agent_conf (BPTTAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            BPTTAgentState: The initial agent state; the carried environment state, observation, hidden state and
+            previous action are ``None`` and get initialized by the training function.
+
+        """
         config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
         wrapped_env = cls._wrap_env(env, config)
         obs_dim = wrapped_env.info.observation_space.shape[0]
@@ -356,6 +548,32 @@ class BPTTPPOJax(PPOJax):
                   agent_state: BPTTAgentState = None,
                   traj=None,
                   mh: MetricsHandler = None):
+        """
+        Run BPTT-PPO for ``num_updates`` updates.
+
+        Every update collects a rollout of ``num_steps`` steps, computes advantages with GAE and runs
+        ``update_epochs`` epochs over ``num_minibatches`` minibatches of whole environment sequences. In the loss,
+        each sequence is replayed from the hidden state it had at the start of the rollout, with the running
+        observation statistics held fixed, and the PPO losses are evaluated on the replayed log probabilities and
+        values. If ``agent_state`` carries an environment state, hidden state and previous action from a previous
+        call, training continues from them.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (BPTTAgentConf): Static agent configuration.
+            agent_state (BPTTAgentState): Agent state to start or resume from.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Optional metrics handler computing the validation metrics.
+
+        Returns:
+            dict: Dictionary with the keys ``"agent_state"`` (:class:`BPTTAgentState` after training),
+            ``"training_metrics"`` (:class:`~loco_mujoco.algorithms.ppo_jax.PPOSummaryMetrics` with a leading axis
+            of length ``num_updates``) and ``"validation_metrics"``
+            (:class:`~loco_mujoco.utils.metrics.ValidationSummary` with a leading axis of length ``num_updates``;
+            entries of updates without validation are zero).
+
+        """
 
         config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
         action_dim = config.action_dim
@@ -741,6 +959,33 @@ class BPTTPPOJax(PPOJax):
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
                     train_state_seed=None, traj=None):
+        """
+        Roll out a trained recurrent policy in a Python loop and render it.
+
+        Hidden state and previous action start at zero and are reset to zero whenever an episode ends. By default
+        the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU MuJoCo
+        environment instead. The environment is stopped at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (BPTTAgentConf): Agent configuration.
+            agent_state (BPTTAgentState): Agent state holding the trained policy.
+            n_envs (int): Number of parallel environments; must be 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Only used to warn about a call that neither renders, records nor terminates; the
+                environment is rendered at every step regardless.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action sampling. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the standard deviation of the action distribution is set to zero so that
+                the mean action is applied. This overwrites ``log_std_a`` in the parameters of ``agent_state`` in
+                place.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            train_state_seed (int): Index of the seed to play if the agent was trained with ``n_seeds > 1``.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
 
         if use_mujoco:
             assert n_envs == 1, "Only one mujoco env can be run at a time."

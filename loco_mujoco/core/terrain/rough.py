@@ -1,3 +1,5 @@
+"""Randomly generated rough terrain, based on a heightfield that is resampled on every reset."""
+
 from types import ModuleType
 from typing import Any, Union, Tuple
 from pathlib import Path
@@ -109,6 +111,7 @@ class RoughTerrain(DynamicTerrain):
             model (Union[MjModel, Model]): The simulation model.
             data (Union[MjData, Data]): The simulation data.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             RoughTerrainState: The initialized terrain state.
@@ -159,6 +162,7 @@ class RoughTerrain(DynamicTerrain):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -194,6 +198,7 @@ class RoughTerrain(DynamicTerrain):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjModel, Model], Union[MjData, Data], Any]: The updated simulation model, data, and carry.
@@ -207,9 +212,20 @@ class RoughTerrain(DynamicTerrain):
     def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType, env: Any = None,
                       carry: Any = None) -> Union[np.ndarray, jnp.ndarray]:
         """
-        Height of the env's current rough terrain at world points ``xy`` of shape (..., 2). The terrain differs per
-        env, so ``carry`` (holding its heightfield) is required. Points outside the heightfield get the height of
-        its border.
+        Height of the env's current rough terrain at world points.
+
+        The terrain differs per env, so ``carry`` (holding its heightfield) is required. Points outside the heightfield
+        get the height of its border.
+
+        Args:
+            xy (Union[np.ndarray, jnp.ndarray]): World xy positions, shape ``(..., 2)``.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            env (Any): The environment instance (unused).
+            carry (Any): Additional carry holding the terrain state.
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: Terrain heights in meters, shape ``(...)``.
+
         """
         assert_backend_is_supported(backend)
         assert carry is not None, "RoughTerrain differs per env: get_height_at needs the env's carry"

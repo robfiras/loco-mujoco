@@ -1,3 +1,16 @@
+"""
+LocoMuJoCo: an imitation learning benchmark for whole-body control.
+
+The top-level package exports the simulation base classes (:class:`~loco_mujoco.core.mujoco_base.Mujoco`,
+:class:`~loco_mujoco.core.mujoco_mjx.Mjx`), the environment base class
+(:class:`~loco_mujoco.environments.base.LocoEnv`) and the task factories
+(:class:`~loco_mujoco.task_factories.base.TaskFactory`, :class:`~loco_mujoco.task_factories.rl_factory.RLFactory`,
+:class:`~loco_mujoco.task_factories.imitation_factory.ImitationFactory`).
+
+User-specific settings such as dataset and cache paths are stored in the file ``LOCOMUJOCO_VARIABLES.yaml`` inside
+the package directory (``PATH_TO_VARIABLES``) and can be read with :func:`get_variable`.
+"""
+
 from pathlib import Path
 import os
 import yaml
@@ -38,9 +51,27 @@ try:
     from .task_factories import (TaskFactory, RLFactory, ImitationFactory)
 
     def get_registered_envs():
+        """
+        Get all registered environments.
+
+        Returns:
+            dict: Mapping from environment name (the class name, e.g. ``"UnitreeH1"`` or ``"MjxUnitreeH1"``) to the
+            environment class.
+
+        """
         return LocoEnv.registered_envs
 
     def get_variable(key):
+        """
+        Read a variable from the ``LOCOMUJOCO_VARIABLES.yaml`` file.
+
+        Args:
+            key (str): Name of the variable, e.g. ``"LOCOMUJOCO_AMASS_PATH"``.
+
+        Returns:
+            Union[str, list, None]: Value of the variable, or ``None`` if the variable is not set.
+
+        """
         try:
             return yaml.load(open(PATH_TO_VARIABLES), Loader=yaml.FullLoader)[key]
         except KeyError:

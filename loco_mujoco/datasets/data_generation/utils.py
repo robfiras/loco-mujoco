@@ -1,3 +1,8 @@
+"""
+Utilities for generating trajectory datasets: callbacks that record model-specific quantities while a trajectory
+is replayed, mocap bodies for retargeting, finite-difference velocities and loaders for configuration files.
+"""
+
 import math
 from copy import deepcopy
 from dataclasses import replace
@@ -20,10 +25,32 @@ from loco_mujoco.core.trajectory import (
 
 class ReplayCallback:
 
-    """Base class that can be used to do things while replaying a trajectory."""
+    """
+    Base class that can be used to do things while replaying a trajectory.
+
+    An instance is passed as ``callback_class`` to
+    :meth:`~loco_mujoco.environments.base.LocoEnv.play_trajectory` and is called once per replayed sample in place of
+    the default update. The base implementation reproduces the default update: it sets the simulation state from the
+    trajectory sample and runs the forward kinematics.
+
+    """
 
     @staticmethod
     def __call__(env, model, data, traj_sample, carry):
+        """
+        Set the simulation to a trajectory sample and compute the forward kinematics.
+
+        Args:
+            env: The environment replaying the trajectory.
+            model (MjModel): Mujoco model.
+            data (MjData): Mujoco data structure.
+            traj_sample (TrajectoryData): The current sample of the trajectory.
+            carry: Additional carry of the environment.
+
+        Returns:
+            Tuple[MjModel, MjData, Any]: The model, the updated data and the updated carry.
+
+        """
         data = env.set_sim_state_from_traj_data(data, traj_sample, carry)
         model, data, carry = env._simulation_pre_step(model, data, carry)
         mujoco.mj_forward(model, data)
@@ -32,8 +59,31 @@ class ReplayCallback:
 
 
 class ExtendTrajData(ReplayCallback):
+    """
+    Replay callback that records the model-specific quantities of every replayed sample.
+
+    A trajectory may only contain joint positions and velocities. While such a trajectory is replayed, this callback
+    records the quantities that follow from the kinematics of the model: body positions, orientations and velocities
+    (``xpos``, ``xquat``, ``cvel``), subtree centers of mass (``subtree_com``), site positions and orientations
+    (``site_xpos``, ``site_xmat``), together with ``qpos`` and ``qvel``. After the replay,
+    :meth:`extend_trajectory_data` returns the trajectory completed with these quantities.
+
+    """
 
     def __init__(self, env, n_samples, model, body_names=None, site_names=None):
+        """
+        Constructor.
+
+        Args:
+            env: The environment replaying the trajectory.
+            n_samples (int): Total number of samples that will be replayed.
+            model (MjModel): Mujoco model of the environment.
+            body_names (List[str], optional): Names of bodies that have to exist in the model. All bodies of the
+                model are recorded in any case.
+            site_names (List[str], optional): Names of sites that have to exist in the model. All sites of the model
+                are recorded in any case.
+
+        """
         self.b_names, self.b_ids = self.get_body_names_and_ids(env._model, body_names)
         self.s_names, self.s_ids = self.get_site_names_and_ids(env._model, site_names)
         dim_qpos, dim_qvel = 0, 0
@@ -69,6 +119,20 @@ class ExtendTrajData(ReplayCallback):
         self.current_length = 0
 
     def __call__(self, env, model, data, traj_sample, carry):
+        """
+        Apply the trajectory sample to the simulation and record the resulting quantities.
+
+        Args:
+            env: The environment replaying the trajectory.
+            model (MjModel): Mujoco model.
+            data (MjData): Mujoco data structure.
+            traj_sample (TrajectoryData): The current sample of the trajectory.
+            carry: Additional carry of the environment.
+
+        Returns:
+            Tuple[MjModel, MjData, Any]: The model, the updated data and the updated carry.
+
+        """
         model, data, carry = super().__call__(env, model, data, traj_sample, carry)
 
         self.recorder["xpos"][self.current_length] = data.xpos[self.b_ids]
@@ -87,6 +151,20 @@ class ExtendTrajData(ReplayCallback):
         return model, data, carry
 
     def extend_trajectory_data(self, traj_data: TrajectoryData, traj_info: TrajectoryInfo):
+        """
+        Add the recorded quantities to a trajectory.
+
+        Args:
+            traj_data (TrajectoryData): Data of the replayed trajectory. Its number of samples has to equal the number
+                of recorded samples.
+            traj_info (TrajectoryInfo): Info of the replayed trajectory.
+
+        Returns:
+            Tuple[TrajectoryData, TrajectoryInfo]: The data with the recorded quantities, and the info with the body
+            names, the site names and the model description (:class:`~loco_mujoco.core.trajectory.dataclasses.TrajectoryModel`)
+            of the replaying model.
+
+        """
         assert self.current_length == traj_data.qpos.shape[0]
         assert traj_info.model.njnt == self.traj_model.njnt
         converted_data = {}
@@ -100,15 +178,20 @@ class ExtendTrajData(ReplayCallback):
     @staticmethod
     def get_body_names_and_ids(model, keys=None):
         """
-        Get the names of the bodies in the model. If keys is not None, only return the names of the bodies
-        that are in keys, otherwise return all body names.
+        Get the names and ids of all bodies in the model.
+
+        If ``keys`` is given, it is additionally checked that all of these body names exist in the model.
 
         Args:
-            model: mujoco model
-            keys: list of body names
+            model (MjModel): Mujoco model.
+            keys (List[str], optional): Body names that have to exist in the model.
 
         Returns:
-            List of body names and list of body ids.
+            Tuple[List[str], List[int]]: Names and ids of all bodies in the model.
+
+        Raises:
+            AssertionError: If a name in ``keys`` is not found in the model.
+
         """
         keys = deepcopy(keys)
         body_names = []
@@ -124,15 +207,20 @@ class ExtendTrajData(ReplayCallback):
     @staticmethod
     def get_site_names_and_ids(model, keys=None):
         """
-        Get the names of the sites in the model. If keys is not None, only return the names of the sites
-        that are in keys, otherwise return all site names.
+        Get the names and ids of all sites in the model.
+
+        If ``keys`` is given, it is additionally checked that all of these site names exist in the model.
 
         Args:
-            model: mujoco model
-            keys: list of site names
+            model (MjModel): Mujoco model.
+            keys (List[str], optional): Site names that have to exist in the model.
 
         Returns:
-            List of site names and list of site ids.
+            Tuple[List[str], List[int]]: Names and ids of all sites in the model.
+
+        Raises:
+            AssertionError: If a name in ``keys`` is not found in the model.
+
         """
         keys = deepcopy(keys)
         site_names = []
@@ -154,17 +242,28 @@ def add_mocap_bodies(mjspec: MjSpec,
                      height_adjustment_geom_names: List[str] = None,
                      max_height_adjustment: float = 1.0):
     """
-    Add mocap bodies to the model specification.
+    Add mocap bodies to the model specification and prepare the model for retargeting.
+
+    One mocap body with a visual box site is added per name in ``mocap_bodies``. If requested, each mocap body is
+    connected to its mimic site with an equality constraint, so that moving the mocap bodies pulls the robot into the
+    corresponding pose. The robot configuration can additionally disable joint limits and collisions, set the
+    stiffness of the joint limits, and select the type and the solver parameters of each constraint.
 
     Args:
-        mjspec (MjSpec): The model specification.
-        sites_for_mimic (List[str]): The sites to mimic.
-        mocap_bodies (List[str]): The names of the mocap bodies to be added to the model specification.
-        mocap_bodies_init_pos: The initial positions of the mocap bodies.
+        mjspec (MjSpec): The model specification. It is modified in place.
+        sites_for_mimic (List[str]): The names of the mimic sites of the robot.
+        mocap_bodies (List[str]): The names of the mocap bodies to be added to the model specification, one per
+            mimic site and in the same order.
+        robot_conf (DictConfig): Robot configuration for retargeting (see ``loco_mujoco/smpl/robot_confs``). If
+            None, weld constraints with default parameters are used and the model is not changed otherwise.
         add_equality_constraint (bool): Whether to add equality constraints between the sites and the mocap bodies.
         height_adjustment_geom_names (List[str]): The names of the geoms to be used for height adjustment of the
-            trajectory.
+            trajectory. Their contact margin and gap are set to ``max_height_adjustment``, so that their distance
+            to the floor is available up to that value.
         max_height_adjustment (float): The maximum height adjustment for the geoms.
+
+    Returns:
+        MjSpec: The modified model specification.
 
     """
 
@@ -229,32 +328,25 @@ def calculate_qvel_with_finite_difference(qpos, frequency):
     Calculate joint velocities (qvel) using finite differences for a given trajectory.
 
     This function computes joint velocities by applying a central finite difference
-    method to the joint positions (`qpos`). It handles free joints (e.g., floating-base
-    joints with translational and rotational components) separately from other joints.
-    The input `qpos` is expected to be a 2D NumPy array, where the first dimension
-    corresponds to time steps (`Nsampleintraj`) and the second dimension corresponds
-    to joint states (`njoints`).
+    method to the joint positions (``qpos``). It handles the free joint (the floating base
+    with translational and rotational components) separately from the other joints. Since central
+    differences are not defined for the first and the last sample, these two samples are dropped.
 
     Args:
-        qpos (numpy.ndarray):
-            A 2D array of shape `(nsamples, qpos_dim)` representing the joint positions.
+        qpos (numpy.ndarray): A 2D array of shape ``(nsamples, qpos_dim)`` representing the joint positions.
             The first 7 columns correspond to the free joint (3 for position and 4 for orientation
-            as a quaternion), and the remaining columns correspond to other joint positions.
-        frequency (float):
-            The sampling frequency of the trajectory in Hz.
+            as a quaternion with the scalar part first), and the remaining columns correspond to joints with a
+            single degree of freedom.
+        frequency (float): The sampling frequency of the trajectory in Hz.
 
     Returns:
-
-        numpy.ndarray:
-            A 2D array of shape `(nsamples - 2, qpos_dim-1)` representing the computed joint velocities.
-            The velocities include translational (3 components) and rotational (3 components) velocities
-            for the free joint.
+        Tuple[numpy.ndarray, numpy.ndarray]: The joint positions without the first and the last sample, shape
+        ``(nsamples - 2, qpos_dim)``, and the joint velocities, shape ``(nsamples - 2, qpos_dim - 1)``. The
+        velocities of the free joint consist of 3 translational components and 3 rotational components, the latter
+        computed as the finite difference of the orientation expressed as a rotation vector.
 
     Notes:
-        - The function uses a central finite difference formula for velocity computation:
-          `(qpos[t+1] - qpos[t-1]) / (2 * delta_t)`.
-        - The quaternion orientation in `qpos` is assumed to have the scalar part first.
-        - Free joint velocities are split into translational and rotational components.
+        The central finite difference formula is ``(qpos[t+1] - qpos[t-1]) / (2 * delta_t)``.
 
     """
 
@@ -283,6 +375,22 @@ def calculate_qvel_with_finite_difference(qpos, frequency):
 
 
 def expression_constructor(loader, node):
+    """
+    YAML constructor for the tag ``!expr``, which evaluates a scalar as a Python expression.
+
+    Only the names ``pi``, ``math`` and ``np`` (an alias of the ``math`` module) are available in the expression.
+
+    Args:
+        loader: The YAML loader.
+        node: The scalar node holding the expression.
+
+    Returns:
+        The value of the expression.
+
+    Raises:
+        ValueError: If the expression cannot be evaluated.
+
+    """
     # Get the scalar value (the expression in string form)
     value = loader.construct_scalar(node)
     try:
@@ -293,6 +401,16 @@ def expression_constructor(loader, node):
 
 
 def load_robot_conf(file_path):
+    """
+    Load a robot configuration from a YAML file, with support for the tag ``!expr``.
+
+    Args:
+        file_path (str): Path to the YAML file.
+
+    Returns:
+        dict: The content of the file.
+
+    """
     # Register the custom constructor for the tag '!expr'
     yaml.SafeLoader.add_constructor('!expr', expression_constructor)
     with open(file_path, 'r') as file:
@@ -300,6 +418,16 @@ def load_robot_conf(file_path):
 
 
 def load_dataset_conf(file_path):
+    """
+    Load a dataset configuration from a YAML file.
+
+    Args:
+        file_path (str): Path to the YAML file.
+
+    Returns:
+        dict: The content of the file.
+
+    """
     # simple yaml loader
     with open(file_path, 'r') as file:
         return yaml.safe_load(file)

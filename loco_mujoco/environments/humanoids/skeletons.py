@@ -1,3 +1,8 @@
+"""
+Environments of the humanoid skeleton model with torque actuation and with muscle actuation, and their Mjx
+variants.
+"""
+
 from typing import List, Tuple, Dict, Union
 import warnings
 
@@ -15,6 +20,18 @@ class SkeletonTorque(BaseSkeleton):
     ------------
 
     Mujoco environment of a humanoid skeleton model with one torque actuator per joint.
+
+    The model has a floating base (pelvis), three lumbar joints, seven joints per arm and seven joints per
+    leg. With the default box feet (``use_box_feet=True``), the subtalar and toe joints are removed, which
+    leaves 27 actuated joints. By default, the observation consists of the pose of the floating base without
+    its x-y position (height and orientation quaternion), all joint positions, the linear and angular
+    velocity of the floating base, and all joint velocities. The action contains one command per torque
+    actuator, normalized to [-1, 1] and rescaled to the control range of the actuator (default control
+    function).
+
+    The model supports body scaling (``scaling``) to simulate humans of different sizes, and the arms can be
+    removed (``disable_arms``); see :class:`~loco_mujoco.environments.humanoids.base_skeleton.BaseSkeleton`
+    for all constructor options. The tables below show the default spaces.
 
 
     Default Observation Space
@@ -211,6 +228,12 @@ class SkeletonTorque(BaseSkeleton):
         """
         Constructor.
 
+        Args:
+            **kwargs: Arguments passed to
+                :class:`~loco_mujoco.environments.humanoids.base_skeleton.BaseSkeleton`, e.g.,
+                ``use_box_feet``, ``disable_arms`` and ``scaling``. ``use_muscles`` is fixed to False in this
+                environment; passing a different value raises an error.
+
         """
 
         if "use_muscles" in kwargs.keys():
@@ -228,7 +251,8 @@ class SkeletonTorque(BaseSkeleton):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: List of action space specification.
+            List[str]: List of actuator names.
+
         """
 
         action_spec = ["mot_lumbar_ext", "mot_lumbar_bend", "mot_lumbar_rot", "mot_shoulder_flex_r",
@@ -246,6 +270,10 @@ class SkeletonTorque(BaseSkeleton):
     def get_default_xml_file_path(cls) -> str:
         """
         Returns the default path to the xml file of the environment.
+
+        Returns:
+            str: Path to the default xml file.
+
         """
         return cls.get_model_path("skeleton", "skeleton_torque.xml")
 
@@ -253,7 +281,14 @@ class SkeletonTorque(BaseSkeleton):
 class MjxSkeletonTorque(SkeletonTorque):
 
     """
-    Mjx version of SkeletonTorque.
+    Mjx version of the :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonTorque` environment.
+
+    The model, the observation space and the action space are the same as in the CPU environment, but
+    ``mjx_enabled`` is set so that the environment can be simulated with the JAX-based backend
+    (functional ``mjx_reset``/``mjx_step`` interface that can be jit-compiled and vectorized). Compared to the
+    CPU environment, the default timestep, the number of substeps and the solver options are changed, and by
+    default (``mjx_reduced_contacts=True``) all contacts are disabled except the ones between the box feet and
+    the floor, which requires ``use_box_feet=True``.
 
     """
 
@@ -266,9 +301,13 @@ class MjxSkeletonTorque(SkeletonTorque):
         Constructor.
 
         Args:
-            timestep (float): Timestep of the simulation.
-            n_substeps (int): Number of substeps.
-            **kwargs: Additional arguments
+            timestep (float): Simulation timestep in seconds.
+            n_substeps (int): Number of simulation steps per environment step.
+            **kwargs: Additional arguments passed to
+                :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonTorque`. If no ``model_option_conf``
+                is given, the solver is configured with 4 iterations and 8 line-search iterations, and the
+                implicit joint damping of the Euler integrator is disabled.
+
         """
         if "model_option_conf" not in kwargs.keys():
             model_option_conf = dict(iterations=4, ls_iterations=8, disableflags=mujoco.mjtDisableBit.mjDSBL_EULERDAMP)
@@ -280,7 +319,10 @@ class MjxSkeletonTorque(SkeletonTorque):
 
 class HumanoidTorque(SkeletonTorque):
     """
-    Wrapper class for SkeletonTorque. Deprecated and will be removed in a future release.
+    Deprecated alias of :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonTorque`, kept for compatibility
+    with old environment names. It emits a ``DeprecationWarning`` on construction and will be removed in a
+    future release.
+
     """
     def __init__(self, *args, **kwargs):
         warnings.warn(
@@ -298,9 +340,22 @@ class SkeletonMuscle(BaseSkeleton):
     Description
     ------------
 
-    Mujoco environment of a human skeleton model with muscle actuation.
+    Mujoco environment of a humanoid skeleton model with muscle actuation.
 
-    .. note:: This Humanoid consists of 92 muscles on the lower limb. The upper body is torque actuated.
+    The kinematic structure is the same as in
+    :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonTorque`: a floating base (pelvis), three
+    lumbar joints, seven joints per arm and seven joints per leg, where the subtalar and toe joints are
+    removed with the default box feet (``use_box_feet=True``). The default observation is also the same. The
+    action has 106 dimensions: one command for each of the 14 torque actuators of the arms followed by one
+    command for each of the 92 muscles, normalized to [-1, 1] and rescaled to the control
+    range of the actuator (default control function).
+
+    The model supports body scaling (``scaling``) to simulate humans of different sizes, and the arms can be
+    removed (``disable_arms``); see :class:`~loco_mujoco.environments.humanoids.base_skeleton.BaseSkeleton`
+    for all constructor options. The tables below show the default spaces.
+
+    .. note:: This humanoid has 92 muscles, which actuate the legs and the lumbar joints. The arms are
+        torque actuated.
 
     Default Observation Space
     -------------------------
@@ -653,6 +708,12 @@ class SkeletonMuscle(BaseSkeleton):
         """
         Constructor.
 
+        Args:
+            **kwargs: Arguments passed to
+                :class:`~loco_mujoco.environments.humanoids.base_skeleton.BaseSkeleton`, e.g.,
+                ``use_box_feet``, ``disable_arms`` and ``scaling``. ``use_muscles`` is fixed to True in this
+                environment; passing a different value raises an error.
+
         """
 
         if "use_muscles" in kwargs.keys():
@@ -670,7 +731,8 @@ class SkeletonMuscle(BaseSkeleton):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: List of action space specification.
+            List[str]: List of actuator names.
+
         """
 
         action_spec = ["mot_shoulder_flex_r", "mot_shoulder_add_r", "mot_shoulder_rot_r", "mot_elbow_flex_r",
@@ -699,6 +761,10 @@ class SkeletonMuscle(BaseSkeleton):
     def get_default_xml_file_path(cls) -> str:
         """
         Returns the default path to the xml file of the environment.
+
+        Returns:
+            str: Path to the default xml file.
+
         """
         return cls.get_model_path("skeleton", "skeleton_muscle.xml")
 
@@ -706,7 +772,14 @@ class SkeletonMuscle(BaseSkeleton):
 class MjxSkeletonMuscle(SkeletonMuscle):
 
     """
-    Mjx version of SkeletonMuscle.
+    Mjx version of the :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonMuscle` environment.
+
+    The model, the observation space and the action space are the same as in the CPU environment, but
+    ``mjx_enabled`` is set so that the environment can be simulated with the JAX-based backend
+    (functional ``mjx_reset``/``mjx_step`` interface that can be jit-compiled and vectorized). Compared to the
+    CPU environment, the default timestep, the number of substeps and the solver options are changed, and by
+    default (``mjx_reduced_contacts=True``) all contacts are disabled except the ones between the box feet and
+    the floor, which requires ``use_box_feet=True``.
 
     """
 
@@ -719,9 +792,13 @@ class MjxSkeletonMuscle(SkeletonMuscle):
         Constructor.
 
         Args:
-            timestep (float): Timestep of the simulation.
-            n_substeps (int): Number of substeps.
-            **kwargs: Additional arguments.
+            timestep (float): Simulation timestep in seconds.
+            n_substeps (int): Number of simulation steps per environment step.
+            **kwargs: Additional arguments passed to
+                :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonMuscle`. If no ``model_option_conf``
+                is given, the solver is configured with 4 iterations and 8 line-search iterations, and the
+                implicit joint damping of the Euler integrator is disabled.
+
         """
         if "model_option_conf" not in kwargs.keys():
             model_option_conf = dict(iterations=4, ls_iterations=8,
@@ -734,7 +811,10 @@ class MjxSkeletonMuscle(SkeletonMuscle):
 
 class HumanoidMuscle(SkeletonMuscle):
     """
-    Wrapper class for SkeletonMuscle. Deprecated and will be removed in a future release.
+    Deprecated alias of :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonMuscle`, kept for compatibility
+    with old environment names. It emits a ``DeprecationWarning`` on construction and will be removed in a
+    future release.
+
     """
     def __init__(self, *args, **kwargs):
         warnings.warn(

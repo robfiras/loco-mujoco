@@ -1,17 +1,23 @@
+"""
+Base class and registry of the task factories.
+"""
+
 from typing import Dict, Type, Any, Tuple
 from loco_mujoco.environments.base import LocoEnv
 
 
 class TaskFactory:
     """
-    A factory class for creating and registering environment instances for tasks.
+    Base class of the factories that create environments for tasks.
 
-    This class provides a mechanism to register task factories and create specific
-    environments based on their names.
+    A factory creates a registered environment by name through its :meth:`make` method and returns it together with
+    the trajectory of the task, if any. Factories are registered by their class name, so that they can be selected
+    by name, e.g. from a configuration file, with :meth:`get_factory_cls`.
 
     Attributes:
         registered (Dict[str, Type["TaskFactory"]]): A dictionary mapping factory class names
-                                                     to their corresponding classes.
+            to their corresponding classes.
+
     """
 
     registered: Dict[str, Type["TaskFactory"]] = dict()

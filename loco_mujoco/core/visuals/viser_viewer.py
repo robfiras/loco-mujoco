@@ -1,3 +1,11 @@
+"""
+Browser-based viewer built on viser and mjviser, a drop-in alternative to the OpenGL
+:class:`~loco_mujoco.core.visuals.viewer.MujocoViewer`.
+
+The viewer needs the optional dependencies ``viser`` and ``mjviser``.
+
+"""
+
 import base64
 import mimetypes
 import time
@@ -188,6 +196,8 @@ class ViserViewer:
             sky (str/tuple): Background gradient. "model" reproduces the OpenGL viewer by
                 reading the model's skybox texture, a (top_rgb, bottom_rgb) pair sets an
                 explicit gradient, and None leaves viser's plain background.
+            **unsupported_params: Viewer parameters the viser viewer does not support. They are
+                ignored with a warning.
 
         """
         check_optional_imports()
@@ -1053,6 +1063,13 @@ class ViserViewer:
 
     @property
     def video_file_path(self):
+        """
+        Path of the video file of the recorder.
+
+        Returns:
+            str: The path, or None if the viewer does not record.
+
+        """
         if self._recorder is not None:
             return self._recorder.file_path
         else:

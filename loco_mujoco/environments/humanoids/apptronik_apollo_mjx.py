@@ -1,3 +1,7 @@
+"""
+Mjx version of the Apptronik Apollo environment.
+"""
+
 import mujoco
 from mujoco import MjSpec
 
@@ -5,10 +9,32 @@ from .apptronik_apollo import Apollo
 
 
 class MjxApollo(Apollo):
+    """
+    Mjx version of the :class:`~loco_mujoco.environments.humanoids.apptronik_apollo.Apollo` environment.
+
+    The robot model, the observation space and the action space are the same as in the CPU environment, but
+    ``mjx_enabled`` is set so that the environment can be simulated with the JAX-based backend
+    (functional ``mjx_reset``/``mjx_step`` interface that can be jit-compiled and vectorized). Compared to the
+    CPU environment, the default timestep, the number of substeps and the solver options are changed, and by
+    default (``mjx_reduced_contacts=True``) all contacts are disabled
+    except the ones between the foot soles and the floor.
+
+    """
 
     mjx_enabled = True
     
     def __init__(self, timestep=0.001, n_substeps=5, **kwargs):
+        """
+        Constructor.
+
+        Args:
+            timestep (float): Simulation timestep in seconds.
+            n_substeps (int): Number of simulation steps per environment step.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.humanoids.apptronik_apollo.Apollo`. If no
+                ``model_option_conf`` is given, the solver is configured with 2 iterations and 4 line-search
+                iterations, and the implicit joint damping of the Euler integrator is disabled.
+
+        """
         if "model_option_conf" not in kwargs.keys():
             model_option_conf = dict(iterations=2, ls_iterations=4, disableflags=mujoco.mjtDisableBit.mjDSBL_EULERDAMP)
         else:
@@ -18,17 +44,16 @@ class MjxApollo(Apollo):
 
     def _modify_spec_for_mjx(self, spec: MjSpec):
         """
-        Mjx is bad in handling many complex contacts. To speed-up simulation significantly we apply
-        some changes to the XML:
-            1. Replace the complex foot meshes with primitive shapes. Here, one foot mesh is replaced with
-               two capsules.
-            2. Disable all contacts except the ones between feet and the floor.
+        Reduces the contacts of the model to speed up the simulation with Mjx.
+
+        Mjx is slow in handling many complex contacts. Therefore, all contacts are disabled except the ones
+        between the two foot-sole collision geometries and the floor.
 
         Args:
-            spec: Handle to Mujoco XML.
+            spec (MjSpec): Mujoco specification.
 
         Returns:
-            Mujoco XML handle.
+            MjSpec: Modified Mujoco specification.
 
         """
 

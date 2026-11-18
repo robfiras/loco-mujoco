@@ -1,3 +1,5 @@
+"""Lean forward kinematics for a floating-base tree of hinge joints, for use inside long differentiated rollouts."""
+
 import jax.numpy as jnp
 import mujoco
 import numpy as np
@@ -6,12 +8,14 @@ from loco_mujoco.core.utils.math import quat_mul as _quat_mul, quat_to_mat as _q
 
 
 def _cross(a, b):
+    """Cross product along the last axis, written out in components."""
     ax, ay, az = a[..., 0], a[..., 1], a[..., 2]
     bx, by, bz = b[..., 0], b[..., 1], b[..., 2]
     return jnp.stack([ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx], axis=-1)
 
 
 def _rotate(mat, v):
+    """Rotate the vectors ``v`` (..., 3) with the rotation matrices ``mat`` (..., 3, 3)."""
     return jnp.sum(mat * v[..., None, :], axis=-1)
 
 
@@ -57,7 +61,17 @@ class FlatKinematics:
         self._site_mat = self._site_mat.reshape(-1, 3, 3)
 
     def __call__(self, data):
-        """Returns data with the fields above brought up to its qpos and qvel. Works on a single state."""
+        """
+        Returns data with the fields above brought up to its qpos and qvel. Works on a single state.
+
+        Args:
+            data (mjx.Data): The simulation data of a single (unbatched) state.
+
+        Returns:
+            mjx.Data: Copy of the data with updated ``xpos``, ``xquat``, ``xmat``, ``cvel``, ``subtree_com``,
+            ``site_xpos`` and ``site_xmat``.
+
+        """
         qpos, qvel = data.qpos, data.qvel
         root = qpos[3:7] / jnp.linalg.norm(qpos[3:7])
         pos, quat = [jnp.zeros(3), qpos[:3]], [jnp.array([1.0, 0.0, 0.0, 0.0]), root]

@@ -1,3 +1,16 @@
+"""
+PPO with the Stochastic Stateful Policy Gradient (S2PG-PPO) in JAX.
+
+Implements the stochastic stateful policy of Al-Hafez et al., "Time-Efficient Reinforcement Learning with
+Stochastic Stateful Policies" (arXiv:2311.04082), on top of :class:`~loco_mujoco.algorithms.ppo_jax.PPOJax`.
+The policy has an internal state ``z`` whose transition is stochastic: at every step the policy samples the
+action and the next internal state jointly. The joint sample is treated as the action of a stateless policy,
+so that the policy can be trained with the ordinary PPO update and without backpropagation through time.
+
+This algorithm is experimental. Example: ``examples/training_examples/jax_rl_mimic_s2pg``.
+
+"""
+
 import ast
 import warnings
 from omegaconf import open_dict
@@ -35,28 +48,64 @@ def _stored_hidden_dim(hidden_state_dim: int, rnn_type: str) -> int:
 
 class IndependentJointDist:
     """
-    Wraps two independent distributions (action and next hidden state).
+    Joint distribution of two independent distributions (action and next hidden state).
 
-    Because the two are independent:
-        log p(a, z') = log p_a(a) + log p_z(z')
-        entropy(a, z') = entropy(a) + entropy(z')
+    Samples are the concatenation ``[a, z']``. Because the two parts are independent,
+    ``log p(a, z') = log p_a(a) + log p_z(z')`` and ``entropy(a, z') = entropy(a) + entropy(z')``.
+
     """
 
     def __init__(self, dist_a: distrax.Distribution, dist_z: distrax.Distribution, action_dim: int):
+        """
+        Initialize the joint distribution.
+
+        Args:
+            dist_a (distrax.Distribution): Distribution over actions.
+            dist_z (distrax.Distribution): Distribution over the next hidden state.
+            action_dim (int): Dimension of the action, used to split joint samples.
+
+        """
         self.dist_a = dist_a
         self.dist_z = dist_z
         self.action_dim = action_dim
 
     def log_prob(self, x: jnp.ndarray) -> jnp.ndarray:
+        """
+        Compute the log probability of a joint sample.
+
+        Args:
+            x (jax.Array): Joint samples ``[a, z']``, shape ``(..., action_dim + stored_hidden_dim)``.
+
+        Returns:
+            jax.Array: Sum of the log probabilities of the two parts, shape ``(...)``.
+
+        """
         return self.dist_a.log_prob(x[..., :self.action_dim]) \
              + self.dist_z.log_prob(x[..., self.action_dim:])
 
     def sample(self, seed: jnp.ndarray) -> jnp.ndarray:
+        """
+        Sample an action and a next hidden state.
+
+        Args:
+            seed (jax.Array): PRNG key; it is split into one key per part.
+
+        Returns:
+            jax.Array: Joint samples ``[a, z']``, shape ``(..., action_dim + stored_hidden_dim)``.
+
+        """
         seed_a, seed_z = jax.random.split(seed)
         return jnp.concatenate([self.dist_a.sample(seed=seed_a),
                                  self.dist_z.sample(seed=seed_z)], axis=-1)
 
     def entropy(self) -> jnp.ndarray:
+        """
+        Compute the entropy of the joint distribution.
+
+        Returns:
+            jax.Array: Sum of the entropies of the two parts.
+
+        """
         return self.dist_a.entropy() + self.dist_z.entropy()
 
 
@@ -66,31 +115,45 @@ class IndependentJointDist:
 
 class ActorCriticS2PG(nn.Module):
     """
-    Network for S2PG-PPO.
+    Actor-critic network for S2PG-PPO.
 
-    Actor
-    -----
-    *rnn_type = "gru" or "lstm"* (default):
-      1. Embed obs and prev_action separately.
-      2. Feed concat([obs_embed, prev_action_embed]) into a GRU / LSTM cell
-         whose initial carry is the current hidden state ``z``.
-      3. The RNN carry output is the mean of the stochastic next hidden state z'.
-      4. A post-RNN obs re-embedding + RNN output → action mean.
+    **Actor.** With ``rnn_type`` set to ``"gru"`` or ``"lstm"``:
 
-    *rnn_type = "vanilla"*:
-      concat([obs, z, prev_action]) → MLP → (action_mean, next_hidden_mean).
+    1. The normalized observation and the previous action are embedded separately by a dense layer of width
+       ``n_features``.
+    2. The concatenated embeddings are fed into a GRU / LSTM cell whose carry is the current hidden state ``z``.
+    3. The new carry is the mean of the stochastic next hidden state ``z'``.
+    4. A second embedding of the observation is concatenated with the RNN output and mapped linearly to the
+       action mean.
 
-    The actor returns an IndependentJointDist over (a, z').
+    With ``rnn_type="vanilla"`` the two embeddings are concatenated with the hidden state and passed through an
+    MLP that outputs the action mean and the mean of the next hidden state.
 
-    Critic
-    ------
-    MLP over concat([obs, z, prev_action]) → scalar V(s, z, a_prev).
+    The actor yields an :class:`IndependentJointDist` over ``(a, z')`` made of two diagonal Gaussians with
+    state-independent standard deviations (parameters ``log_std_a`` and ``log_std_z``).
 
-    Inputs
-    ------
-    obs:          (..., obs_dim)
-    hidden_state: (..., stored_hidden_dim)   # for LSTM: concat(h, c)
-    prev_action:  (..., action_dim)
+    **Critic.** An MLP over the concatenation of the normalized observation, the hidden state and the previous
+    action, i.e. ``V(s, z, a_prev)``.
+
+    The network has a ``run_stats`` variable collection (observation normalization) and has to be applied with
+    ``mutable=["run_stats"]``.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        hidden_state_dim (int): Size of the RNN hidden state. For an LSTM the stored hidden state is the
+            concatenation of ``h`` and ``c`` and thus twice as large.
+        rnn_type (str): ``"gru"``, ``"lstm"`` or ``"vanilla"``.
+        n_features (int): Width of the embeddings before and after the RNN.
+        activation (str): Name of the activation function in ``flax.linen``.
+        init_std_a (float): Initial standard deviation of the action distribution.
+        init_std_z (float): Initial standard deviation of the hidden-state distribution.
+        learnable_std (bool): If False, the gradients with respect to ``log_std_a`` and ``log_std_z`` are
+            stopped.
+        hidden_layer_dims (Sequence[int]): Hidden layers of the critic MLP and of the ``"vanilla"`` actor MLP.
+        ema_coef (float): Exponential smoothing of the mean of the hidden-state transition,
+            ``z'_mean = (1 - ema_coef) * z + ema_coef * f(obs, z, a_prev)``. The default ``1.0`` disables
+            smoothing; values between 0 and 1 add inertia.
+
     """
 
     action_dim: int
@@ -107,10 +170,29 @@ class ActorCriticS2PG(nn.Module):
                                     # 1.0 = no smoothing (default), 0 < ema_coef < 1 adds inertia
 
     def setup(self):
+        """Resolve the activation function from its name."""
         self.activation_fn = get_activation_fn(self.activation)
 
     @nn.compact
     def __call__(self, obs, hidden_state, prev_action):
+        """
+        Compute the joint distribution over action and next hidden state, and the value estimate.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(batch, obs_dim)``.
+            hidden_state (jax.Array): Current hidden states, shape ``(batch, stored_hidden_dim)``, where
+                ``stored_hidden_dim`` is ``2 * hidden_state_dim`` for an LSTM (``h`` and ``c`` concatenated) and
+                ``hidden_state_dim`` otherwise.
+            prev_action (jax.Array): Previous actions, shape ``(batch, action_dim)``.
+
+        Returns:
+            Tuple[IndependentJointDist, jax.Array]: The joint distribution over ``(a, z')`` and the value estimates
+            of shape ``(batch,)``.
+
+        Raises:
+            ValueError: If ``rnn_type`` is unknown.
+
+        """
         # RunningMeanStd applies atleast_2d then squeeze internally, which
         # strips the batch dim on 1D inputs.  Re-promote all three tensors to
         # 2D so every downstream layer sees a consistent (batch, feat) shape.
@@ -201,20 +283,40 @@ class S2PGPolicy:
     """
     Policy wrapper for S2PG-PPO.
 
-    All methods take obs, hidden_state, and prev_action as separate arguments.
+    All methods take the observation, the hidden state and the previous action as separate arguments.
+
     """
 
     def __init__(self, network: nn.Module, action_dim: int):
+        """
+        Initialize the policy wrapper.
+
+        Args:
+            network (nn.Module): The :class:`ActorCriticS2PG` network.
+            action_dim (int): Dimension of the action space, used to split joint samples.
+
+        """
         self.network = network
         self.action_dim = action_dim
 
     def get_env_action_and_next_hidden(
         self, obs, hidden_state, prev_action, train_state, rng
     ):
-        """Sample joint (a, z') and split into env action and next hidden state.
+        """
+        Sample the joint ``(a, z')`` and split it into the environment action and the next hidden state.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(n_envs, obs_dim)``.
+            hidden_state (jax.Array): Current hidden states, shape ``(n_envs, stored_hidden_dim)``.
+            prev_action (jax.Array): Previous actions, shape ``(n_envs, action_dim)``.
+            train_state (TrainState): Current train state with parameters and running statistics.
+            rng (jax.Array): PRNG key used for sampling.
 
         Returns:
-            (env_action, next_hidden, log_prob, value, joint_action, updated_train_state)
+            Tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, TrainState]: The environment actions, the
+            sampled next hidden states, the log probabilities of the joint samples, the value estimates, the joint
+            samples ``[a, z']`` and the train state with updated running statistics.
+
         """
         pi, value, train_state = self._forward_pass(obs, hidden_state, prev_action, train_state)
         joint_action = pi.sample(seed=rng)
@@ -224,9 +326,24 @@ class S2PGPolicy:
         return env_action, next_hidden, log_prob, value, joint_action, train_state
 
     def get_dist_and_value(self, obs, hidden_state, prev_action, train_state):
+        """
+        Compute the joint distribution and the value estimate.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(n_envs, obs_dim)``.
+            hidden_state (jax.Array): Current hidden states, shape ``(n_envs, stored_hidden_dim)``.
+            prev_action (jax.Array): Previous actions, shape ``(n_envs, action_dim)``.
+            train_state (TrainState): Current train state with parameters and running statistics.
+
+        Returns:
+            Tuple[IndependentJointDist, jax.Array, TrainState]: The joint distribution over ``(a, z')``, the value
+            estimates and the train state with updated running statistics.
+
+        """
         return self._forward_pass(obs, hidden_state, prev_action, train_state)
 
     def _forward_pass(self, obs, hidden_state, prev_action, train_state):
+        """Run a forward pass of the network and write the updated running statistics to the train state."""
         y, updates = self.network.apply(
             {"params": train_state.params, "run_stats": train_state.run_stats},
             obs, hidden_state, prev_action,
@@ -241,7 +358,26 @@ class S2PGPolicy:
 # ---------------------------------------------------------------------------
 
 class S2PGTransition(NamedTuple):
-    """Transition for S2PG — stores raw obs, hidden state, and prev_action separately."""
+    """
+    One step of experience collected by S2PG-PPO.
+
+    Observation, hidden state and previous action are stored separately.
+
+    Attributes:
+        done (jax.Array): Whether the episode ended at this step.
+        absorbing (jax.Array): Whether the state reached at this step is absorbing.
+        action (jax.Array): Joint sample ``[a_t, z_{t+1}]``, shape ``(action_dim + stored_hidden_dim,)``.
+        hidden_state (jax.Array): Hidden state ``z_t`` the policy was conditioned on at this step.
+        prev_action (jax.Array): Previous environment action ``a_{t-1}`` (zeros at the start of an episode).
+        value (jax.Array): Critic estimate at this step.
+        reward (jax.Array): Reward received.
+        log_prob (jax.Array): Log probability of the joint sample under the data-collecting policy.
+        obs (jax.Array): Raw environment observation.
+        info (dict): Info dictionary returned by the environment step.
+        traj_state (TrajState): Trajectory state of the environment after the step.
+        metrics (Metrics): Episode statistics of the :class:`~loco_mujoco.core.wrappers.mjx.LogWrapper`.
+
+    """
     done: jnp.ndarray
     absorbing: jnp.ndarray
     action: jnp.ndarray         # joint action concat([a, z'])
@@ -262,17 +398,44 @@ class S2PGTransition(NamedTuple):
 
 @dataclass(frozen=True)
 class S2PGAgentConf(AgentConfBase):
+    """
+    Static configuration of an S2PG-PPO agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        network (ActorCriticS2PG): The actor-critic network definition.
+        tx (optax.GradientTransformation): The optimizer.
+
+    """
     config: DictConfig
     network: ActorCriticS2PG
     tx: Any
 
     def serialize(self):
+        """
+        Serialize the agent configuration and the network definition.
+
+        Returns:
+            dict: Dictionary with the keys ``"config"`` (the resolved configuration as a plain container) and
+            ``"network"`` (the state dictionary of the network definition).
+
+        """
         conf_dict = OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True)
         serialized_network = flax.serialization.to_state_dict(self.network)
         return {"config": conf_dict, "network": serialized_network}
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            S2PGAgentConf: The restored configuration with a newly built optimizer.
+
+        """
         config = OmegaConf.create(d["config"])
         tx = S2PGPPOJax._get_optimizer(config)
         return cls(config=config,
@@ -282,6 +445,19 @@ class S2PGAgentConf(AgentConfBase):
 
 @struct.dataclass
 class S2PGAgentState(AgentStateBase):
+    """
+    Dynamic state of an S2PG-PPO agent.
+
+    Attributes:
+        train_state (TrainState): Parameters, optimizer state and running observation statistics of the network.
+        env_state: Environment state at the end of the last training chunk; not saved to disk.
+        last_obs (jax.Array): Last observations of the previous training chunk; not saved to disk.
+        hidden_state (jax.Array): Hidden states ``z`` at the end of the last training chunk, shape
+            ``(num_envs, stored_hidden_dim)``; not saved to disk.
+        prev_action (jax.Array): Last actions of the previous training chunk, shape ``(num_envs, action_dim)``;
+            not saved to disk.
+
+    """
     train_state: TrainState
     env_state: Any = None
     last_obs: Any = None
@@ -289,10 +465,29 @@ class S2PGAgentState(AgentStateBase):
     prev_action: Any = None     # a_{t-1} carried across chunks
 
     def serialize(self):
+        """
+        Serialize the agent state.
+
+        Returns:
+            dict: Dictionary with the key ``"train_state"``; the carried environment state, observation, hidden
+            state and previous action are dropped.
+
+        """
         return {"train_state": flax.serialization.to_state_dict(self.train_state)}
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+            agent_conf (S2PGAgentConf): Agent configuration providing the network and the optimizer.
+
+        Returns:
+            S2PGAgentState: The restored state, including the optimizer state.
+
+        """
         train_state = TrainState.create(
             apply_fn=agent_conf.network.apply,
             tx=agent_conf.tx,
@@ -313,22 +508,25 @@ class S2PGPPOJax(PPOJax):
     """
     S2PG-PPO: Proximal Policy Optimization with the Stochastic Stateful Policy Gradient.
 
-    Key properties
-    --------------
-    * The policy jointly models (action, next_hidden_state) as two independent
-      Gaussians; their summed log-prob is the IS ratio — no BPTT required.
-    * The hidden state z is propagated as the GRU/LSTM carry; its stochastic
-      transition replaces BPTT with a score-function estimator.
-    * The previous action a_{t-1} is fed to the RNN input and the critic,
-      matching the original S2PG formulation.
-    * Value function: V(s, z, a_prev).
+    Key properties:
 
-    Supported rnn_type values: "gru" (default), "lstm", "vanilla" (MLP fallback).
+    * The policy jointly models ``(action, next_hidden_state)`` as two independent Gaussians; their summed log
+      probability enters the importance-sampling ratio, so no backpropagation through time is required.
+    * The hidden state ``z`` is propagated as the GRU/LSTM carry; its stochastic transition replaces BPTT with
+      a score-function estimator.
+    * The previous action ``a_{t-1}`` is fed to the RNN input and to the critic.
+    * The value function is ``V(s, z, a_prev)``.
+    * Hidden state and previous action are reset to zero when an episode ends.
 
-    Reference
-    ---------
-    "Time-Efficient Reinforcement Learning with Stochastic Stateful Policies"
-    Firas Al-Hafez et al., arXiv 2311.04082
+    Supported ``rnn_type`` values: ``"gru"`` (default), ``"lstm"`` and ``"vanilla"`` (MLP fallback).
+
+    Reference: Firas Al-Hafez et al., "Time-Efficient Reinforcement Learning with Stochastic Stateful Policies",
+    arXiv:2311.04082.
+
+    The interface is that of :class:`~loco_mujoco.algorithms.ppo_jax.PPOJax`; see
+    ``examples/training_examples/jax_rl_mimic_s2pg`` for a training script. Reward normalization
+    (``normalize_env``) is not applied by this algorithm.
+
     """
 
     _agent_conf = S2PGAgentConf
@@ -336,6 +534,30 @@ class S2PGPPOJax(PPOJax):
 
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived hyperparameters, the network and the optimizer.
+
+        In addition to the PPO hyperparameters (see :meth:`PPOJax.init_agent_conf
+        <loco_mujoco.algorithms.ppo_jax.PPOJax.init_agent_conf>`), the following keys are read from
+        ``config.experiment``:
+
+        - ``hidden_state_dim``: size of the internal state ``z`` (the RNN hidden state).
+        - ``rnn_type`` (optional, default ``"gru"``): ``"gru"``, ``"lstm"`` or ``"vanilla"``.
+        - ``n_features`` (optional, default 256): width of the embeddings before and after the RNN.
+        - ``init_std_z`` (optional, default 0.1): initial standard deviation of the hidden-state distribution.
+        - ``ema_coef`` (optional, default 1.0): exponential smoothing of the hidden-state transition mean.
+
+        The keys ``num_updates``, ``minibatch_size``, ``validation_interval``, ``action_dim`` and a recomputed
+        ``validation.num`` are written to ``config.experiment`` in place.
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            S2PGAgentConf: The agent configuration.
+
+        """
         with open_dict(config.experiment):
             config.experiment.num_updates = (
                 config.experiment.total_timesteps // config.experiment.num_steps // config.experiment.num_envs)
@@ -373,6 +595,19 @@ class S2PGPPOJax(PPOJax):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf: S2PGAgentConf, rng) -> S2PGAgentState:
+        """
+        Initialize the agent state (network parameters, running statistics and optimizer state).
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            agent_conf (S2PGAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            S2PGAgentState: The initial agent state; the carried environment state, observation, hidden state and
+            previous action are ``None`` and get initialized by the training function.
+
+        """
         config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
         wrapped_env = cls._wrap_env(env, config)
         obs_dim = wrapped_env.info.observation_space.shape[0]
@@ -399,6 +634,32 @@ class S2PGPPOJax(PPOJax):
                   agent_state: S2PGAgentState = None,
                   traj=None,
                   mh: MetricsHandler = None):
+        """
+        Run S2PG-PPO for ``num_updates`` updates.
+
+        Every update collects a rollout of ``num_steps`` steps in which the policy samples the environment action
+        and the next hidden state jointly, computes advantages with GAE and runs ``update_epochs`` epochs of
+        minibatch updates over individually shuffled time steps. The PPO losses use the log probability of the
+        stored joint sample given the stored observation, hidden state and previous action. If ``agent_state``
+        carries an environment state, hidden state and previous action from a previous call, training continues
+        from them.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (S2PGAgentConf): Static agent configuration.
+            agent_state (S2PGAgentState): Agent state to start or resume from.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Optional metrics handler computing the validation metrics.
+
+        Returns:
+            dict: Dictionary with the keys ``"agent_state"`` (:class:`S2PGAgentState` after training),
+            ``"training_metrics"`` (:class:`~loco_mujoco.algorithms.ppo_jax.PPOSummaryMetrics` with a leading axis
+            of length ``num_updates``) and ``"validation_metrics"``
+            (:class:`~loco_mujoco.utils.metrics.ValidationSummary` with a leading axis of length ``num_updates``;
+            entries of updates without validation are zero).
+
+        """
 
         config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
         action_dim = config.action_dim
@@ -721,6 +982,33 @@ class S2PGPPOJax(PPOJax):
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
                     train_state_seed=None, traj=None):
+        """
+        Roll out a trained stateful policy in a Python loop and render it.
+
+        Hidden state and previous action start at zero and are reset to zero whenever an episode ends. By default
+        the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU MuJoCo
+        environment instead. The environment is stopped at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (S2PGAgentConf): Agent configuration.
+            agent_state (S2PGAgentState): Agent state holding the trained policy.
+            n_envs (int): Number of parallel environments; must be 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Only used to warn about a call that neither renders, records nor terminates; the
+                environment is rendered at every step regardless.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action sampling. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the standard deviation of the action distribution is set to zero so that
+                the mean action is applied. This overwrites ``log_std_a`` in the parameters of ``agent_state`` in
+                place. The transition of the hidden state remains stochastic.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            train_state_seed (int): Index of the seed to play if the agent was trained with ``n_seeds > 1``.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
 
         if use_mujoco:
             assert n_envs == 1, "Only one mujoco env can be run at a time."

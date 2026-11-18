@@ -1,3 +1,7 @@
+"""
+Environment of the Talos humanoid robot (CPU MuJoCo backend).
+"""
+
 from typing import Union, List, Tuple, Dict
 
 import mujoco
@@ -17,6 +21,16 @@ class Talos(BaseRobotHumanoid):
     ------------
 
     Mujoco environment of the Talos robot. Talos is a humanoid robot developed by PAL Robotics.
+
+    The robot has a floating base, 2 torso joints, 2 head joints, 7 joints per arm, 6 joints per leg and two
+    grippers. By default the grippers are removed (``disable_gripper=True``), which leaves 30 actuated
+    joints. The default observation then consists of the pose of the floating base without its x-y position
+    (height and orientation quaternion), all joint positions, the linear and angular velocity of the floating
+    base, and all joint velocities. The action contains one command per actuator, normalized to [-1, 1] and
+    rescaled to the control range of the actuator (default control function).
+
+    With ``disable_gripper=False``, the gripper joints are added to the observation and one actuator per
+    gripper is added to the action space. The tables below show the default spaces without grippers.
 
 
     Default Observation Space
@@ -236,11 +250,20 @@ class Talos(BaseRobotHumanoid):
         Constructor.
 
         Args:
-            disable_gripper (bool): Whether to disable the gripper in the model.
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the XML file or an `MjSpec` object. If none is provided, the default XML file is used.
-            observation_spec (List[Observation]): Observation specification.
-            actuation_spec (List[str]): Action specification.
+            disable_gripper (bool): If True, the joints, actuators and equality constraints of both grippers
+                are removed from the model, and the respective entries are removed from the observation and
+                action specification.
+            spec (Union[str, MjSpec]): Model to simulate, either a path to a MuJoCo XML file or an ``MjSpec``
+                object. If None, the default model of this environment is used.
+            observation_spec (List[Observation]): Observations that make up the observation vector, given as
+                observation objects or as dictionaries with a ``type`` key naming the observation type and its
+                parameters as the remaining keys. If None, the default observation space is used.
+            actuation_spec (List[str]): Names of the actuators in the model that are controlled by the action.
+                If None, the default action space is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. The
+                extra key ``mjx_reduced_contacts`` (bool, default True) only affects the Mjx variant: if True,
+                the contacts are reduced by ``_modify_spec_for_mjx``; if False, the collision geometries of the
+                model are kept.
 
         """
 
@@ -282,7 +305,9 @@ class Talos(BaseRobotHumanoid):
         Specifies which joints, motors, and equality constraints should be removed from the Mujoco spec.
 
         Returns:
-            Tuple[List[str], List[str], List[str]]: Lists of joints, motors, and equality constraints to remove.
+            Tuple[List[str], List[str], List[str]]: Names of the joints to remove, names of the motors to
+            remove, and names of the equality constraints to remove.
+
         """
 
         joints_to_remove = []
@@ -321,6 +346,7 @@ class Talos(BaseRobotHumanoid):
 
         Returns:
             str: Path to the default XML file.
+
         """
         return cls.get_model_path("talos", "talos.xml")
 
@@ -465,7 +491,7 @@ class Talos(BaseRobotHumanoid):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: List of action names.
+            List[str]: List of actuator names.
 
         """
 
@@ -511,6 +537,9 @@ class Talos(BaseRobotHumanoid):
         """
         Returns the name of the upper body in the Mujoco XML file.
 
+        Returns:
+            str: Name of the upper body.
+
         """
         return "torso_2_link"
 
@@ -518,6 +547,9 @@ class Talos(BaseRobotHumanoid):
     def root_body_name(self) -> str:
         """
         Returns the name of the root body in the Mujoco XML file.
+
+        Returns:
+            str: Name of the root body.
 
         """
         return "base_link"
@@ -527,6 +559,9 @@ class Talos(BaseRobotHumanoid):
         """
         Returns the name of the free joint in the Mujoco XML file.
 
+        Returns:
+            str: Name of the free joint.
+
         """
 
         return "reference"
@@ -534,10 +569,13 @@ class Talos(BaseRobotHumanoid):
     @info_property
     def init_qpos(self) -> np.ndarray:
         """
-        Returns the initial position of the robot.
+        Returns the initial joint positions (``qpos``) of the robot.
 
         Returns:
-            np.ndarray: Initial position of the robot.
+            np.ndarray: Initial ``qpos`` of shape ``(49,)``, i.e., of the full model including the grippers:
+            position and orientation quaternion (w, x, y, z) of the floating base followed by the joint
+            positions.
+
         """
         return np.array([0.0, 0.0, 1.08, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                          0.16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -547,10 +585,11 @@ class Talos(BaseRobotHumanoid):
     @info_property
     def init_qvel(self) -> np.ndarray:
         """
-        Returns the initial velocity of the robot.
+        Returns the initial joint velocities (``qvel``) of the robot.
 
         Returns:
-            np.ndarray: Initial velocity of the robot.
+            np.ndarray: Initial ``qvel`` (all zeros) of shape ``(49,)``.
+
         """
         return np.zeros(49)
 
@@ -558,6 +597,9 @@ class Talos(BaseRobotHumanoid):
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
         Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
 
         """
         return (0.8, 1.3)

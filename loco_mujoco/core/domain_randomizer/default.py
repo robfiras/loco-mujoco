@@ -1,3 +1,5 @@
+"""Default domain randomizer and its state."""
+
 from typing import Any, Union, Tuple
 from types import ModuleType
 
@@ -80,6 +82,7 @@ class DefaultRandomizer(DomainRandomizer):
             model (Union[MjModel, Model]): The simulation model.
             data (Union[MjData, Data]): The simulation data.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             DefaultRandomizerState: The initialized randomizer state.
@@ -115,6 +118,7 @@ class DefaultRandomizer(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -187,6 +191,7 @@ class DefaultRandomizer(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjModel, Model], Union[MjData, Data], Any]: The updated simulation model, data, and carry.
@@ -270,6 +275,7 @@ class DefaultRandomizer(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: The updated observation and carry.
@@ -380,6 +386,7 @@ class DefaultRandomizer(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: The updated action and carry.
@@ -769,6 +776,7 @@ class DefaultRandomizer(DomainRandomizer):
         Samples p_gains_noise for the PDControl control function.
 
         Args:
+            env (Any): The environment instance.
             model (Union[MjModel, Model]): The simulation model.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
@@ -808,6 +816,7 @@ class DefaultRandomizer(DomainRandomizer):
         Samples d_gains_noise for the PDControl control function..
 
         Args:
+            env (Any): The environment instance.
             model (Union[MjModel, Model]): The simulation model.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).

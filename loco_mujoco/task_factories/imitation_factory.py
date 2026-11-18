@@ -1,3 +1,7 @@
+"""
+Factory for imitation learning tasks.
+"""
+
 import os
 from typing import Union, Dict, Tuple
 from omegaconf import ListConfig, DictConfig
@@ -30,7 +34,10 @@ class ImitationFactory(TaskFactory):
     """
     A factory class for creating imitation learning environments with arbitrary trajectories.
 
-    Use `make` to create an environment and load the trajectories of the given dataset configurations.
+    Use :meth:`make` to create an environment and load the trajectories of the given dataset configurations. The
+    trajectories can come from the default datasets of LocoMuJoCo, from AMASS, from LAFAN1 and from custom
+    trajectories, and the sources can be combined.
+
     """
 
     @classmethod
@@ -43,7 +50,11 @@ class ImitationFactory(TaskFactory):
              init_state_type: str = "TrajInitialStateHandler",
              **kwargs) -> Tuple[LocoEnv, Trajectory]:
         """
-        Creates and returns an imitation learning environment given different configurations.
+        Create and return an imitation learning environment given different dataset configurations.
+
+        The trajectories of all given configurations are loaded, concatenated and passed to the environment. Each
+        configuration can be given as the dataclass or as a dictionary with its fields. At least one configuration is
+        needed.
 
         Args:
             env_name (str): The name of the registered environment to create.
@@ -58,10 +69,12 @@ class ImitationFactory(TaskFactory):
 
         Returns:
             Tuple[LocoEnv, Trajectory]: The requested imitation learning environment with the trajectory
-                preloaded, and the processed trajectory.
+            preloaded, and the processed trajectory.
 
         Raises:
-            ValueError: If the `dataset_type` is unknown.
+            KeyError: If the specified environment is not registered.
+            ValueError: If a dataset type or dataset group is unknown.
+
         """
 
         if env_name not in LocoEnv.registered_envs:
@@ -110,17 +123,21 @@ class ImitationFactory(TaskFactory):
     @staticmethod
     def get_default_traj(env, default_dataset_conf) -> Trajectory:
         """
-        Loads the default trajectory based on the dataset type, task, and debug mode.
+        Load the default trajectories of the tasks in the configuration.
+
+        For each task, the trajectory is taken from the local cache (``LOCOMUJOCO_CONVERTED_DEFAULT_PATH``) if it exists
+        there. Otherwise it is downloaded from the HuggingFace dataset repository or, if the repository has no dataset
+        for this environment, retargeted from the dataset of another environment; the result is completed with the
+        model-specific quantities and written to the cache. The trajectories are then processed to match the model and
+        the control frequency of the environment and concatenated.
 
         Args:
-            env: The environment, which provides dataset paths.
+            env: The environment for which the trajectories are loaded.
             default_dataset_conf (DefaultDatasetConf): The configuration for the default trajectory.
 
         Returns:
             Trajectory: The default trajectories.
 
-        Raises:
-            ValueError: If the `dataset_type` is unknown.
         """
         env_name = env.__class__.__name__
         if "Mjx" in env_name:
@@ -201,12 +218,23 @@ class ImitationFactory(TaskFactory):
     def _retarget_default_on_the_fly(env_name_target: str, task: str, dataset_type: str,
                                      source_env: str = _DEFAULT_RETARGET_SOURCE_ENV) -> Trajectory:
         """
-        On-the-fly retargeting for a default dataset.
+        Retarget a default dataset on the fly.
 
-        Called when the pre-retargeted dataset for `env_name_target` is not
+        Called when the pre-retargeted dataset for ``env_name_target`` is not
         available on the HuggingFace hub. Downloads the source-env version
-        of the same task and retargets it to the target env using the custom
-        SMPL robot config registered under LOCOMUJOCO_CUSTOM_ROBOT_CONF_PATH.
+        of the same task and retargets it to the target env using the
+        SMPL robot configuration of the target env (shipped with LocoMuJoCo or registered under
+        ``LOCOMUJOCO_CUSTOM_ROBOT_CONF_PATH``).
+
+        Args:
+            env_name_target (str): Name of the environment to retarget to.
+            task (str): Name of the task.
+            dataset_type (str): Type of the default dataset.
+            source_env (str): Name of the environment whose dataset is used as the source.
+
+        Returns:
+            Trajectory: The retargeted trajectory.
+
         """
         source_filename = f"DefaultDatasets/{dataset_type}/{source_env}/{task}.npz"
         source_path = hf_hub_download(
@@ -220,17 +248,22 @@ class ImitationFactory(TaskFactory):
     @staticmethod
     def get_amass_traj(env, amass_dataset_conf: AMASSDatasetConf) -> Trajectory:
         """
-        Determines the path to the trajectory file based on the dataset type, task, and debug mode.
+        Load the AMASS trajectories of the configuration, retargeted to the environment.
+
+        The datasets of ``dataset_group`` and ``rel_dataset_path`` are loaded with
+        :func:`~loco_mujoco.smpl.retargeting.load_retargeted_amass_trajectory`, which retargets them if no cached version
+        exists, and processed to match the model and the control frequency of the environment.
 
         Args:
-            env: The environment, which provides dataset paths.
-            amass_dataset_conf (AMASSDatasetConf): The configuration for the AMASS trajectory
+            env: The environment for which the trajectories are loaded.
+            amass_dataset_conf (AMASSDatasetConf): The configuration for the AMASS trajectory.
 
         Returns:
             Trajectory: The AMASS trajectories.
 
         Raises:
-            ValueError: If the `dataset_group` is unknown.
+            ValueError: If the ``dataset_group`` is unknown.
+
         """
 
         # Determine dataset paths
@@ -254,17 +287,22 @@ class ImitationFactory(TaskFactory):
     @staticmethod
     def get_lafan1_traj(env, lafan1_dataset_conf: LAFAN1DatasetConf) -> Trajectory:
         """
-        Determines the path to the trajectory file based on the dataset type, task, and debug mode.
+        Load the LAFAN1 trajectories of the configuration for the environment.
+
+        The datasets of ``dataset_group`` or, if no group is given, ``dataset_name`` are loaded with
+        :func:`~loco_mujoco.datasets.humanoids.LAFAN1.load.load_lafan1_trajectory` and processed to match the model and
+        the control frequency of the environment.
 
         Args:
-            env: The environment, which provides dataset paths.
+            env: The environment for which the trajectories are loaded.
             lafan1_dataset_conf (LAFAN1DatasetConf): The configuration for the LAFAN1 trajectory.
 
         Returns:
             Trajectory: The LAFAN1 trajectories.
 
         Raises:
-            ValueError: If the `dataset_group` is unknown.
+            ValueError: If the ``dataset_group`` is unknown.
+
         """
         # Determine dataset paths
         if lafan1_dataset_conf.dataset_group:
@@ -292,14 +330,16 @@ class ImitationFactory(TaskFactory):
     @staticmethod
     def get_custom_dataset(env, custom_dataset_conf: CustomDatasetConf) -> Trajectory:
         """
-        Loads the custom trajectory based on the dataset type, task, and debug mode.
+        Process the custom trajectory of the configuration for the environment.
+
+        The trajectory is processed to match the model and the control frequency of the environment.
 
         Args:
-            env: The environment, which provides dataset paths.
+            env: The environment for which the trajectory is loaded.
             custom_dataset_conf (CustomDatasetConf): The configuration for the custom trajectory.
 
         Returns:
-            Trajectory: The custom trajectories.
+            Trajectory: The processed custom trajectory.
 
         """
         env_name = env.__class__.__name__
