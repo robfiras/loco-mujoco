@@ -150,3 +150,35 @@ def test_mjx_warp_reset_in_step():
     state = step(state, action)
     assert not bool(state.done)
     assert int(state.additional_carry.cur_step_in_episode) == 2
+
+
+def test_mjx_warp_refresh_kinematics_with_warp_only_collisions(tmp_path):
+    """
+    Under MjWarp the kinematics are refreshed on a JAX copy of the model. A collision pair that only MjWarp
+    implements (cylinder-mesh) must not stop the environment from being built, and the refreshed fields must
+    still match MuJoCo's.
+    """
+    pytest.importorskip("mujoco_warp")
+    spec = mujoco.MjSpec.from_file(DummyHumamoidEnv.get_default_xml_file_path())
+    spec.add_mesh(name="tetrahedron", uservert=[0, 0, 0, 0.05, 0, 0, 0, 0.05, 0, 0, 0, 0.05])
+    # a collision bit of their own, so the two only collide with each other
+    spec.body("torso").add_geom(type=mujoco.mjtGeom.mjGEOM_MESH, meshname="tetrahedron", margin=0,
+                                contype=2, conaffinity=2)
+    spec.body("left_thigh").add_geom(type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.02, 0.05, 0], margin=0,
+                                     contype=2, conaffinity=2)
+    xml_path = tmp_path / "humanoid_cylinder_mesh.xml"
+    xml_path.write_text(spec.to_xml())
+
+    env = DummyHumamoidEnv(spec=xml_path.as_posix(), enable_mjx=True, use_mjwarp=True, refresh_kinematics=True,
+                           horizon=10, gamma=0.99, n_envs=1)
+
+    key = jax.random.PRNGKey(0)
+    state = env.mjx_reset(key)
+    state = jax.jit(env.mjx_step)(state, env.sample_action_space(key))
+
+    data = mujoco.MjData(env._model)
+    data.qpos, data.qvel = np.asarray(state.data.qpos), np.asarray(state.data.qvel)
+    mujoco.mj_forward(env._model, data)
+    for field in ("xpos", "xquat", "geom_xpos", "site_xpos", "subtree_com", "cvel"):
+        np.testing.assert_allclose(np.asarray(getattr(state.data, field)), getattr(data, field),
+                                   atol=1e-5, err_msg=field)

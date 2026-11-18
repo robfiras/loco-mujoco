@@ -107,8 +107,7 @@ class Mjx(Mujoco):
             # `nconmax` is the deprecated name of `naconmax`; MJX 4 no longer accepts it
             naconmax = nconmax if naconmax is None else naconmax
             self._first_data = mjx.make_data(self._model, impl='warp', naconmax=naconmax, njmax=njmax)
-            self._kin_sys = mjx.put_model(self._model, impl='jax')
-            self._kin_data = mjx.make_data(self._model, impl='jax')
+            self._kin_sys, self._kin_data = self._make_kinematics_copy()
             impl = self._first_data._impl
             naccdmax = impl.naconmax if naccdmax is None else naccdmax
             self._first_data = self._first_data.replace(_impl=impl.replace(naccdmax=naccdmax))
@@ -324,6 +323,23 @@ class Mjx(Mujoco):
         kin = self._kin_data.replace(qpos=data.qpos, qvel=data.qvel)
         kin = mjx.com_vel(self._kin_sys, mjx.com_pos(self._kin_sys, mjx.kinematics(self._kin_sys, kin)))
         return data.replace(**{f: getattr(kin, f) for f in self._KINEMATIC_FIELDS})
+
+    def _make_kinematics_copy(self) -> Tuple[Model, Data]:
+        """
+        Builds the JAX copy of the model that the kinematics are computed on under MjWarp. MJX implements
+        com_pos and com_vel for the JAX backend only. The copy has no collisions, contact pairs or sensors:
+        the kinematics do not read them, and the JAX backend rejects some that MjWarp supports, such as
+        cylinder-mesh collisions.
+
+        """
+        spec = self._mjspec.copy()
+        for geom in spec.geoms:
+            geom.contype = 0
+            geom.conaffinity = 0
+        for element in spec.pairs + spec.sensors:
+            spec.delete(element)
+        model = spec.compile()
+        return mjx.put_model(model, impl='jax'), mjx.make_data(model, impl='jax')
 
     def _mjx_create_observation(self, model: Model,
                                 data: Data,
