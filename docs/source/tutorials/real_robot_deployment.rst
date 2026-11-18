@@ -5,16 +5,17 @@ Real Robot Deployment
 
 This tutorial describes the path from a policy trained in LocoMuJoCo to the same policy
 running on a real humanoid. The reference implementation is
-`LocoMuJoCo Real <https://github.com/robfiras/loco-mujoco-real>`__, an extension package
-with environments for the Unitree G1 (``G1Real``) and the AgiBot X2 Ultra
-(``X2UltraReal``), a motion-tracking task, and the deployment tools in its
-``examples/deployment`` folder. The commands below are run from that repository.
+`LocoMuJoCo Real <https://github.com/robfiras/loco-mujoco-real>`__, a companion repository
+with deployable environments for the Unitree G1 (``G1Real``) and the AgiBot X2 Ultra
+(``X2UltraReal``), ready-to-run training configs for motion tracking with PPO and with
+SuperMimic in its ``training`` folder, and the deployment tools in its ``deployment``
+folder. The commands below are run from that repository; ``<robot>`` is ``g1`` or ``x2``.
 
 .. note::
 
     The deployment tools are under active development. The stages and the reasons for them
     are stable; script names and options may still change. The README files in
-    ``examples/deployment`` of LocoMuJoCo Real are the authority on the details.
+    ``deployment`` of LocoMuJoCo Real are the authority on the details.
 
     Status: both pipelines, the Unitree G1 and the AgiBot X2 Ultra, have been run on the
     robot.
@@ -114,15 +115,20 @@ domain randomization example in :doc:`customizing_environments`.
 standing pose. The controller then never has to hold, or switch clips in, a pose in
 mid-stride.
 
-Training itself is unchanged:
+Training itself is unchanged. LocoMuJoCo Real has a config per robot for PPO
+(``training/<robot>/conf.yaml``) and for SuperMimic (``training/<robot>/supermimic.yaml``),
+both on the same deployable environment:
 
 .. code-block:: bash
 
-    python examples/training/train.py
+    python training/<robot>/train.py
 
 .. code-block:: bash
 
-    python examples/training/train.py env=mjx_x2_ultra_real
+    python training/<robot>/train_supermimic.py
+
+Every later stage takes the checkpoint of either algorithm, ``PPOJax_saved.pkl`` or
+``SuperMimicJax_saved.pkl``.
 
 
 Stage 2: Export the Policy to a Bundle
@@ -142,7 +148,7 @@ JAX. The checkpoint is therefore exported to a **bundle**, a folder that is run 
 
 .. code-block:: bash
 
-    python examples/deployment/export_ppo_bundle.py --checkpoint outputs/<run>/PPOJax_saved.pkl --output deploy_bundles/<name>
+    python deployment/export_bundle.py --checkpoint outputs/<run>/PPOJax_saved.pkl --output deploy_bundles/<name>
 
 The runtime library (``lmj_deploy.py``) rebuilds the actor's observation by hand from a
 ``MjData``, applies the frozen normalizer and the network, and maps the action to joint
@@ -166,7 +172,7 @@ and compares every observation term, the action and the joint targets:
 
 .. code-block:: bash
 
-    python examples/deployment/validate_bundle.py --bundle deploy_bundles/<name> --checkpoint outputs/<run>/PPOJax_saved.pkl
+    python deployment/validate_bundle.py --bundle deploy_bundles/<name> --checkpoint outputs/<run>/PPOJax_saved.pkl
 
 It must print ``PASS``. The differences are at the level of floating-point error
 (``1e-7`` and below). Run it again whenever the observation, the control function or the
@@ -181,7 +187,7 @@ lockstep:
 
 .. code-block:: bash
 
-    python examples/deployment/sim2sim_mujoco.py --bundle deploy_bundles/<name> --viewer
+    python deployment/rollout_mujoco.py --bundle deploy_bundles/<name> --viewer
 
 The ``--plant`` option selects the simulated robot:
 
@@ -219,22 +225,22 @@ protocol; the **controller** is the program that will later drive the robot, unc
      - controller
    * - Unitree G1
      - Unitree SDK 2 (DDS), ``LowState`` / ``LowCmd``
-     - ``sim2sim_dds_bridge.py``
-     - ``deploy_g1.py``
+     - ``g1/sim2sim_bridge.py``
+     - ``g1/deploy_g1.py``
    * - AgiBot X2 Ultra
      - ROS 2 Humble, AimDK joint and IMU topics
-     - ``sim2sim_aimdk_bridge.py``
-     - ``deploy_x2.py``
+     - ``x2/sim2sim_bridge.py``
+     - ``x2/deploy_x2.py``
 
 In two terminals:
 
 .. code-block:: bash
 
-    python examples/deployment/sim2sim_dds_bridge.py --bundle deploy_bundles/<name> --viewer
+    python deployment/g1/sim2sim_bridge.py --bundle deploy_bundles/<name> --viewer
 
 .. code-block:: bash
 
-    python examples/deployment/deploy_g1.py --bundle deploy_bundles/<name> --motion <clip>
+    python deployment/g1/deploy_g1.py --bundle deploy_bundles/<name> --motion <clip>
 
 The simulated robot hangs from an elastic band, like the real one from its crane, and the
 start goes as it will on the robot: the controller ramps to the first pose of the clip and
@@ -307,10 +313,10 @@ well: the policy keeps running but tracks the standing pose instead of the clip.
 Before the controller can command the joints, the vendor's own controller has to release
 them. How that is done, the network setup and the required software differ per robot:
 
-- **AgiBot X2 Ultra**: ``examples/deployment/X2_ROBOT_GUIDE.md`` in LocoMuJoCo Real covers
+- **AgiBot X2 Ultra**: ``deployment/x2/X2_ROBOT_GUIDE.md`` in LocoMuJoCo Real covers
   the network, ROS 2 and ``aimdk_msgs``, the switch to the developer mode, the topics, the
   gains and measurements taken on the robot.
-- **Unitree G1**: ``examples/deployment/README.md`` covers the Unitree SDK setup and the
+- **Unitree G1**: ``deployment/g1/README.md`` covers the Unitree SDK setup and the
   controller.
 
 
@@ -322,7 +328,7 @@ Stages 1 to 4 do not depend on the robot's middleware. A new robot needs:
 1. an environment and a robot conf (:ref:`adding_new_robot_tutorial`), with position
    actuators, armature and a default-pose keyframe,
 2. a small transport module that reads the robot's state into a ``MjData`` and writes
-   joint targets with gains (compare ``lmj_dds.py`` and ``lmj_aimdk.py``),
+   joint targets with gains (compare ``g1/lmj_dds.py`` and ``x2/lmj_aimdk.py``),
 3. a bridge that makes MuJoCo speak the same protocol, and
 4. a controller with the start-up sequence, the safety checks and the operator input.
 

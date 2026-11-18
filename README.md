@@ -9,13 +9,15 @@
 [//]: # ([![PyPI]&#40;https://img.shields.io/pypi/v/loco-mujoco&#41;]&#40;https://pypi.org/project/loco-mujoco/&#41;)
 
 > 🚀 **Latest News:**
-> A **new release (v1.1)** just dropped! 🎉  
-> **New:** MJX now supports the **MjWarp** backend for even faster parallel simulation on compatible GPUs.
+> A **new release (v1.2)** just dropped! 🎉  
+> **New:** LocoMuJoCo now includes **SuperMimic** and supports **real-robot deployment** on the
+> **AgiBot X2 Ultra** and the **Unitree G1** through
+> [LocoMuJoCo Real](https://github.com/robfiras/loco-mujoco-real).
 
 
 **LocoMuJoCo** is an **imitation learning benchmark** specifically designed for **whole-body control**.  
 It features a diverse set of environments, including **quadrupeds**, **humanoids**, and **(musculo-)skeletal human models**,
-each provided with comprehensive datasets (over 22,000 samples per humanoid).
+each provided with comprehensive datasets.
 
 Although primarily focused on imitation learning, LocoMuJoCo also supports custom reward function classes,  
 making it suitable for pure reinforcement learning as well.
@@ -27,12 +29,13 @@ making it suitable for pure reinforcement learning as well.
 ### Key Advantages 
 ✅ Supports **MuJoCo** (single environment) and **MJX/MJWarp** (parallel environments) \
 ✅ Includes **12 humanoid and 4 quadruped environments**, featuring 4 **biomechanical human models** \
-✅ Clean single-file JAX algorithms for quick benchmarking (**PPO**, **GAIL**, **AMP**, **DeepMimic**, **SuperMimic**)\
+✅ Clean single-file JAX algorithms for quick benchmarking (**SuperMimic**, **PPO**, **GAIL**, **AMP**, **DeepMimic**)\
 ✅ Combined training and environment into one JIT‑compiled function for lightning‑fast training 🚀 \
 ✅ **Motion capture datasets** (AMASS, LAFAN1, native LocoMuJoCo) retargeted for each humanoid \
 ✅ **Robot-to-robot retargeting** allows to retarget any existing dataset from one robot to another \
 ✅ Powerful **trajectory comparison metrics** including dynamic time warping and discrete Fréchet distance, all in JAX \
 ✅ Built-in **domain and terrain randomization** \
+✅ **Real-robot deployment** with [LocoMuJoCo Real](https://github.com/robfiras/loco-mujoco-real): deployable training setups for PPO and SuperMimic, and the tools to take a policy to the robot \
 ✅ Modular design: define, swap, and reuse components like observation types, reward functions, terminal state handlers, and domain randomization \
 ✅ [Documentation](https://loco-mujoco.readthedocs.io/)
 
@@ -167,6 +170,28 @@ env, traj = ImitationFactory.make(
 ```
 
 For a complete example, see `examples/tutorials/02_creating_mjx_env.py`.
+
+---
+
+## Real Robot Deployment
+
+[LocoMuJoCo Real](https://github.com/robfiras/loco-mujoco-real) is the companion repository for taking
+policies trained in LocoMuJoCo to a real robot. It currently covers the **Unitree G1** and the **AgiBot X2 Ultra**
+and provides:
+
+- **deployable training setups**: for each robot an environment with the observations, rewards and sim-to-real
+  randomization it needs, and ready-to-run training configs for motion tracking with **PPO** and with **SuperMimic**,
+- **deployment tools**: export of a trained policy to a bundle that runs with only `numpy` and `mujoco`, validation
+  of the bundle against the training environment, rollouts in plain MuJoCo, sim-to-sim over the robot's middleware,
+  and the controller that runs on the robot.
+
+```bash
+python training/<robot>/train.py             # PPO
+python training/<robot>/train_supermimic.py  # SuperMimic
+```
+
+The [real robot deployment tutorial](https://loco-mujoco.readthedocs.io/en/latest/source/tutorials/real_robot_deployment.html)
+explains the stages from training to the robot.
 
 ---
 

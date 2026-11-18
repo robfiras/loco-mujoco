@@ -19,15 +19,16 @@ Welcome to LocoMuJoCo!
 Latest News
 ===========
 
-🚀 **New in Release v1.1**
+🚀 **New in Release v1.2**
 
-MJX now supports the **MjWarp** backend for even faster parallel simulation on compatible GPUs.
+LocoMuJoCo now includes **SuperMimic** and supports **real-robot deployment** on the **AgiBot X2 Ultra** and the **Unitree G1** through
+`LocoMuJoCo Real <https://github.com/robfiras/loco-mujoco-real>`__.
 
 Overview
 ========
 
 **LocoMuJoCo** is an **imitation learning benchmark** tailored for **whole-body control**.
-It includes a diverse range of environments—**quadrupeds**, **humanoids**, and **(musculo-)skeletal human models**—each equipped with comprehensive datasets (22k+ samples per humanoid).
+It includes a diverse range of environments—**quadrupeds**, **humanoids**, and **(musculo-)skeletal human models**—each equipped with comprehensive datasets.
 
 While designed for imitation learning, it also supports **pure reinforcement learning** with custom reward classes.
 
@@ -39,12 +40,14 @@ Key Advantages
 
 - ✅ Supports **MuJoCo** (single) and **MJX/MjWarp** (parallel) environments
 - ✅ Includes **12 humanoid + 4 quadruped environments**, with **4 biomechanical human models**
-- ✅ Clean, single-file **JAX algorithms**: PPO, GAIL, AMP, DeepMimic
+- ✅ Clean, single-file **JAX algorithms**: SuperMimic, PPO, GAIL, AMP, DeepMimic
 - ✅ **22,000+ motion capture datasets** (AMASS, LAFAN1, native)
 - ✅ **Robot-to-robot retargeting**
 - ✅ Trajectory comparison metrics (e.g., DTW, Fréchet distance) implemented in **JAX**
 - ✅ **Gymnasium interface**
 - ✅ Built-in **domain and terrain randomization**
+- ✅ **Real-robot deployment** with `LocoMuJoCo Real <https://github.com/robfiras/loco-mujoco-real>`__: deployable
+  training setups for PPO and SuperMimic, and the tools to take a policy to the robot (:ref:`tutorial <real_robot_deployment_tutorial>`)
 - ✅ **Modular design**: easily swap components (observations, rewards, terminal handlers, etc.)
 - ✅ Comprehensive `documentation <https://loco-mujoco.readthedocs.io/>`__
 
