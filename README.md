@@ -4,9 +4,8 @@
 
 ![continuous integration](https://github.com/robfiras/loco-mujoco/actions/workflows/continuous_integration.yml/badge.svg?branch=dev)
 [![Documentation Status](https://app.readthedocs.org/projects/loco-mujoco/badge/?version=latest)](https://loco-mujoco.readthedocs.io/en/latest/?badge=latest)
+[![PyPI](https://img.shields.io/pypi/v/loco-mujoco)](https://pypi.org/project/loco-mujoco/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-[//]: # ([![PyPI]&#40;https://img.shields.io/pypi/v/loco-mujoco&#41;]&#40;https://pypi.org/project/loco-mujoco/&#41;)
 
 > 🚀 **Latest News:**
 > A **new release (v1.2)** just dropped! 🎉  
@@ -43,18 +42,6 @@ making it suitable for pure reinforcement learning as well.
 
 ## Installation
 
-[//]: # (You have the choice to install the latest release via PyPI by running )
-
-[//]: # ()
-[//]: # ()
-[//]: # (```bash)
-
-[//]: # ()
-[//]: # (pip install loco-mujoco )
-
-[//]: # ()
-[//]: # (```)
-
 LocoMuJoCo requires **Python 3.10 or newer**. We recommend a fresh environment, for example with conda:
 
 ```bash
@@ -62,7 +49,14 @@ conda create -n loco-mujoco python=3.11
 conda activate loco-mujoco
 ```
 
-Clone this repo and do an editable installation:
+Install the latest release from PyPI:
+
+```bash
+pip install loco-mujoco
+```
+
+Or, to run the examples, change the code or use the SMPL/AMASS extras, clone this repo and do an editable
+installation:
 
 ```bash
 git clone https://github.com/robfiras/loco-mujoco.git
