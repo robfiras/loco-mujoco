@@ -45,6 +45,8 @@ dynamic = ["version"]
 
 [tool.setuptools.packages.find]
 where = ["."]
+# only the library: without this, docs/ and scripts/ are installed as top-level packages
+include = ["loco_mujoco*"]
 
 [tool.coverage.run]
 source = ["loco_mujoco"]
