@@ -376,6 +376,7 @@ class BestTrainStates:
             metrics=jnp.full((n,), -jnp.inf),
             iterations=jnp.zeros((n,)),
             cur_worst_perf=-jnp.inf,
+            step=0,
             n=n,
             size=0
         )

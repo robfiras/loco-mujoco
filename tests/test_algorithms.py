@@ -145,6 +145,95 @@ def test_PPO_adaptive_kl_lr(ppo_rl_config):
     assert jnp.all(jnp.isfinite(lr))
 
 
+def _tiny_ppo_config(ppo_rl_config):
+    config = OmegaConf.create(OmegaConf.to_container(ppo_rl_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.total_timesteps = 64
+        config.experiment.num_envs = 4
+        config.experiment.num_steps = 8
+        config.experiment.num_minibatches = 32
+        config.experiment.validation.num = 1
+    return config
+
+
+def test_PPO_anneal_lr(ppo_rl_config):
+    """anneal_lr used to read the learning rate from the top level of the config
+    (config.lr), which does not exist. The learning rate has to decay linearly."""
+    config = _tiny_ppo_config(ppo_rl_config)
+    with open_dict(config.experiment):
+        config.experiment.anneal_lr = True
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = PPOJax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(PPOJax.build_train_fn(env, agent_conf))
+
+    result = train_fn(rng, agent_state, traj)
+    lr = result["training_metrics"].learning_rate
+    assert lr.shape[0] == 2     # 64 timesteps / (4 envs * 8 steps)
+    assert jnp.all(jnp.isfinite(lr))
+    assert jnp.all(lr <= config.experiment.lr) and jnp.all(lr >= 0.0)
+    assert lr[1] < lr[0]
+
+
+@pytest.mark.parametrize("algorithm", ("GAIL", "AMP"))
+def test_Imitation_anneal_lr_optimizer(algorithm, imitation_config):
+    """Same bug as in PPO: the annealed optimizer of GAIL/AMP read config.lr."""
+    config = OmegaConf.create(OmegaConf.to_container(imitation_config, resolve=True))
+    with open_dict(config.experiment):
+        config.experiment.anneal_lr = True
+        config.experiment.num_updates = 10
+    alg_cls = GAILJax if algorithm == "GAIL" else AMPJax
+
+    tx, disc_tx = alg_cls._get_optimizer(config)
+    params = {"w": jnp.ones(3)}
+    opt_state = tx.init(params)
+    updates, _ = tx.update({"w": jnp.ones(3)}, opt_state, params)
+    assert jnp.all(jnp.isfinite(updates["w"]))
+
+
+def test_validation_schedule():
+    """validation.num = 0 disables validation instead of dividing by zero."""
+    schedule = PPOJax._validation_schedule
+    # unchanged behaviour for regular settings
+    assert schedule(100, 10) == (10, 10)
+    assert schedule(10, 3) == (3, 3)
+    assert schedule(10, 4) == (2, 5)
+    # disabled: the interval is never reached
+    assert schedule(100, 0) == (101, 0)
+    # more validation runs requested than updates: validate after every update
+    assert schedule(5, 10) == (1, 5)
+
+
+def test_PPO_validation_disabled(ppo_rl_config):
+    config = _tiny_ppo_config(ppo_rl_config)
+    with open_dict(config.experiment):
+        config.experiment.validation.num = 0
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = PPOJax.init_agent_conf(env, config)
+    assert agent_conf.config.experiment.validation.num == 0
+    assert agent_conf.config.experiment.validation_interval > agent_conf.config.experiment.num_updates
+
+    rng = jax.random.PRNGKey(0)
+    agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(PPOJax.build_train_fn(env, agent_conf))
+    result = train_fn(rng, agent_state, traj)
+    assert jnp.all(jnp.isfinite(result["training_metrics"].mean_value_loss))
+
+
+def test_BestTrainStates_create():
+    """BestTrainStates.create did not pass the required field ``step``."""
+    from loco_mujoco.algorithms.common.dataclasses import BestTrainStates
+    best = BestTrainStates.create({"w": jnp.ones(3)}, n=4)
+    assert best.train_states["w"].shape == (4, 3)
+    assert best.metrics.shape == (4,) and best.iterations.shape == (4,)
+    assert best.step == 0 and best.n == 4 and best.size == 0
+
+
 def test_PPO_in_training_eval_and_debug(imitation_config):
     """Drive PPO's in-training validation path and the debug callback.
 
