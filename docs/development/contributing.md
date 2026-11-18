@@ -1,3 +1,2 @@
-# Contributing
-
-This page is being written.
+```{include} ../../CONTRIBUTING.md
+```

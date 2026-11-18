@@ -5,7 +5,7 @@ html_theme.sidebar_secondary.remove: true
 # LocoMuJoCo
 
 <div class="lmj-hero">
-  <img class="lmj-hero-logo" src="_static/logo.png" alt="LocoMuJoCo">
+  <img class="lmj-hero-logo dark-light" src="_static/logo.png" alt="LocoMuJoCo">
   <p class="lmj-tagline">Imitation and reinforcement learning for whole-body control,
   from motion capture data to the real robot.</p>
   <p class="lmj-sub">16 humanoids, quadrupeds and musculoskeletal human models. Retargeted motion capture

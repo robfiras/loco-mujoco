@@ -13,12 +13,23 @@ For explanations and examples, start with the [user guide](../user_guide/index.m
 | {mod}`loco_mujoco.algorithms` | JAX implementations of PPO, GAIL, AMP, SuperMimic and the experimental algorithms. |
 | {mod}`loco_mujoco.smpl` | SMPL-based human-to-robot and robot-to-robot retargeting. |
 | {mod}`loco_mujoco.utils` | Trajectory metrics, dataset path helpers, logging and video utilities. |
+| {mod}`loco_mujoco.datasets.humanoids.LAFAN1` | Loader for the LAFAN1 dataset. |
+| {mod}`loco_mujoco.datasets.data_generation` | Helpers that complete a trajectory with forward kinematics. |
+
+## Top-level functions
+
+```{eval-rst}
+.. autofunction:: loco_mujoco.get_registered_envs
+
+.. autofunction:: loco_mujoco.get_variable
+```
+
+## Packages
 
 ```{eval-rst}
 .. autosummary::
    :toctree: generated
    :recursive:
-   :caption: Packages
 
    loco_mujoco.core
    loco_mujoco.environments
@@ -26,4 +37,6 @@ For explanations and examples, start with the [user guide](../user_guide/index.m
    loco_mujoco.algorithms
    loco_mujoco.smpl
    loco_mujoco.utils
+   loco_mujoco.datasets.humanoids.LAFAN1
+   loco_mujoco.datasets.data_generation
 ```

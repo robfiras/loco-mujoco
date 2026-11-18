@@ -34,7 +34,7 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "_legacy", "_scripts", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "_scripts", "Thumbs.db", ".DS_Store"]
 source_suffix = {".md": "markdown", ".rst": "restructuredtext"}
 root_doc = "index"
 
@@ -53,6 +53,33 @@ myst_heading_anchors = 3
 myst_substitutions = {"release": release}
 
 # -- API reference -----------------------------------------------------------
+
+
+def _unshadow_submodules():
+    """
+    Make ``getattr(package, "submodule")`` return the submodule for every submodule of ``loco_mujoco``.
+
+    A package that does ``from .mujoco import *`` re-exports the names imported in that file, so
+    ``loco_mujoco.core.utils.mujoco`` ends up pointing to the top-level ``mujoco`` package instead of the
+    submodule. autosummary resolves modules by attribute access and would document the wrong one.
+    """
+    import importlib
+    import pkgutil
+
+    for info in pkgutil.walk_packages(loco_mujoco.__path__, prefix="loco_mujoco.", onerror=lambda name: None):
+        if info.name.startswith("loco_mujoco.datasets"):
+            continue  # data conversion scripts, not part of the API reference
+        try:
+            module = importlib.import_module(info.name)
+        except Exception:
+            continue
+        parent_name, _, child = info.name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if parent is not None and getattr(parent, child, None) is not module:
+            setattr(parent, child, module)
+
+
+_unshadow_submodules()
 
 autosummary_generate = True
 autosummary_imported_members = False
@@ -171,3 +198,5 @@ linkcheck_ignore = [
     r"https://mano\.is\.tue\.mpg\.de.*",
 ]
 linkcheck_timeout = 20
+# GitHub renders heading anchors with JavaScript, so they cannot be checked.
+linkcheck_anchors_ignore_for_url = [r"https://github\.com/.*"]

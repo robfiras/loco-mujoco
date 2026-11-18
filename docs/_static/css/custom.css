@@ -273,3 +273,18 @@ table.autosummary td {
 table.autosummary td:first-child {
   white-space: nowrap;
 }
+
+/* The landing page shows the logo instead of a text title. */
+.bd-article section:has(> .lmj-hero) > h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* Transparent artwork keeps its transparency in dark mode. */
+html[data-theme="dark"] .bd-content img.lmj-hero-logo {
+  background-color: transparent !important;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.35));
+}
