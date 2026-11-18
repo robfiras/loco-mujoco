@@ -2,7 +2,7 @@ import os
 import argparse
 
 from loco_mujoco import TaskFactory
-from loco_mujoco.algorithms.experimental import SACJax
+from loco_mujoco.algorithms.experimental import TD3Jax
 
 from omegaconf import OmegaConf
 
@@ -10,14 +10,14 @@ os.environ['XLA_FLAGS'] = (
     '--xla_gpu_triton_gemm_any=True ')
 
 # Set up argument parser
-parser = argparse.ArgumentParser(description='Run evaluation with SACJax.')
+parser = argparse.ArgumentParser(description='Run evaluation with TD3Jax.')
 parser.add_argument('--path', type=str, required=True, help='Path to the agent pkl file')
 parser.add_argument('--use_mujoco', action='store_true', help='Use MuJoCo for evaluation instead of Mjx')
 args = parser.parse_args()
 
 # Use the path from command line arguments
 path = args.path
-agent_conf, agent_state = SACJax.load_agent(path)
+agent_conf, agent_state = TD3Jax.load_agent(path)
 config = agent_conf.config
 
 # get task factory
@@ -32,9 +32,9 @@ env, traj = factory.make(**config.experiment.env_params, **config.experiment.tas
 # Determine which evaluation environment to run
 if args.use_mujoco:
     # run eval mujoco
-    SACJax.play_policy(env, agent_conf, agent_state, deterministic=False, n_steps=10000, n_envs=1,
+    TD3Jax.play_policy(env, agent_conf, agent_state, deterministic=False, n_steps=10000, n_envs=1,
                        record=True, use_mujoco=True, traj=traj)
 else:
     # run eval mjx
-    SACJax.play_policy(env, agent_conf, agent_state, deterministic=False, n_steps=10000, n_envs=1, record=True,
+    TD3Jax.play_policy(env, agent_conf, agent_state, deterministic=False, n_steps=10000, n_envs=1, record=True,
                        traj=traj)

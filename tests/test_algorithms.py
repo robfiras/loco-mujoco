@@ -861,6 +861,29 @@ def test_TD3_save_and_load_agent(td3_config, tmp_path):
     assert _params_allclose(agent_state.critic_state.run_stats, loaded_state.critic_state.run_stats)
 
 
+def test_TD3_training_in_chunks(td3_config):
+    """The pattern of examples/training_examples/jax_rl_mimic_td3/experiment_resume.py: the agent state
+    returned by one call of the training function (with the replay buffer) is passed to the next call."""
+    config = OmegaConf.create(OmegaConf.to_container(td3_config, resolve=True))
+
+    factory = TaskFactory.get_factory_cls(config.experiment.task_factory.name)
+    env, traj = factory.make(**config.experiment.env_params, **config.experiment.task_factory.params)
+    agent_conf = TD3Jax.init_agent_conf(env, config)
+    rng = jax.random.PRNGKey(0)
+    agent_state = TD3Jax.init_agent_state(env, agent_conf, rng)
+    train_fn = jax.jit(TD3Jax.build_train_fn(env, agent_conf))
+
+    max_timesteps = []
+    for _ in range(2):
+        out = train_fn(rng, agent_state, traj)
+        agent_state = out["agent_state"]
+        max_timesteps.append(float(out["training_metrics"].max_timestep[-1]))
+        assert all(jnp.all(jnp.isfinite(x)) for x in jax.tree_util.tree_leaves(agent_state.actor_state.params))
+
+    # the second chunk continues the first one
+    assert max_timesteps[1] > max_timesteps[0]
+
+
 def test_TD3_pessimism_penalty(td3_config):
     """With `pessimism_penalty` set, TD3 aggregates the twin Q-targets with
     Motivo-style ensemble pessimism (mean - k*|Q1-Q2|) instead of min(Q1,Q2).
