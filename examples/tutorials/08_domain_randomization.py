@@ -24,8 +24,6 @@ randomization_config = {
     # joint properties
     "randomize_joint_damping": True,
     "joint_damping_range": [0.3, 1.5],
-    "randomize_joint_stiffness": True,
-    "joint_stiffness_range": [0.9, 1.1],
     "randomize_joint_friction_loss": True,
     "joint_friction_loss_range": [0.0, 0.2],
     "randomize_joint_armature": True,

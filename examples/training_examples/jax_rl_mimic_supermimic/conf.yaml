@@ -47,7 +47,9 @@ experiment:
     # domain_randomization_type: DefaultRandomizer
     # domain_randomization_params:
     #   randomize_geom_friction_tangential: true
+    #   geom_friction_tangential_range: [0.8, 1.2]
     #   add_joint_pos_noise: true
+    #   joint_pos_noise_scale: 0.003
 
   # ---- observation routing (default: full observation for all three) ----
   # actor_obs_group: <name>
