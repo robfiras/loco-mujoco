@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(".."))
 
 
 project = 'LocoMuJoCo'
-copyright = '2025, Firas Al-Hafez'
+copyright = '2023-2026, Firas Al-Hafez'
 author = 'Firas Al-Hafez'
 release = 'v1.2.0'
 

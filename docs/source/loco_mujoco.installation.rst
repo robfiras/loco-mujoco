@@ -113,7 +113,7 @@ Environments
 An overview of all environments is available `here <https://github.com/robfiras/loco-mujoco/tree/dev/loco_mujoco/environments>`_
 and in more detail in the `documentation <https://loco-mujoco.readthedocs.io/>`_.
 
-.. image:: https://github.com/user-attachments/assets/bf5eb128-eedc-49f7-a64c-cef0072d53f3
+.. image:: ../../imgs/lmj_envs.gif
    :align: center
 
 Stay tuned — more coming soon!

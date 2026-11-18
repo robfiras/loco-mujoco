@@ -61,8 +61,8 @@ completely custom domain randomization modules using our interface as shown belo
 Terrains
 ---------------------------
 
-We also provide a terrain interface allowing to define custom terrain types. For now,
-we only support flat and rough terrains, but any custom terrain can be implemented by following
+We also provide a terrain interface allowing to define custom terrain types. LocoMuJoCo comes with
+a flat terrain, a rough terrain and a terrain loaded from a height map (see :doc:`../core/terrain` for an overview), and any custom terrain can be implemented by following
 the interface. In the example below, we show how to change to the rough terrain. Note that
 the free joint xy-position of the robot is reset to the origin once the border is reached.
 All other parts of the simulation state remain unchanged.
