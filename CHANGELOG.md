@@ -27,6 +27,9 @@ Every version below is a git tag and a
 - Docstrings of the public API were completed; coverage is enforced with `interrogate` (threshold in
   `pyproject.toml`). No behaviour changed.
 - `README.md` and the package READMEs were shortened and now point to the documentation site.
+- Linux is stated as the supported operating system, in the installation guide and in the package
+  classifiers (`Operating System :: POSIX :: Linux` instead of `OS Independent`). Continuous integration
+  runs on Linux only; macOS and Windows are not tested.
 
 ### Removed
 
