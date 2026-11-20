@@ -92,7 +92,7 @@ Take a trained policy to the Unitree G1 or the AgiBot X2 Ultra with LocoMuJoCo R
 :::
 ::::
 
-## What is in the box
+## What LocoMuJoCo provides
 
 ::::{grid} 1 2 3 3
 :gutter: 3

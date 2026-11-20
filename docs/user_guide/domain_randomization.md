@@ -152,5 +152,5 @@ ObservationType.ModelInfo("masses", model_attributes="body_mass", group="critic"
 - [Observations](observations.md) for groups and `allow_randomization`.
 - [Control functions](control_functions.md) for the PD controller whose gains are randomized.
 - [Writing custom modules](custom_modules.md#domain-randomizers) for your own randomizer.
-- [Sim-to-real](../sim2real/index.md) for the randomization used for the real-robot policies.
+- [Sim-to-real](../sim2real/training.md#randomization) for the randomization used for the real-robot policies.
 - API: {mod}`loco_mujoco.core.domain_randomizer.base`, {mod}`loco_mujoco.core.domain_randomizer.default`.

@@ -123,7 +123,7 @@ to return fewer sites.
 
 Every actuator in the model becomes one action dimension by default. For a policy that is meant for a real
 robot, use position actuators with the gains of the real joint drives, see
-[sim-to-real deployment](../sim2real/index.md).
+[sim-to-real deployment](../sim2real/training.md#actuation).
 
 ```{note}
 If the model defines a default standing pose, store it as a `<keyframe>` and not as joint `ref` values. `ref`
