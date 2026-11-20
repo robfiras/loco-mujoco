@@ -215,31 +215,28 @@ figure.lmj-figure figcaption,
   margin: 0.25rem 0.3rem;
 }
 
-.lmj-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 0.8rem;
-  margin: 1.6rem 0 2rem 0;
+/* Looping videos that replace GIFs: sharp at any width and smaller than a GIF of the same quality. */
+.lmj-media {
+  margin: 1.2rem auto 2rem auto;
 }
 
-.lmj-stat {
-  border: 1px solid var(--lmj-card-border);
-  border-radius: 10px;
-  padding: 0.9rem 0.6rem;
-  text-align: center;
+.lmj-media-narrow {
+  max-width: 85%;
 }
 
-.lmj-stat .lmj-stat-num {
+.lmj-media video.lmj-video {
   display: block;
-  font-size: 1.7rem;
-  font-weight: 700;
-  color: var(--pst-color-primary);
-  line-height: 1.2;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: var(--pst-color-surface);
 }
 
-.lmj-stat .lmj-stat-label {
-  font-size: 0.85rem;
-  color: var(--lmj-muted);
+@media (max-width: 720px) {
+  .lmj-media-narrow {
+    max-width: 100%;
+  }
 }
 
 /* The landing page uses the full width: no left sidebar. */

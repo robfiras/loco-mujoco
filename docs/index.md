@@ -17,27 +17,35 @@ html_theme.sidebar_secondary.remove: true
   </div>
 </div>
 
-```{image} ../imgs/main_lmj.gif
-:alt: Humanoid robots and human models of LocoMuJoCo replaying motion capture data
-:align: center
-:width: 100%
-```
-
-<div class="lmj-stats">
-  <div class="lmj-stat"><span class="lmj-stat-num">16</span><span class="lmj-stat-label">embodiments</span></div>
-  <div class="lmj-stat"><span class="lmj-stat-num">3</span><span class="lmj-stat-label">simulation backends</span></div>
-  <div class="lmj-stat"><span class="lmj-stat-num">10</span><span class="lmj-stat-label">JAX algorithms</span></div>
-  <div class="lmj-stat"><span class="lmj-stat-num">3</span><span class="lmj-stat-label">motion capture sources</span></div>
-  <div class="lmj-stat"><span class="lmj-stat-num">2</span><span class="lmj-stat-label">robots deployed on hardware</span></div>
+<div class="lmj-media">
+  <video class="lmj-video" autoplay loop muted playsinline poster="_static/media/lmj_overview_poster.jpg" aria-label="Humanoid robots and human models of LocoMuJoCo replaying motion capture data">
+    <source src="_static/media/lmj_overview.mp4" type="video/mp4">
+  </video>
 </div>
 
 ## Install
+
+::::{tab-set}
+
+:::{tab-item} From PyPI
+
+```bash
+pip install loco-mujoco
+```
+:::
+
+:::{tab-item} From source
+
+Clone the repository to also get the examples, tutorials and training configs:
 
 ```bash
 git clone https://github.com/robfiras/loco-mujoco.git
 cd loco-mujoco
 pip install -e .
 ```
+:::
+
+::::
 
 Then replay a motion capture clip on a humanoid robot:
 
@@ -157,11 +165,11 @@ Deployable training setups and the tools to run a policy on the robot.
 
 ## Real-robot deployment
 
-```{image} https://raw.githubusercontent.com/robfiras/loco-mujoco-real/main/assets/x2_sim2real.gif
-:alt: The AgiBot X2 Ultra running a SuperMimic tracking policy, on the robot and in simulation
-:align: center
-:width: 80%
-```
+<div class="lmj-media lmj-media-narrow">
+  <video class="lmj-video" autoplay loop muted playsinline poster="_static/media/x2_sim2real_poster.jpg" aria-label="The AgiBot X2 Ultra running a SuperMimic tracking policy, on the robot and in simulation">
+    <source src="_static/media/x2_sim2real.mp4" type="video/mp4">
+  </video>
+</div>
 
 <p class="lmj-caption">A SuperMimic tracking policy on the AgiBot X2 Ultra, on the robot and in simulation.</p>
 

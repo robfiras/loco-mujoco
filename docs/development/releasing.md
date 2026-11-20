@@ -113,7 +113,7 @@ while 0.2.1 and 1.0.0 exist on PyPI without a tag. *Recommended:* keep the two i
 upload per tag.
 
 The examples, tutorials and tests are not part of the PyPI package. Users who want them clone the
-repository, which is why the installation guide uses an editable install.
+repository, which is why the installation guide offers an editable install next to `pip install loco-mujoco`.
 
 ## Documentation
 

@@ -1,10 +1,10 @@
 # Sim-to-real deployment
 
-```{image} https://raw.githubusercontent.com/robfiras/loco-mujoco-real/main/assets/x2_sim2real.gif
-:alt: The AgiBot X2 Ultra running a tracking policy, on the robot and in simulation
-:width: 85%
-:align: center
-```
+<div class="lmj-media lmj-media-narrow">
+  <video class="lmj-video" autoplay loop muted playsinline poster="../_static/media/x2_sim2real_poster.jpg" aria-label="The AgiBot X2 Ultra running a tracking policy, on the robot and in simulation">
+    <source src="../_static/media/x2_sim2real.mp4" type="video/mp4">
+  </video>
+</div>
 
 <p class="lmj-caption">The AgiBot X2 Ultra tracking a motion with a policy trained in LocoMuJoCo, on the robot
 and in simulation.</p>

@@ -144,7 +144,7 @@ Next to the OpenGL viewer, every environment has a [viser](https://viser.studio)
 serves the scene to a browser instead of opening a local window. It needs the optional dependencies:
 
 ```bash
-pip install -e ".[viser]"
+pip install "loco-mujoco[viser]"   # or pip install -e ".[viser]" in a clone of the repository
 ```
 
 The methods are drop-in replacements and use the same viewer parameters:
@@ -205,7 +205,7 @@ The simulation can be collected into an animated [USD](https://openusd.org) stag
 Blender, Omniverse and other tools read. The export needs the optional USD bindings:
 
 ```bash
-pip install -e ".[usd]"
+pip install "loco-mujoco[usd]"   # or pip install -e ".[usd]" in a clone of the repository
 ```
 
 Each call of {meth}`~loco_mujoco.core.mujoco_base.Mujoco.render_usd` appends one frame, and

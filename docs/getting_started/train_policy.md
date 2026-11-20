@@ -22,6 +22,14 @@ directions.</p>
 
 ## Before you start
 
+The example is part of the repository, not of the PyPI package. If you installed LocoMuJoCo from PyPI, clone
+the repository to get it:
+
+```bash
+git clone https://github.com/robfiras/loco-mujoco.git
+cd loco-mujoco
+```
+
 You need a GPU with the [CUDA build of JAX](installation.md#add-gpu-support) and Weights & Biases for logging:
 
 ```bash

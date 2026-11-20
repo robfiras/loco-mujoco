@@ -20,7 +20,20 @@ conda create -n loco-mujoco python=3.11
 conda activate loco-mujoco
 ```
 
-Clone the repository and install it in editable mode:
+Then install LocoMuJoCo in one of two ways:
+
+::::{tab-set}
+
+:::{tab-item} From PyPI
+
+```bash
+pip install loco-mujoco
+```
+
+The PyPI package contains the library only. Use it if you want to build on LocoMuJoCo in your own project.
+:::
+
+:::{tab-item} From source
 
 ```bash
 git clone https://github.com/robfiras/loco-mujoco.git
@@ -28,8 +41,15 @@ cd loco-mujoco
 pip install -e .
 ```
 
-This installs MuJoCo, MJX, MuJoCo Warp and the CPU version of JAX. It is all you need for the next two pages
-of this guide.
+The repository also contains the examples, tutorials, training configs and tests. Use this if you want to
+run the training examples, change LocoMuJoCo itself, or set up [AMASS and SMPL](amass.md), which needs an
+editable installation.
+:::
+
+::::
+
+Either way, this installs MuJoCo, MJX, MuJoCo Warp and the CPU version of JAX. It is all you need for the
+next two pages of this guide. The [training page](train_policy.md) runs an example from the repository.
 
 ## Add GPU support
 
@@ -76,7 +96,8 @@ To use a local copy instead, for example on a machine without network access, se
 
 ## Optional extras
 
-Install an extra with `pip install -e ".[name]"`. Several can be combined, for example `".[viser,usd]"`.
+Install an extra with `pip install "loco-mujoco[name]"`, or with `pip install -e ".[name]"` in a clone of the
+repository. Several can be combined, for example `"loco-mujoco[viser,usd]"`.
 
 | Extra | Adds | Needed for |
 |---|---|---|
