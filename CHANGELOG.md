@@ -19,6 +19,9 @@ Every version below is a git tag and a
   and pull requests.
 - Continuous integration builds the documentation with warnings treated as errors and checks docstring
   coverage. New optional dependency group `docs`.
+- Continuous integration builds the wheel and the source distribution, installs the wheel into a clean
+  environment on Python 3.10, 3.11, 3.12 and 3.13, and runs a smoke test with it; this job also runs weekly.
+  The package lists the supported Python versions in its classifiers.
 
 ### Changed
 
@@ -27,6 +30,11 @@ Every version below is a git tag and a
 - Docstrings of the public API were completed; coverage is enforced with `interrogate` (threshold in
   `pyproject.toml`). No behaviour changed.
 - `README.md` and the package READMEs were shortened and now point to the documentation site.
+- Linux is stated as the supported operating system, in the installation guide and in the package
+  classifiers (`Operating System :: POSIX :: Linux` instead of `OS Independent`). Continuous integration
+  runs on Linux only; macOS and Windows are not tested.
+- The license is declared as the SPDX expression `MIT` with `license-files`, as setuptools 77 and newer
+  expect; the deprecated license table and license classifier are removed.
 
 ### Removed
 
@@ -35,6 +43,9 @@ Every version below is a git tag and a
 
 ### Fixed
 
+- A wheel or source distribution built from a working copy contained the bytecode caches (`__pycache__`) of
+  `loco_mujoco/smpl`. `setup.py` and `MANIFEST.in` now exclude them, and `MANIFEST.in` no longer includes the
+  non-existent `requirements.txt`.
 - `examples/tutorials/11_creating_custom_modules.py` failed at `env.reset()` because its custom modules did
   not accept the `traj` argument introduced in 1.2.0.
 - Stale statements in the READMEs of the training examples (robot, algorithm and file names).

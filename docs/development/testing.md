@@ -195,8 +195,9 @@ tests do.
 ## Continuous integration
 
 The workflow is `.github/workflows/continuous_integration.yml`. It runs on pushes and pull requests to
-`master` and `dev`, and can be started by hand from the Actions tab. It has two jobs, both on
-`ubuntu-latest` with Python 3.11.
+`master` and `dev`, and can be started by hand from the Actions tab. It has three jobs on `ubuntu-latest`:
+the test job and the documentation job with Python 3.11, and the installation job with every supported
+Python version.
 
 The test job
 
@@ -214,6 +215,27 @@ step at present.
 The documentation job installs the `docs` extra, checks docstring coverage with
 [interrogate](https://interrogate.readthedocs.io), and builds the documentation with warnings treated as
 errors. See [Writing documentation](documentation.md).
+
+The installation job checks the package as users get it from PyPI, on Python 3.10, 3.11, 3.12 and 3.13. For
+each version it
+
+1. builds the wheel and the source distribution with `python -m build` and checks them with
+   `twine check --strict`,
+2. installs the wheel, not an editable checkout, into a clean virtual environment, so that pip resolves the
+   dependency versions a new user would get that day,
+3. runs `.github/scripts/install_smoke_test.py` from outside the repository on the CPU: a MuJoCo
+   environment, an MJX environment and an imitation environment with a clip of the default dataset.
+
+A missing data file in the wheel, a Python version that the dependencies no longer support, or a new
+dependency release that breaks the package all fail this job. It also runs every Monday on its own, without
+the other two jobs, so that such a release is noticed between pull requests. To run the smoke test locally,
+install the package into a fresh environment and call the script from a directory outside the repository:
+
+```bash
+python -m build
+python -m venv /tmp/lmj-venv && /tmp/lmj-venv/bin/pip install dist/*.whl
+cd /tmp && JAX_PLATFORMS=cpu /tmp/lmj-venv/bin/python /path/to/loco-mujoco/.github/scripts/install_smoke_test.py
+```
 
 ## Adding tests
 

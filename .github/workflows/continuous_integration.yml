@@ -1,5 +1,10 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python.
-# Runs on: push to master or dev, and pull requests into them.
+# Jobs:
+#   build    the full test suite with coverage, on Python 3.11
+#   docs     docstring coverage and the documentation build
+#   install  builds the wheel and sdist, installs the wheel in a clean environment and runs a smoke test,
+#            on every supported Python version
+# Runs on: push to master or dev, pull requests into them, and weekly (install job only), so that a new
+# release of a dependency that breaks the installation is noticed before users report it.
 
 name: Continuous Integration
 
@@ -8,10 +13,13 @@ on:
     branches: [ master, dev ]
   pull_request:
     branches: [ master, dev ]
+  schedule:
+    - cron: "0 5 * * 1"   # Mondays, 05:00 UTC
   workflow_dispatch:   # allows "Run workflow" from Actions tab
 
 jobs:
   build:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -71,6 +79,7 @@ jobs:
           htmlcov
 
   docs:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -96,3 +105,45 @@ jobs:
       with:
         name: documentation
         path: docs/_build/html
+
+  install:
+    # Installs LocoMuJoCo the way users get it from PyPI: the built wheel, not an editable checkout, with
+    # the dependency versions that pip resolves today for each Python version.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    name: install (Python ${{ matrix.python-version }})
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Build the wheel and the source distribution
+      run: |
+        python -m pip install --upgrade pip build twine
+        python -m build
+        python -m twine check --strict dist/*
+    - name: Install the wheel in a clean environment
+      run: |
+        python -m venv "$RUNNER_TEMP/venv"
+        "$RUNNER_TEMP/venv/bin/pip" install --upgrade pip
+        "$RUNNER_TEMP/venv/bin/pip" install dist/*.whl
+        "$RUNNER_TEMP/venv/bin/pip" list | grep -i -E "^(loco-mujoco|mujoco|mujoco-mjx|mujoco-warp|jax|jaxlib|numpy) "
+    - name: Cache robot models
+      uses: actions/cache@v4
+      with:
+        path: ~/.loco-mujoco-caches/robot_models
+        key: robot-models-${{ hashFiles('loco_mujoco/core/utils/models.py') }}
+    - name: Smoke test
+      # run outside the checkout, so that the installed package is imported and not the source tree
+      working-directory: ${{ runner.temp }}
+      env:
+        JAX_PLATFORMS: cpu
+      run: |
+        cp "$GITHUB_WORKSPACE/.github/scripts/install_smoke_test.py" .
+        "$RUNNER_TEMP/venv/bin/loco-mujoco-download-models"
+        "$RUNNER_TEMP/venv/bin/python" install_smoke_test.py
