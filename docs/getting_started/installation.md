@@ -8,8 +8,8 @@
   <li><a href="next_steps.html">5 · Evaluate and customize</a></li>
 </ul>
 
-LocoMuJoCo is developed and tested on Linux and requires **Python 3.10 or newer**. Training on the GPU requires
-an NVIDIA GPU. Other operating systems are not tested.
+LocoMuJoCo is developed and tested on Linux and requires **Python 3.10 or newer**; the installation is tested
+with Python 3.10 to 3.13. Training on the GPU requires an NVIDIA GPU. Other operating systems are not tested.
 
 ## Install the package
 

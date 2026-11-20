@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "wget", "pyyaml"]
+requires = ["setuptools>=77", "wheel", "wget", "pyyaml"]
 
 [project]
 name = "loco-mujoco"
@@ -34,11 +34,15 @@ authors = [{name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
 maintainers = [{ name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
 description = 'Imitation learning benchmark focusing on complex locomotion tasks using MuJoCo.'
 readme = "README.md"
-license = { file= "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["Imitation Learning", "Reinforcement Learning", "Locomotion"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: POSIX :: Linux",
 ]
 dynamic = ["version"]
