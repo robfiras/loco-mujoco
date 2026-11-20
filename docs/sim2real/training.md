@@ -56,6 +56,22 @@ Randomize what differs between the model and the robot rather than everything: p
 friction, the centre of mass of the torso, observation noise and, if the latency of the robot is known, an
 observation delay. See [domain randomization](../user_guide/domain_randomization.md).
 
+LocoMuJoCo Real randomizes sensing and disturbances and leaves the simulated plant (masses, inertias, joint
+damping, gains) unchanged. Its randomizer, `G1RealRandomizer`, is the same for both robots
+(`training/<robot>/env/randomization/sim2real.yaml`):
+
+| What | How | Range |
+|---|---|---|
+| Pushes | A velocity impulse on the root, every 1 to 3 s | ±0.5 m/s in x and y, ±0.2 m/s in z; ±0.52 rad/s in roll and pitch, ±0.78 rad/s in yaw |
+| Encoder bias | A constant offset on the measured joint positions, drawn per episode | ±0.02 rad |
+| Observation noise | Uniform noise on the measured joint positions, joint velocities and base angular velocity | ±0.01 rad, ±0.5 rad/s, ±0.2 rad/s |
+| Friction | One friction coefficient for all colliding geometries of the robot, drawn per episode | 0.3 to 1.2 |
+| Centre of mass | An offset of the pelvis centre of mass, per axis | ±2.5 cm in x, ±5 cm in y and z |
+
+Noise and bias are applied to the actor's observations only. The critic receives the clean values, and
+projected gravity is not perturbed. With these settings, SuperMimic tracks all 40 LAFAN1 clips with one policy
+per robot, see the [benchmark results](../training/benchmark.md#supermimic-on-the-real-robot-environments).
+
 ## Reference motions
 
 A clip that is played on the robot should start and end in a standing pose. The controller then never has to

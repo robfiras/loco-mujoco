@@ -188,7 +188,9 @@ are deployed on hardware, for the Unitree G1 and the AgiBot X2 Ultra (`training/
 together with the tools to take a checkpoint to the robot. They differ from this example in the points that
 matter for transfer: they train one policy on 40 LAFAN1 clips, use MuJoCo Warp with 4096 environments, enable
 self-collisions, and randomize the domain with pushes, sensor noise and bias, friction and a centre-of-mass
-offset. Noise is applied only to the policy's observations; the critic receives clean values.
+offset ([values](../sim2real/training.md#randomization)). Noise is applied only to the policy's observations;
+the critic receives clean values. Their results in simulation are on the
+[benchmark page](benchmark.md#supermimic-on-the-real-robot-environments).
 
 The example on this page is the same algorithm reduced to a minimal setup. To move towards the deployment
 configuration, enable a randomizer under `env_params` (the example file contains a commented block) and route

@@ -44,6 +44,26 @@ In this order, the first time with every new policy or motion:
 6. **The policy on the floor**: start it balancing on a standing pose, slacken the crane, then play the
    motion.
 
+## A run on the X2 Ultra
+
+```{figure} ../_static/figures/x2_sim_vs_real.jpg
+:alt: Six moments of a dance routine, each shown in simulation and on the real AgiBot X2 Ultra
+:width: 100%
+:align: center
+
+The same policy in simulation (left of each pair) and on the real AgiBot X2 Ultra (right), at the same moments
+of a 43 s routine of chained dance clips from [BONES-SEED](https://huggingface.co/datasets/bones-studio/seed).
+```
+
+The policy was trained with SuperMimic on all of BONES-SEED in the deployable environment of stage 1. It runs
+at 50 Hz and observes only what the robot measures: joint positions and velocities from the encoders,
+projected gravity and angular velocity from the IMU in the pelvis, the previous action and the reference frame
+to track. There is no estimate of the base state and no external tracking. The actions are joint position
+targets that the drives track with the stiffness and damping of the simulated position servos.
+
+On the X2 Ultra, a policy step takes about 2 ms, on a robot state that is about 2 ms old. The controller runs
+on a laptop connected over Ethernet or on the robot's own computer.
+
 ## Robot-specific guides
 
 Before the controller can command the joints, the vendor's own controller has to release them. How that is

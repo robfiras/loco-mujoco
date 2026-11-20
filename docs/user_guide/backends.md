@@ -27,8 +27,8 @@ MJX
 
 MuJoCo Warp
 : Use it for large-scale training on an NVIDIA GPU. It handles many contacts and constraints much better than
-  MJX, so it is the backend of choice for full collision models and for the highest throughput.
-  `examples/speed_test.py` measures all three backends on your hardware.
+  MJX, so it is the backend of choice for full collision models and for the highest throughput. See
+  [throughput](#throughput) for measured numbers.
 
 ## Selecting a backend
 
@@ -266,6 +266,76 @@ After a step, quantities that are derived from the joint state, such as body pos
 before the last simulation substep. This is how MuJoCo's integrator works and applies to all backends. With
 `refresh_kinematics=True`, an `Mjx...` environment recomputes them after every control step at a small cost.
 ```
+
+## Throughput
+
+The table gives environment steps per second of the three backends on one robot, the 29-joint Unitree G1
+of [LocoMuJoCo Real](../sim2real/index.md), with [mjlab](https://arxiv.org/abs/2601.22074) on the same robot
+as a reference. An environment step is the full step: physics, control, observation, reward and termination.
+
+| Collision model | Framework | Backend | 1 env | 8 envs | 1,024 envs | 4,096 envs | 8,192 envs |
+|---|---|---|---:|---:|---:|---:|---:|
+| Full self-collision | mjlab | MuJoCo Warp | 211 | | 135,086 | 315,642 | 391,556 |
+| | LocoMuJoCo | MuJoCo (CPU) | 2,147 | 15,805 | | | |
+| | LocoMuJoCo | MJX | 169 | | 12,667 | 9,388 | 8,974 |
+| | LocoMuJoCo | MuJoCo Warp | 530 | | **251,472** | **442,715** | **487,553** |
+| Feet–floor only | mjlab | MuJoCo Warp | 212 | | 136,799 | 319,886 | 401,512 |
+| | LocoMuJoCo | MuJoCo (CPU) | 2,209 | 16,169 | | | |
+| | LocoMuJoCo | MJX | 183 | | 61,097 | 79,935 | 83,899 |
+| | LocoMuJoCo | MuJoCo Warp | 533 | | **252,548** | **447,007** | **493,827** |
+| MJX-tuned model | LocoMuJoCo | MJX | 386 | | 232,833 | 343,052 | 324,378 |
+| | LocoMuJoCo | MuJoCo Warp | 705 | | 358,874 | 694,743 | 770,061 |
+
+An empty cell is a configuration that was not measured. The CPU backend runs one environment per process, so
+its 8-environment column uses eight processes.
+
+What the numbers show:
+
+- **MuJoCo Warp is the fastest GPU backend.** With full self-collision it reaches about 490,000 steps per
+  second, 20 to 54 times more than MJX. MJX evaluates all 502 candidate geometry pairs of this robot in every
+  step, whereas the broad phase of MuJoCo Warp discards distant pairs.
+- **MJX depends on the collision model.** Keeping only the contacts between the 14 foot spheres and the
+  floor makes MJX 4.8 to 9.3 times faster, but changes MuJoCo Warp, mjlab and the CPU backend by less than 3 %.
+  This is why the `Mjx...` environments reduce their contacts by default.
+- **MJX can be fast with a model made for it.** The last two rows use the Unitree G1 that ships with
+  LocoMuJoCo (`MjxUnitreeG1`), with simple collision geometry and the MJX solver settings described
+  [above](#selecting-a-backend). MJX then reaches about 340,000 steps per second.
+- **One environment is fastest on the CPU.** The GPU backends are limited by latency when they run a single
+  environment. The CPU backend scales by a factor of 7.4 from one to eight processes.
+- **Compared with mjlab**, the MuJoCo Warp backend of LocoMuJoCo is 1.9 times faster at 1,024 environments,
+  1.4 times at 4,096 and 1.25 times at 8,192. These are environment-level numbers, so they include the logic of
+  each task, which is heavier in mjlab's velocity task. As shipped, with its domain randomization and the
+  `implicitfast` integrator, mjlab reaches 98,000, 244,000 and 313,000 steps per second at the same sizes.
+
+```{dropdown} How the numbers were measured
+:icon: info
+
+- **Hardware.** One NVIDIA RTX 4090 (24 GB) and an Intel Core i9-13900KF.
+- **Software.** LocoMuJoCo 1.2.0 with MJX 3.11.0, which bundles its own copy of MuJoCo Warp, Warp 1.14.0,
+  JAX 0.10.1 and LocoMuJoCo Real 0.1.0. mjlab 1.6.1 with MuJoCo Warp 3.11.0, Warp 1.19.0 and PyTorch 2.14.1.
+  All GPU libraries are their CUDA 12 builds.
+- **Tasks.** mjlab runs its flat-ground G1 velocity task with domain randomization turned off, LocoMuJoCo its
+  velocity task with the same robot. The two G1 models have identical bodies, masses and actuators, and 34
+  collision geometries with self-collision.
+- **Simulation settings.** MuJoCo 3.11, a 50 Hz control rate with four physics substeps of 5 ms, the Euler
+  integrator (mjlab's default is `implicitfast`) and the same solver settings in all configurations except the
+  MJX-tuned model. The feet–floor variant keeps only the contacts between the 14 foot spheres and the floor,
+  set identically in both frameworks (mjlab's `FEET_ONLY_COLLISION`).
+- **Protocol.** mjlab's benchmark protocol: zero actions, 50 warm-up steps and 200 timed environment steps
+  (2,000 on the CPU). Each entry is the mean of five measurements in each of two passes run in opposite order;
+  the passes agree within 2 % from 1,024 environments on and within 5 % otherwise.
+- **Scope.** The measurements cover one embodiment on one GPU.
+```
+
+To measure the backends on your own hardware, run `examples/speed_test.py`. It sweeps backends, collision
+models and numbers of environments, and writes the results to a CSV file:
+
+```bash
+python examples/speed_test.py --env UnitreeH1 --n-envs 1024 4096
+```
+
+It uses random actions and the robot models of LocoMuJoCo, so its numbers are not directly comparable with the
+table above.
 
 ## The low-level classes
 

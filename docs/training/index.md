@@ -87,7 +87,7 @@ The four core modules are in {mod}`loco_mujoco.algorithms`, the remaining six in
   and the basis of most others.
 - **You want a robot to reproduce reference motions as closely as possible.** Start with
   [DeepMimic-style tracking](deepmimic.md). It is PPO with a dense per-step tracking reward, needs no extra
-  machinery, and is the recipe used for the benchmark results across all humanoids.
+  machinery, and is the recipe used for the [benchmark results](benchmark.md) across all humanoids.
 - **You want one tracking policy for many clips, or you train for deployment on a robot.** Look at
   [SuperMimic](supermimic.md). It learns a world model and improves the policy by differentiating through
   imagined rollouts.
@@ -162,6 +162,13 @@ The anatomy of a `conf.yaml`, overrides, sweeps, logging, checkpoints and memory
 
 The `eval.py` scripts, trajectory similarity measures and video recording.
 :::
+
+:::{grid-item-card} Benchmark results
+:link: benchmark
+:link-type: doc
+
+Reference results on every humanoid, algorithm comparisons, and SuperMimic on the real-robot environments.
+:::
 ::::
 
 ```{toctree}
@@ -191,4 +198,5 @@ distillation
 
 configuration
 evaluation
+benchmark
 ```
