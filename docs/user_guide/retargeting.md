@@ -42,47 +42,119 @@ what "the same pose" means.
 The pipeline has three stages. The first runs once per robot, the second once per motion, and the third only
 when the source of a motion is another robot.
 
+```{figure} ../_static/figures/retargeting_pipeline.svg
+:alt: Data flow of the three retargeting stages
+:width: 100%
+:align: center
+
+The three stages. Stage 1 fits an SMPL shape $\boldsymbol\beta^\text{tgt}$ and per-site offsets to the target
+robot once. Stage 2 turns an SMPL clip into a robot trajectory by stepping MuJoCo with soft weld constraints
+between mocap targets and the mimic sites. Stage 3 maps the trajectory of a source robot back to a synthetic
+SMPL clip, using the shape $\boldsymbol\beta^\text{src}$ of the source robot, and feeds it into stage 2.
+```
+
+The formulas below use the following notation. SMPL forward kinematics $\Phi$ maps a pose
+$\boldsymbol\theta$ (an axis-angle rotation per joint), a shape $\boldsymbol\beta \in \mathbb{R}^{16}$ and a root
+translation $\mathbf{t}$ to the global joint positions $\mathbf{J}$ and rotations $\mathbf{R}$. LocoMuJoCo
+reads AMASS with SMPL-H, which has 52 joints including the fingers; only the 15 body joints of the table above
+take part in retargeting. $\pi(i)$ is the SMPL joint of mimic site $i$.
+
 ## Stage 1: fitting an SMPL shape to the robot
 
 A human and a robot differ in limb lengths, so driving the robot directly with human joint positions would
 ask for poses it cannot reach. The first stage therefore finds the SMPL body that looks most like the robot.
 
-The robot is put into a T-pose, using the joint offsets given in its configuration file, and the positions of
-its mimic sites are read. The SMPL model, also in a T-pose, is then optimized with Adam: its 16 shape
-parameters and one global scale factor are adjusted until the mean distance between the SMPL joints and the
-corresponding mimic sites is minimal (1,000 iterations at a learning rate of 0.05 by default).
+```{figure} ../_static/figures/retargeting_stage1.jpg
+:alt: The SMPL body overlaid on the Unitree G1 in a T-pose, before and after the shape fit
+:width: 85%
+:align: center
 
-Along with the shape and the scale, the stage stores for every site the remaining position offset and the
-relative rotation between the SMPL joint frame and the site frame, a height offset of the feet and the ratio
-of the body heights before and after the fit. The offsets account for the fact that SMPL joints lie inside the
-body while mimic sites may be placed elsewhere on a link. Everything is written to
+Stage 1 for the Unitree G1, before (left) and after (right) the fit. The lines connect the mimic sites to
+their SMPL joints. The mean distance at the 15 correspondences falls from 112.1 mm to 21.8 mm.
+```
+
+The robot is put into a T-pose, using the joint offsets given in its configuration file, and the positions
+$\mathbf{p}^\text{robot}_i$ of its mimic sites are read. The SMPL model, also in its T-pose
+$\boldsymbol\theta_T$, is then fitted with Adam: its 16 shape parameters and one global scale factor $s$ are
+adjusted to minimize the mean distance between the SMPL joints and the corresponding mimic sites,
+
+$$
+\min_{\boldsymbol\beta,\, s}\ \frac{1}{15} \sum_{i=1}^{15}
+\bigl\lVert \mathbf{p}^\text{robot}_i - \mathbf{p}^\text{smpl}_{\pi(i)}(\boldsymbol\theta_T, \boldsymbol\beta, s) \bigr\rVert_2,
+\qquad
+\mathbf{p}^\text{smpl}_j = s\,\bigl(\mathbf{J}_j(\boldsymbol\theta_T, \boldsymbol\beta, \mathbf{0}) - \mathbf{J}_0\bigr) + \mathbf{p}_\text{root},
+$$
+
+for 1,000 iterations at a learning rate of 0.05 by default (`shape_iterations`, `shape_lr`).
+
+Along with the shape and the scale, the stage stores for every site a rigid offset
+$(\mathbf{R}^\text{s2r}_i, \mathbf{t}^\text{s2r}_i)$ from the SMPL joint frame to the site frame, a height
+offset of the feet and the ratio of the body heights before and after the fit. The offsets absorb the
+systematic difference between SMPL joints, which lie inside the body, and mimic sites, which are often
+placed on the surface of a link. Because they are fitted once and reused for every frame of every clip, the
+targets of stage 2 are correct for the robot rather than for the human. Everything is written to
 `<retargeted AMASS folder>/<Environment>/shape_optimized.pkl` and reused for every motion.
 
 ## Stage 2: from an SMPL motion to a robot trajectory
 
-An SMPL motion is a sequence of joint rotations and root translations. For each frame, the forward kinematics
-of the SMPL model are evaluated with the shape fitted in stage 1, the horizontal root motion is scaled by the
-height ratio, and the stored offsets are applied. The result is a target position and orientation for each
-mimic site.
+An SMPL motion is a sequence of poses and root translations $(\boldsymbol\theta_t, \mathbf{t}_t)$. For each
+frame, the root translation is scaled by the height ratio from stage 1, SMPL forward kinematics is evaluated
+with the fitted shape, $(\mathbf{J}_t, \mathbf{R}_t) = \Phi(\boldsymbol\theta_t, \boldsymbol\beta,
+\mathbf{t}_t)$, and the stored offsets are applied. The result is a target position and orientation for each
+mimic site:
+
+$$
+\boldsymbol\tau_{i,t} = \mathbf{J}_{\pi(i),t} - \mathbf{R}_{\pi(i),t}\,\mathbf{R}^\text{s2r}_i\,\mathbf{t}^\text{s2r}_i,
+\qquad
+\mathbf{Q}_{i,t} = \mathbf{R}_{\pi(i),t}\,\mathbf{R}^\text{s2r}_i .
+$$
+
+```{figure} ../_static/figures/retargeting_stage2.jpg
+:alt: A dance sequence as an SMPL surface, as SMPL skeleton with site targets, and on the Fourier GR1T2
+:width: 100%
+:align: center
+
+Stage 2 on a dance sequence: (b) the original SMPL motion, (c) the SMPL skeleton with the shape of the robot
+(blue) and the 15 site targets (orange), (d) the resulting Fourier GR1T2 trajectory. The pale silhouettes show
+the poses 0.5 s before and after the highlighted frame.
+```
 
 The targets are not solved with a conventional inverse kinematics routine but **with the simulator**. A
 mocap body is added to the model for each site and connected to the site by a soft equality constraint, by
-default a weld that constrains position and orientation. For every frame the mocap bodies are moved to their
-targets and MuJoCo is stepped a few times (25 by default), which pulls the robot into the pose. The joint
-positions after these steps are the retargeted frame, and the next frame starts from them.
+default a weld (`mjEQ_WELD`) that constrains position and orientation. For every frame the mocap bodies are
+moved to their targets and MuJoCo is stepped $N_\text{sub}$ times, starting from the previous frame, which
+pulls the robot into the pose:
 
-Because the pose is found by a physics step, joint limits and collisions of the model are active while the
-constraints pull. If a human pose is unreachable, the robot settles in a compromise that respects its limits
-instead of in an invalid configuration. For the first frame, joint limits and collisions are switched off and
-the simulation is run longer, so that the robot can reach the initial pose from its default configuration
+$$
+\mathbf{q}_t = \texttt{mj\_step}^{N_\text{sub}}\bigl(\mathbf{q}_{t-1};\ \{\boldsymbol\tau_{i,t}, \mathbf{Q}_{i,t}\}_{i=1}^{15}\bigr),
+\qquad N_\text{sub} = 25 \text{ by default (}\texttt{motion\_iterations}\text{)}.
+$$
+
+Two choices make this work:
+
+- **Position and orientation targets.** A weld constrains the full pose of a site, whereas a connect
+  constraint (`mjEQ_CONNECT`) constrains only its position. The orientation is needed to track degrees of
+  freedom such as the twist of the wrist or the yaw of the pelvis, and it is what lets stage 3 invert the
+  mapping in closed form.
+- **Soft constraints.** The constraints are soft: their `solref` and `solimp` parameters define a damped,
+  spring-like impedance that allows a finite violation. Because the same physics step also enforces joint
+  limits and collisions, the robot favors a physically plausible pose over matching every site exactly when
+  the two conflict, for example when the human motion would push a foot through the floor. Inverse kinematics
+  with hard targets can instead produce poses that penetrate the ground or the robot itself.
+
+For the first frame, joint limits and collisions are switched off and the simulation is run longer
+(`init_motion_iterations`), so that the robot can reach the initial pose from its default configuration
 without getting stuck.
 
 Afterwards:
 
-- Joint velocities are computed from the joint positions by central finite differences. The first and the last
-  frame are dropped in the process.
-- If foot geometries are listed in the configuration, the whole trajectory is shifted vertically so that the
-  lowest point of the motion just touches the floor.
+- If foot geometries are listed in the configuration, the whole trajectory is shifted down by one constant
+  $\Delta z = \min\bigl(\texttt{max\_height\_adjustment},\ \min_{t,\,g} \operatorname{dist}(g, \text{floor})\bigr)$
+  over all frames $t$ and foot geometries $g$, so that the lowest point of the motion just touches the floor
+  and the relative motion is unchanged.
+- Joint velocities are computed from the joint positions by central finite differences,
+  $\mathbf{v}_t = (\mathbf{q}_{t+1} - \mathbf{q}_{t-1}) / (2\Delta t)$. The first and the last frame are
+  dropped in the process.
 - The trajectory is replayed in the environment to compute the body and site quantities, which makes it
   [complete](trajectories.md), and it is saved.
 
@@ -93,15 +165,43 @@ To save time, AMASS motions are subsampled before retargeting (every fourth fram
 To transfer a trajectory from a source robot to a target robot, the source motion is first converted back
 into an SMPL motion and then sent through stage 2 with the shape of the target robot.
 
-The mimic-site positions and orientations of the source trajectory are computed and expressed in SMPL joint
-frames with the offsets that stage 1 stored for the source robot. An SMPL pose and root translation for every
-frame are then optimized with Adam, with the SMPL shape fixed to that of the *source* robot, to minimize a
-weighted sum of the position error and the geodesic rotation error at the 15 correspondences (400 iterations,
-weights 1.0 and 0.1 by default). After each iteration the body pose is smoothed over time with a small
-Gaussian kernel to suppress jitter.
+```{figure} ../_static/figures/retargeting_stage3.jpg
+:alt: A walking motion of the Unitree H1v2, its synthetic SMPL skeleton, and the same motion on the Booster T1
+:width: 100%
+:align: center
 
-The result is a synthetic SMPL motion that reproduces what the source robot did. Stage 2 turns it into a
-trajectory of the target robot. Stage 1 is run for either robot if its shape file does not exist yet.
+Stage 3 on a walking sequence: (f) the Unitree H1v2 trajectory used as the source, (g) the synthetic SMPL
+motion fitted with the shape of the H1v2, (h) the resulting Booster T1 trajectory.
+```
+
+The mimic-site poses $(\mathbf{p}^\text{src}_{i,t}, \mathbf{R}^\text{src}_{i,t})$ of the source trajectory
+are computed with forward kinematics and moved into the SMPL joint frames by undoing the offsets that stage 1
+stored for the source robot:
+
+$$
+\hat{\mathbf{p}}^\text{src}_{i,t} = \mathbf{p}^\text{src}_{i,t} + \mathbf{R}^\text{src}_{i,t}\,\mathbf{t}^\text{s2r,src}_i,
+\qquad
+\hat{\mathbf{R}}^\text{src}_{i,t} = \mathbf{R}^\text{src}_{i,t}\,\bigl(\mathbf{R}^\text{s2r,src}_i\bigr)^{-1}.
+$$
+
+An SMPL pose and root translation for every frame are then optimized with Adam, with the SMPL shape fixed to
+that of the *source* robot, to minimize a weighted sum of the position error and the geodesic rotation error
+at the 15 correspondences:
+
+$$
+\mathcal{L}_\text{r2r} =
+\frac{\lambda_p}{15T} \sum_{i,t} \bigl\lVert \hat{\mathbf{p}}^\text{src}_{i,t}
+  - \mathbf{J}_{\pi(i),t}(\boldsymbol\theta_t, \boldsymbol\beta^\text{src}, \mathbf{t}_t) \bigr\rVert_2
++ \frac{\lambda_r}{15T} \sum_{i,t} \arccos\!\left(\frac{\operatorname{tr}\bigl(\mathbf{R}_{\pi(i),t}^\top \hat{\mathbf{R}}^\text{src}_{i,t}\bigr) - 1}{2}\right),
+$$
+
+with $\lambda_p = 1.0$ and $\lambda_r = 0.1$ (`pos_loss_weight`, `rot_loss_weight`) and 400 iterations at a
+learning rate of 0.005 by default. After each iteration the body pose is smoothed over time with a small
+Gaussian kernel (size 3, $\sigma = 0.5$) to suppress jitter.
+
+The result is a synthetic SMPL motion that reproduces what the source robot did at the 15 correspondences.
+Stage 2 turns it into a trajectory of the target robot, using the target's shape
+$\boldsymbol\beta^\text{tgt}$. Stage 1 is run for either robot if its shape file does not exist yet.
 
 ## Robot configuration files
 
@@ -238,6 +338,20 @@ delete the shape file and the retargeted clips of that environment; they are not
 - **Velocities** come from finite differences of the positions and can be noisy for fast motions.
 
 Always look at the result with `env.play_trajectory()` before training on it.
+
+## Relation to other retargeters
+
+The pipeline builds on the SMPL shape fitting of [PHC](https://doi.org/10.1109/ICCV51070.2023.01000) and
+[H2O](https://doi.org/10.1109/IROS58592.2024.10801984), which was written for individual robots. LocoMuJoCo
+turns it into a general pipeline that is driven by configuration: a new robot needs only a configuration file
+and 15 mimic sites in its model, and trajectories can be transferred between any two robots. It has been part
+of LocoMuJoCo since [version 1.0.1](https://github.com/robfiras/loco-mujoco/releases/tag/v1.0.1).
+
+Later methods pursue related goals differently. [GMR](https://arxiv.org/abs/2510.02252) replaces the shape fit
+with non-uniform scaling and differential inverse kinematics, aiming at real-time use and fewer artifacts.
+[OmniRetarget](https://arxiv.org/abs/2509.26633) preserves the contacts of the body with objects and terrain.
+LocoMuJoCo fits SMPL to each robot once, tracks the resulting position and orientation targets with soft
+MuJoCo constraints, and reuses the same mapping for robot-to-robot transfer.
 
 ## See also
 
