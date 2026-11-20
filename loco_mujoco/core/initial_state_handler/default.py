@@ -1,3 +1,5 @@
+"""Initial state handler that starts every episode from a fixed, optionally user-defined state."""
+
 from typing import Any, Union, List, Tuple
 from types import ModuleType
 
@@ -49,6 +51,7 @@ class DefaultInitialStateHandler(InitialStateHandler):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The simulation data and carry.

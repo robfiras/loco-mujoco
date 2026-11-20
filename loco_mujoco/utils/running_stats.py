@@ -1,3 +1,10 @@
+"""
+Running statistics with a functional interface for use in JAX code.
+
+The statistics are kept in immutable state dataclasses, which are created by ``reset`` and replaced by
+``update_state``.
+"""
+
 import jax
 import jax.numpy as jnp
 from flax import struct
@@ -5,6 +12,15 @@ from flax import struct
 
 @struct.dataclass
 class RunningStandardizationState:
+    """
+    State of :class:`RunningStandardization`.
+
+    Attributes:
+        mean (jnp.array): Running mean.
+        std (jnp.array): Running spread statistic accumulated by the update rule of Welford's algorithm.
+        count (int): Number of samples seen so far.
+
+    """
     mean: jnp.array
     std: jnp.array
     count: int
@@ -12,6 +28,15 @@ class RunningStandardizationState:
 
 @struct.dataclass
 class RunningAverageWindowState:
+    """
+    State of :class:`RunningAveragedWindow`.
+
+    Attributes:
+        storage (jnp.array): Ring buffer with the last values, shape ``(window_size, *shape)``.
+        index (int): Position in the buffer at which the next value is written.
+        curr_size (int): Number of values currently stored, at most ``window_size``.
+
+    """
     storage: jnp.array
     index: int = 0
     curr_size: int = 0
@@ -19,8 +44,10 @@ class RunningAverageWindowState:
 
 class RunningStandardization:
     """
-    Compute a running standardization of values according to Welford's online
-    algorithm: https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
+    Compute running statistics of values for standardization, following Welford's online algorithm:
+    https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
+
+    The statistics are stored in a :class:`RunningStandardizationState`.
 
     """
     def __init__(self, shape, alpha=1e-32):
@@ -28,8 +55,8 @@ class RunningStandardization:
         Constructor.
 
         Args:
-            shape (tuple): shape of the data to standardize;
-            alpha (float, 1e-32): minimum learning rate.
+            shape (tuple): Shape of the data to standardize.
+            alpha (float): Minimum learning rate; has to be in the open interval ``(0, 1)``.
 
         """
         self._shape = shape
@@ -40,6 +67,9 @@ class RunningStandardization:
     def reset(self):
         """
         Initialize the running standardization state.
+
+        Returns:
+            RunningStandardizationState: State with zero mean, unit spread and a count of one.
 
         """
 
@@ -53,11 +83,11 @@ class RunningStandardization:
         Update the statistics with the current data value.
 
         Args:
-            value (jnp.array): current data value to use for the update.
-            state (RunningStandardizationState): current state of the running standardization.
+            value (jnp.array): Current data value or batch of values, shape ``shape`` or ``(batch_size, *shape)``.
+            state (RunningStandardizationState): Current state of the running standardization.
 
         Returns:
-            RunningStandardizationState with updated statistics.
+            RunningStandardizationState: State with updated statistics.
 
         """
 
@@ -83,8 +113,8 @@ class RunningAveragedWindow:
         Constructor.
 
         Args:
-            shape (tuple): shape of the data to standardize;
-            window_size (int): size of the windows;
+            shape (tuple): Shape of the data to average.
+            window_size (int): Number of values the window holds.
 
         """
         self._shape = shape
@@ -93,6 +123,9 @@ class RunningAveragedWindow:
     def reset(self):
         """
         Initialize the running average window state.
+
+        Returns:
+            RunningAverageWindowState: State with an empty window.
 
         """
         state = RunningAverageWindowState(storage=jnp.zeros((self._window_size, *self._shape)),
@@ -103,11 +136,14 @@ class RunningAveragedWindow:
 
     def update_state(self, value, state: RunningAverageWindowState):
         """
-        Update the statistics with the current data value.
+        Add the current data value to the window, overwriting the oldest value once the window is full.
 
         Args:
-            value (jnp.ndarray): current data value to use for the update.
-            state (RunningAverageWindowState): current state of the running average window.
+            value (jnp.ndarray): Current data value to use for the update.
+            state (RunningAverageWindowState): Current state of the running average window.
+
+        Returns:
+            RunningAverageWindowState: The updated state.
 
         """
         value = jnp.reshape(jnp.asarray(value), self._shape)
@@ -124,10 +160,10 @@ class RunningAveragedWindow:
         Compute the mean of the stored values.
 
         Args:
-            state (RunningAverageWindowState): current state of the running average window.
+            state (RunningAverageWindowState): Current state of the running average window.
 
         Returns:
-            jnp.ndarray with the mean of the stored values.
+            jnp.ndarray: Mean of the values currently stored in the window.
 
         """
         mean = state.storage.sum(0)

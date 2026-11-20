@@ -1,3 +1,7 @@
+"""
+Environment of the ANYbotics ANYmal C quadruped robot (CPU/MuJoCo version).
+"""
+
 from typing import List, Tuple
 import mujoco
 from mujoco import MjSpec
@@ -11,10 +15,25 @@ from loco_mujoco.core.utils import info_property
 class AnymalC(BaseRobotQuadruped):
 
     """
-    Description
-    ------------
-    Mujoco environment of the Anymal C robot by ANYbotics.
+    Environment of the ANYbotics ANYmal C quadruped robot.
 
+    Description
+    -----------
+
+    MuJoCo environment of the ANYmal C, a quadruped robot by ANYbotics. This class uses the CPU (MuJoCo) backend;
+    :class:`~loco_mujoco.environments.quadrupeds.anymal_c_mjx.MjxAnymalC` is its Mjx counterpart.
+
+    The model (``anybotics_anymal_c/anymal_c.xml``) has a floating base and 12 actuated joints: hip
+    abduction/adduction (HAA), hip flexion/extension (HFE) and knee flexion/extension (KFE) joint of each of the four
+    legs.
+
+    By default, the observation has 35 dimensions: the height and the orientation quaternion of the floating base (its
+    horizontal position is left out), the 12 joint positions, the 6D velocity of the floating base and the 12 joint
+    velocities. The action has 12 dimensions, one per actuated joint, each in ``[-1, 1]``. Unless ``control_type`` is
+    given, a PD controller (``PDControl``) with a proportional gain of 100 and no derivative gain is used: an action
+    in ``[-1, 1]`` is mapped linearly onto the range between the lower and the upper joint limit to obtain the
+    position target of the controller. Both spaces are listed below and can be changed with the constructor arguments
+    ``observation_spec`` and ``actuation_spec``.
 
     Default Observation Space
     -------------------------
@@ -120,12 +139,19 @@ class AnymalC(BaseRobotQuadruped):
         Constructor.
 
         Args:
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            camera_params (dict): Dictionary defining some of the camera parameters for visualization.
-            observation_spec (List[ObservationType]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments
+            spec (Union[str, MjSpec], optional): Model of the robot, either the path to a MuJoCo XML file or an
+                ``MjSpec`` object. If None, the default XML file is used (see :meth:`get_default_xml_file_path`).
+            camera_params (dict, optional): Parameters of the cameras used for visualization. If None, the
+                ``follow`` camera is placed further away from the robot than by default.
+            observation_spec (List[Observation], optional): Observations that make up the observation space, as
+                :class:`~loco_mujoco.core.observations.base.Observation` objects or as dictionaries that are parsed
+                with ``parse_observation_spec``. If None, the default observation space listed in the class docstring
+                is used.
+            actuation_spec (List[str], optional): Names of the actuators in the model that make up the action
+                space. If None, the default action space listed in the class docstring is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`.
+                If ``control_type`` is not given, ``PDControl`` is used.
+
         """
 
         if spec is None:
@@ -163,13 +189,17 @@ class AnymalC(BaseRobotQuadruped):
     @staticmethod
     def _get_observation_specification(spec: MjSpec) -> List[ObservationType]:
         """
-        Returns the observation specification of the environment.
+        Returns the default observation specification of the environment.
+
+        The default observation consists of the height and orientation of the floating base, the joint positions,
+        the velocity of the floating base and the joint velocities.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[ObservationType]: A list of observations.
+            List[ObservationType]: The list of default observations.
+
         """
 
         observation_spec = [
@@ -219,13 +249,14 @@ class AnymalC(BaseRobotQuadruped):
     @staticmethod
     def _get_action_specification(spec: MjSpec) -> List[str]:
         """
-        Getter for the action space specification.
+        Returns the default action specification of the environment.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: A list of actuator names.
+            List[str]: The names of the actuators that make up the default action space.
+
         """
         action_spec = [
             "LF_HAA", "LF_HFE", "LF_KFE", "RF_HAA", "RF_HFE", "RF_KFE",
@@ -237,69 +268,78 @@ class AnymalC(BaseRobotQuadruped):
     @classmethod
     def get_default_xml_file_path(cls) -> str:
         """
-        Returns the default path to the xml file of the environment.
+        Returns the default path to the XML file of the ANYmal C model.
 
         Returns:
-            str: The default path to the xml file.
+            str: Path to the XML file.
+
         """
         return cls.get_model_path("anybotics_anymal_c", "anymal_c.xml")
 
     @info_property
     def grf_size(self) -> int:
         """
-        Returns the size of the ground force vector.
+        Returns the size of the ground reaction force vector (three components for each of the four feet).
 
         Returns:
-            int: The size of the ground force vector.
+            int: The size of the ground reaction force vector.
+
         """
         return 12
 
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body in the Mujoco xml.
+        Returns the name of the upper body in the XML file. For this robot, it is the root body.
 
         Returns:
-            str: The name of the upper body.
+            str: Name of the upper body.
+
         """
         return self.root_body_name
 
     @info_property
     def root_body_name(self) -> str:
         """
-        Returns the name of the root body in the Mujoco xml.
+        Returns the name of the root body in the XML file.
 
         Returns:
-            str: The name of the root body.
+            str: Name of the root body.
+
         """
         return "base"
 
     @info_property
     def root_free_joint_xml_name(self) -> str:
         """
-        Returns the name of the free joint of the root body in the Mujoco xml.
+        Returns the name of the free joint of the root in the XML file.
 
         Returns:
-            str: The name of the free joint.
+            str: Name of the free joint.
+
         """
         return "root"
 
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
-        Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+        Returns the range of root heights in which the robot is considered healthy.
+
+        This is only used when the ``HeightBasedTerminalStateHandler`` is used.
 
         Returns:
-            Tuple[float, float]: The healthy range of the root height.
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
+
         """
         return (0.30, 1.0)
 
     @info_property
     def foot_geom_names(self) -> List[str]:
         """
-        Returns the names of the foot geometries.
+        Returns the names of the foot geoms in the XML file.
 
         Returns:
-            List[str]: The names of the foot geometries.
+            List[str]: Names of the four foot geoms.
+
         """
         return ["LH", "RH", "LF", "RF"]

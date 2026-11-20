@@ -1,3 +1,7 @@
+"""
+Environment of the Unitree H1v2 humanoid robot (CPU/MuJoCo version).
+"""
+
 from typing import Union, List, Dict, Tuple
 import mujoco
 from mujoco import MjSpec
@@ -11,10 +15,26 @@ from loco_mujoco.core.utils import info_property
 class UnitreeH1v2(BaseRobotHumanoid):
 
     """
+    Environment of the Unitree H1v2 humanoid robot.
 
     Description
-    ------------
-    Mujoco environment of the Unitree H1.5 robot.
+    -----------
+
+    MuJoCo environment of the second version of the Unitree H1 (model ``unitree_h1_2/h1_2.xml``), a humanoid robot by
+    Unitree Robotics with wrists and five-fingered hands. This class uses the CPU (MuJoCo) backend;
+    :class:`~loco_mujoco.environments.humanoids.unitreeH1v2_mjx.MjxUnitreeH1v2` is its Mjx counterpart.
+
+    The full model has a floating base and 51 actuated joints. With ``disable_hands=True`` (the default), the three
+    wrist joints and the twelve finger joints of each hand are removed together with their actuators and observations.
+    This leaves 21 actuated joints: six per leg, the torso joint and four per arm.
+
+    By default, the observation has 53 dimensions: the height and the orientation quaternion of the floating base (its
+    horizontal position is left out), the 21 joint positions, the 6D velocity of the floating base and the 21 joint
+    velocities. The action has 21 dimensions, one per actuated joint. Unless ``control_type`` is given, a PD
+    controller (``PDControl``) with the gains in :attr:`p_gains` and :attr:`d_gains` is used: the action is added to
+    the nominal joint positions to obtain the position targets of the controller, without scaling to the joint limits.
+    Both spaces are listed below and can be changed with the constructor arguments ``observation_spec`` and
+    ``actuation_spec``.
 
     Default Observation Space
     -------------------------
@@ -180,12 +200,22 @@ class UnitreeH1v2(BaseRobotHumanoid):
         Constructor.
 
         Args:
-            disable_hands (bool): Whether to disable hand joints.
-            spec (Union[str, MjSpec]): Specification of the environment. Can be a path to the XML file or an MjSpec object.
-                If none is provided, the default XML file is used.
-            observation_spec (List[ObservationType], optional): List defining the observation space. Defaults to None.
-            actuation_spec (List[str], optional): List defining the action space. Defaults to None.
-            **kwargs: Additional parameters for the environment.
+            disable_hands (bool): If True, the wrist and finger joints are removed together with their actuators
+                and observations.
+            spec (Union[str, MjSpec], optional): Model of the robot, either the path to a MuJoCo XML file or an
+                ``MjSpec`` object. If None, the default XML file is used (see :meth:`get_default_xml_file_path`).
+            observation_spec (List[Observation], optional): Observations that make up the observation space, as
+                :class:`~loco_mujoco.core.observations.base.Observation` objects or as dictionaries that are parsed
+                with ``parse_observation_spec``. If None, the default observation space listed in the class docstring
+                is used.
+            actuation_spec (List[str], optional): Names of the actuators in the model that make up the action
+                space. If None, the default action space listed in the class docstring is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. The
+                keyword ``mjx_reduced_contacts`` (bool, default True) is consumed here: if False, the Mjx version of
+                this environment keeps the collision geoms of the model instead of the reduced set of contacts of
+                ``_modify_spec_for_mjx``. It has no effect on the CPU version.
+                If ``control_type`` is not given, ``PDControl`` is used with the gains of this class.
+
         """
 
         self._disable_hands = disable_hands
@@ -230,11 +260,15 @@ class UnitreeH1v2(BaseRobotHumanoid):
 
     def _get_spec_modifications(self) -> Tuple[List[str], List[str], List[str]]:
         """
-        Specifies which joints, actuators, and equality constraints should be removed from the Mujoco specification.
+        Specifies which joints, actuators and equality constraints are removed from the MuJoCo specification.
+
+        The lists contain the wrist and finger joints and their actuators. They are only applied when
+        ``disable_hands`` is True.
 
         Returns:
-            Tuple[List[str], List[str], List[str]]: A tuple containing lists of joints to remove, actuators to remove,
-            and equality constraints to remove.
+            Tuple[List[str], List[str], List[str]]: The names of the joints to remove, of the actuators to remove
+            and of the equality constraints to remove (always empty for this robot).
+
         """
 
         joints_to_remove = [
@@ -314,13 +348,18 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @staticmethod
     def _get_observation_specification(spec: MjSpec) -> List[ObservationType]:
         """
-        Returns the observation specification of the environment.
+        Returns the default observation specification of the environment.
+
+        The default observation consists of the height and orientation of the floating base, the joint positions,
+        the velocity of the floating base and the joint velocities. The list covers the full model including the
+        hands; the constructor removes the observations of disabled joints.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[ObservationType]: A list of observation types.
+            List[ObservationType]: The list of default observations.
+
         """
         observation_spec = [
             # ------------- JOINT POS -------------
@@ -437,13 +476,16 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @staticmethod
     def _get_action_specification(spec: MjSpec) -> List[str]:
         """
-        Getter for the action space specification.
+        Returns the default action specification of the environment.
+
+        The list covers the full model including the hands; the constructor removes the actuators of disabled joints.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: A list of actuator names.
+            List[str]: The names of the actuators that make up the default action space.
+
         """
         action_spec = [
             "left_hip_yaw_joint",
@@ -504,10 +546,10 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @property
     def p_gains(self) -> Dict[str, float]:
         """
-        Getter for the proportional gains of the PD controller.
+        Returns the proportional gains of the default PD controller.
 
         Returns:
-            Dict[str, float]: A dictionary containing the proportional gains for each joint
+            Dict[str, float]: The proportional gain of each actuator, keyed by actuator name.
 
         """
         p_gains = {
@@ -569,10 +611,10 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @property
     def d_gains(self) -> Dict[str, float]:
         """
-        Getter for the derivative gains of the PD controller.
+        Returns the derivative gains of the default PD controller.
 
         Returns:
-            Dict[str, float]: A dictionary containing the derivative gains for each joint
+            Dict[str, float]: The derivative gain of each actuator, keyed by actuator name.
 
         """
         d_gains = {
@@ -634,14 +676,21 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @classmethod
     def get_default_xml_file_path(cls) -> str:
         """
-        Returns the default XML file path for the unitree h1_2 environment.
+        Returns the default path to the XML file of the Unitree H1v2 model.
+
+        Returns:
+            str: Path to the XML file.
+
         """
         return cls.get_model_path("unitree_h1_2", "h1_2.xml")
 
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body XML element.
+        Returns the name of the upper body (the torso link) in the XML file.
+
+        Returns:
+            str: Name of the upper body.
 
         """
         return "torso_link"
@@ -649,7 +698,10 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @info_property
     def root_free_joint_xml_name(self) -> str:
         """
-        Returns the name of the root free joint XML element.
+        Returns the name of the free joint of the root in the XML file.
+
+        Returns:
+            str: Name of the free joint.
 
         """
         return "floating_base_joint"
@@ -657,7 +709,12 @@ class UnitreeH1v2(BaseRobotHumanoid):
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
-        Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+        Returns the range of root heights in which the robot is considered healthy.
+
+        This is only used when the ``HeightBasedTerminalStateHandler`` is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
 
         """
         return (0.6, 1.5)

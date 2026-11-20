@@ -1,3 +1,5 @@
+"""Base class of the control functions."""
+
 from typing import Any, Dict, List, Union, Tuple
 from types import ModuleType
 from copy import deepcopy
@@ -54,6 +56,7 @@ class ControlFunction(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jax.Array], Any]: The generated action and carry.
@@ -80,6 +83,7 @@ class ControlFunction(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated data and carry.
@@ -113,14 +117,15 @@ class ControlFunction(StatefulObject):
         """
         Returns the actuator control ranges of the model.
 
-         Args:
-             action_indices (list): A list of actuator indices.
-             model: MuJoCo model.
+        Args:
+            action_indices (list): A list of actuator indices.
+            model (MjModel): MuJoCo model.
 
-         Returns:
-             Two nd.ndarrays defining the action space limits.
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Lower and upper limits of the action space; infinite for actuators
+            without a control range.
 
-         """
+        """
         low = []
         high = []
         for index in action_indices:

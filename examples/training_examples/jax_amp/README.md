@@ -21,7 +21,7 @@ python experiment.py
 
 This command will:
 
-- Train the GAIL agent on the Unitree H1 robot for 75 million steps (approximately 7-10 minutes on an RTX 3080 Ti).
+- Train the AMP agent on the Unitree H1 robot for 75 million steps (approximately 7-10 minutes on an RTX 3080 Ti).
 - Save the trained agent (as `AMPJax_saved.pkl` in the `outputs` folder).
 - Perform a final rendering of the trained policy.
 - Save a video of the rendering to the `LocoMuJoCo_recordings/` directory.
@@ -52,4 +52,3 @@ python eval.py --path path/to/agent_file --use_mujoco
 ```
 
 > ⚠️ **Note:** Evaluating with MuJoCo may not yield results as robust as with Mjx due to simulator differences. For reliable policy transfer between the two, consider applying domain randomization techniques.
-nks to the dataset, or more details about the environment or architecture!

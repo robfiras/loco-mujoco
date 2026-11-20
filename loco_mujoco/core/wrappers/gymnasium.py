@@ -1,3 +1,5 @@
+"""Gymnasium interface for the CPU version of the LocoMuJoCo environments."""
+
 import numpy as np
 import jax
 
@@ -13,6 +15,16 @@ class GymnasiumWrapper(Env):
     """
     This class implements a simple wrapper to use all LocoMuJoCo environments
     with the Gymnasium interface.
+
+    The wrapper runs the CPU (MuJoCo) version of an environment. If one of the dataset configurations
+    (``default_dataset_conf``, ``amass_dataset_conf``, ``lafan1_dataset_conf`` or ``custom_dataset_conf``) is
+    passed, the environment is created with the ``ImitationFactory``, otherwise with the ``RLFactory``.
+
+    Args:
+        env_name (str): Name of the LocoMuJoCo environment.
+        render_mode (str, optional): Either "human" or "rgb_array". Replaces the ``headless`` parameter of the
+            environments, which must not be passed.
+        **kwargs: Arguments of the task factory and the environment.
 
     """
 
@@ -56,15 +68,16 @@ class GymnasiumWrapper(Env):
         """
         Run one timestep of the environment's dynamics.
 
-        .. note:: We set the truncation always to False, as the time limit can be handled by the `TimeLimit`
-         wrapper in Gymnasium.
+        .. note:: The value in the ``truncated`` position is the ``done`` flag of the LocoMuJoCo environment, which
+            is True when the state is absorbing or the horizon is reached.
 
         Args:
             action (np.ndarray):
                 The action to be executed in the environment.
 
         Returns:
-            Tuple of observation, reward, terminated, truncated and info.
+            Tuple[np.ndarray, float, bool, bool, dict]: Observation, reward, terminated (absorbing), truncated
+            (done) and info.
 
         """
 
@@ -75,6 +88,13 @@ class GymnasiumWrapper(Env):
     def reset(self, *, seed=None, options=None):
         """
         Resets the state of the environment, returning an initial observation and info.
+
+        Args:
+            seed (int, optional): Seed of the random number generators. If None, a random seed is drawn.
+            options (dict, optional): Unused.
+
+        Returns:
+            Tuple[np.ndarray, dict]: The initial observation and an empty info dictionary.
 
         """
 
@@ -96,6 +116,10 @@ class GymnasiumWrapper(Env):
     def render(self):
         """
         Renders the environment.
+
+        Returns:
+            Optional[np.ndarray]: In render mode "rgb_array" the rendered image with its first two axes swapped,
+            otherwise None.
 
         """
         if self.render_mode == "human":
@@ -164,6 +188,10 @@ class GymnasiumWrapper(Env):
     def unwrapped(self):
         """
         Returns the inner environment.
+
+        Returns:
+            Mujoco: The wrapped LocoMuJoCo environment.
+
         """
         return self._env
 

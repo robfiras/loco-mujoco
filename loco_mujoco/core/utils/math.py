@@ -1,3 +1,11 @@
+"""
+Math helpers for rotations, relative poses and velocities, for the NumPy and the JAX backend.
+
+The functions in the first part of the module build on SciPy and expect scalar-last quaternions; the rotation
+helpers at the end use MuJoCo's scalar-first convention.
+
+"""
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -313,13 +321,14 @@ def transform_motion(vel, new_pos, old_pos, rot_mat_new2old, backend, flg_local=
     mju_transformSpatial function, but is limited to velocities.
     (https://github.com/google-deepmind/mujoco/blob/1f9dca8bc4cfbfc23f68c6bda7cdb6abebfdeb98/src/engine/engine_util_spatial.c#L454).
 
-
     Args:
-        vel (array): Motion vector to be transformed. Shape (6,) or (batch_size, 6)
+        vel (array): Motion vector to be transformed (angular, then linear). Shape (6,) or (batch_size, 6)
         new_pos (array): Position of the new frame. Shape (3,) or (batch_size, 3)
         old_pos (array): Position of the old frame. Shape (3,) or (batch_size, 3)
         rot_mat_new2old (array): Rotation matrix from the new to the old frame. Shape (3, 3) or (batch_size, 3, 3)
         backend: Backend to use (either np or jnp).
+        flg_local (bool, optional): Whether to rotate the result into the new frame. If False, only the reference
+            point is moved. Defaults to True.
 
     Returns:
         array: Transformed motion vector. Shape (batch_size, 6)
@@ -405,10 +414,22 @@ def rotvec_from_matrix_jax(mat):
 def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_rootid, backend,
                                       main_site_id=0):
     """
+    Calculate the positions, rotations and velocities of a set of sites relative to a main site.
+
     Args:
+        data: Mujoco/Mjx Data structure.
+        rel_site_ids (array): Ids of the sites, including the main site. Shape (n_sites,)
+        rel_body_ids (array): Ids of the bodies the sites are attached to. Shape (n_sites,)
+        body_rootid (array): Root body id of every body of the model (``model.body_rootid``).
+        backend: Backend to use (either np or jnp).
         main_site_id: index INTO `rel_site_ids` of the reference site. The other
             sites' positions/rotations/velocities are computed relative to it.
             Defaults to 0 (first site in the list).
+
+    Returns:
+        tuple: Relative positions, shape (n_sites - 1, 3), relative rotations as rotation vectors, shape
+        (n_sites - 1, 3), and relative 6D velocities, shape (n_sites - 1, 6), of all sites but the main site.
+
     """
 
     if backend == np:
@@ -467,9 +488,11 @@ def quaternion_angular_distance(q1, q2, backend):
     Args:
         q1 (array): First quaternion. Shape (4,) or (batch_size, 4). (quaternions is expected to be scalar last)
         q2 (array): Second quaternion. Shape (4,) or (batch_size, 4). (quaternions is expected to be scalar last)
+        backend: Backend to use (either np or jnp).
 
     Returns:
-        array: Angular distance between the two rotations. Shape (batch_size,)
+        array: Angular distance between the two rotations in radians. Shape (batch_size,)
+
     """
 
     if backend == np:
@@ -620,6 +643,13 @@ def eps_norm(v):
     """
     Norm along the last axis, kept as an axis of size 1, with a small epsilon under the square root so that the
     gradient is finite at zero. See :func:`safe_norm` for the exact norm with a zero gradient at zero.
+
+    Args:
+        v (jnp.ndarray): Vectors, shape (..., n).
+
+    Returns:
+        jnp.ndarray: The norms, shape (..., 1).
+
     """
     # sqrt has an infinite derivative at 0; the epsilon keeps gradients finite at zero rotation.
     return jnp.sqrt(jnp.sum(v * v, axis=-1, keepdims=True) + 1e-12)
@@ -710,6 +740,14 @@ def rot6d_from_mat(R, backend=jnp):
 
     Note the layout differs from :func:`rot6d_from_quat`, which returns the two columns one after the other.
     Both are inputs of trained networks, so neither can be changed without invalidating checkpoints.
+
+    Args:
+        R (array): Rotation matrix, shape (3, 3).
+        backend: Backend to use (either np or jnp).
+
+    Returns:
+        array: The 6D rotation, shape (6,).
+
     """
     return backend.ravel(R[:, :2])
 

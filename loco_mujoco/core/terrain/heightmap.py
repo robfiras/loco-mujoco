@@ -1,3 +1,5 @@
+"""Static terrain loaded from a height map file, for datasets whose motions are placed on a common map."""
+
 import hashlib
 import os
 from types import ModuleType
@@ -22,9 +24,10 @@ class HeightmapTerrain(StaticTerrain):
     start where their clip is.
 
     The file is an ``.npz`` with
-        - ``h``: (ny, nx) heights in metres; cell (i, j) is centred at ``origin + (j * cell, i * cell)``,
-        - ``cell``: cell size in metres,
-        - ``origin``: (2,) world xy of cell (0, 0) (optional, default 0).
+
+    - ``h``: (ny, nx) heights in metres; cell (i, j) is centred at ``origin + (j * cell, i * cell)``,
+    - ``cell``: cell size in metres,
+    - ``origin``: (2,) world xy of cell (0, 0) (optional, default 0).
 
     The map is split into square tiles, each its own heightfield geom (neighbouring tiles share their border samples,
     so the surface is continuous). Tiling matters for MuJoCo Warp: its heightfield collision runs in float32 in the
@@ -33,6 +36,12 @@ class HeightmapTerrain(StaticTerrain):
     Each tile also gets a tight bounding box (its own height range), so geoms well above a tile skip it.
 
     The tiles are written once to MuJoCo's binary heightfield format in ``cache_dir``.
+
+    Attributes:
+        CONTACT_BIT (int): Collision bit shared by the terrain and the geoms in ``contact_geoms``.
+        POOL_PARK_DEPTH (float): Depth below the ground plane, in metres, at which unused box slots of
+            ``contact="pool"`` are parked.
+
     """
 
     CONTACT_BIT = 1 << 3
@@ -44,20 +53,22 @@ class HeightmapTerrain(StaticTerrain):
                  tile_size: Union[float, None] = 8.0, contact: str = "hfield", box_quant: float = 0.01,
                  pool_file: Union[str, None] = None, **kwargs: Any):
         """
+        Load the height map and write its tiles to the cache.
+
         Args:
-            env: The environment instance.
-            file: Path to the height map ``.npz``.
-            cache_dir: Where the binary heightfield tiles are written.
-            base_depth: Depth of each tile's base box below its lowest point, in metres.
-            contact_geoms: If given, only these geoms (e.g. the foot capsules) collide with the terrain, through a
-                collision bit of their own (``CONTACT_BIT``). A fine heightfield gives every touching geom dozens of
-                prism contacts, so letting the whole body collide with it is expensive.
-            ground_clearance: On reset, lift the robot so that its terrain-colliding geoms start at least this far
-                above the terrain (metres). Reference motions and reset noise put feet into steps and risers.
-                None disables the correction.
-            tile_size: Edge length of the square heightfield tiles in metres (rounded to whole cells). None puts the
-                whole map in one heightfield.
-            contact: "hfield": the heightfield tiles are the collision surface. "boxes": the map is covered with
+            env (Any): The environment instance.
+            file (str): Path to the height map ``.npz``.
+            cache_dir (str): Where the binary heightfield tiles are written.
+            base_depth (float): Depth of each tile's base box below its lowest point, in metres.
+            contact_geoms (List[str], optional): If given, only these geoms (e.g. the foot capsules) collide with the
+                terrain, through a collision bit of their own (``CONTACT_BIT``). A fine heightfield gives every
+                touching geom dozens of prism contacts, so letting the whole body collide with it is expensive.
+            ground_clearance (float, optional): On reset, lift the robot so that its terrain-colliding geoms start at
+                least this far above the terrain (metres). Reference motions and reset noise put feet into steps and
+                risers. None disables the correction.
+            tile_size (float, optional): Edge length of the square heightfield tiles in metres (rounded to whole
+                cells). None puts the whole map in one heightfield.
+            contact (str): "hfield": the heightfield tiles are the collision surface. "boxes": the map is covered with
                 axis-aligned boxes (equal heights, quantised to ``box_quant``, merged into rectangles) on a ground
                 plane, and the tiles stay in the model without collisions, for height queries only. A heightfield
                 turns every step riser into a slope one cell wide, and feet on that slope slide off the tread edge.
@@ -66,11 +77,13 @@ class HeightmapTerrain(StaticTerrain):
                 trajectory into them (MuJoCo Warp keeps geom position, size and bounds per world). With "boxes" every
                 world's broadphase tests the contact geoms against every box of the map; this keeps it to K boxes.
                 Within ``pool_file``'s reach of a clip's root path the contacts are those of "boxes".
-            box_quant: Height quantisation of the boxes in metres.
-            pool_file: For ``contact="pool"``: ``.npz`` with ``idx`` (n_trajectories, K), indices into ``boxes()`` of
-                each trajectory's boxes (-1 pads), and ``n_boxes``, the box count they index (checked against
-                ``boxes()``). Rows follow the trajectory order of the dataset the env is trained on. ``write_pool_file``
-                builds it.
+            box_quant (float): Height quantisation of the boxes in metres.
+            pool_file (str, optional): For ``contact="pool"``: ``.npz`` with ``idx`` (n_trajectories, K), indices into
+                ``boxes()`` of each trajectory's boxes (-1 pads), and ``n_boxes``, the box count they index (checked
+                against ``boxes()``). Rows follow the trajectory order of the dataset the env is trained on.
+                ``write_pool_file`` builds it.
+            **kwargs (Any): Additional keyword arguments of the base class.
+
         """
         super().__init__(env, **kwargs)
         assert contact in ("hfield", "boxes", "pool"), f"contact must be 'hfield', 'boxes' or 'pool', got {contact}"
@@ -141,17 +154,25 @@ class HeightmapTerrain(StaticTerrain):
             self._pool_checked = False
 
     def _tile_file(self, a: int, b: int) -> str:
+        """Path of the binary heightfield file of tile (a, b) in the cache."""
         return os.path.join(self.tile_dir, f"tile_{a}_{b}.bin")
 
     def _tile_name(self, a: int, b: int) -> str:
+        """Name of the geom of tile (a, b); the first tile is called "floor" if the tiles are the collision surface."""
         # with box contact the ground plane is the "floor"
         return "floor" if a == b == 0 and self.contact_mode == "hfield" else f"floor_{a}_{b}"
 
     def boxes(self) -> np.ndarray:
-        """(n, 6) boxes [x0, x1, y0, y1, z0, z1] covering the map above its lowest height, cached next to the tiles.
+        """
+        Boxes covering the map above its lowest height, cached next to the tiles.
 
         Cells of one quantised height form flat regions (treads); a region that fills its bounding rectangle is one
-        box, any other is split greedily into rectangles. Cell (i, j) covers +-cell/2 around its sample point."""
+        box, any other is split greedily into rectangles. Cell (i, j) covers +-cell/2 around its sample point.
+
+        Returns:
+            np.ndarray: Boxes ``[x0, x1, y0, y1, z0, z1]`` in world coordinates, shape ``(n, 6)``.
+
+        """
         path = os.path.join(self.tile_dir, f"boxes_q{self.box_quant:g}.npy")
         if os.path.exists(path):
             return np.load(path)
@@ -183,12 +204,13 @@ class HeightmapTerrain(StaticTerrain):
         reference path, the pool gives it the contacts of the full box map.
 
         Args:
-            path: Output ``.npz`` (``idx``, ``n_boxes``, ``reach``).
-            traj: The dataset (a ``Trajectory``), in the order the env will use.
-            reach: Distance from the root path in metres.
+            path (str): Output ``.npz`` (``idx``, ``n_boxes``, ``reach``).
+            traj (Trajectory): The dataset, in the order the env will use.
+            reach (float): Distance from the root path in metres.
 
         Returns:
             np.ndarray: ``idx``, (n_trajectories, K) indices into ``boxes()``, -1 padded.
+
         """
         B = self.boxes()
         qpos, sp = np.asarray(traj.data.qpos), np.asarray(traj.data.split_points)
@@ -211,6 +233,21 @@ class HeightmapTerrain(StaticTerrain):
         return idx
 
     def modify_spec(self, spec: MjSpec) -> MjSpec:
+        """
+        Replace the floor of the model by the terrain.
+
+        The floor geom is deleted and its contact settings are reused for the heightfield tiles, which are added as
+        heightfield assets and geoms. With box contact, a ground plane and the boxes (or the box slots of
+        ``contact="pool"``) are added as well, and the tiles do not collide. If ``contact_geoms`` is set, the terrain
+        and these geoms get the collision bit ``CONTACT_BIT``.
+
+        Args:
+            spec (MjSpec): The simulation specification.
+
+        Returns:
+            MjSpec: The modified simulation specification.
+
+        """
         # replace the floor, keeping its contact settings
         contact = {}
         for g in spec.geoms:
@@ -269,15 +306,34 @@ class HeightmapTerrain(StaticTerrain):
 
     def update(self, env: Any, model: Any, data: Any, carry: Any, backend: ModuleType,
                traj=None) -> Tuple[Any, Any, Any]:
-        """With ``contact="pool"``: put the boxes of each env's current trajectory into the box slots, in the model
-        (position, size, bounds; for MuJoCo also the world body's bounding volume tree) and, for MJX, in the data
-        (MuJoCo Warp computes the poses of world-body geoms only in make_data, and the JAX kinematics refresh after
-        a step writes the slots' model-default poses back).
+        """
+        Write the boxes of each env's current trajectory into the box slots (only with ``contact="pool"``).
+
+        The boxes are written to the model (position, size, bounds; for MuJoCo also the world body's bounding volume
+        tree) and, for MJX, to the data (MuJoCo Warp computes the poses of world-body geoms only in make_data, and the
+        JAX kinematics refresh after a step writes the slots' model-default poses back).
 
         The trajectory is read from ``carry.traj_state`` every step, so the boxes follow the clip even if it changes
         within an episode. Between a reset and the first step the slots still hold the previous trajectory's boxes
         (the model is not per-env state at reset); heights (``get_height_at``, grounding, height scans) come from the
-        full map and are not affected."""
+        full map and are not affected.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Additional carry holding the trajectory state.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            Tuple[Any, Any, Any]: The updated simulation model, data, and carry.
+
+        Raises:
+            ValueError: If ``contact="pool"`` is used without a trajectory state, or the pool file does not match
+                the number of trajectories.
+
+        """
         if self.contact_mode != "pool":
             return model, data, carry
         traj_no = getattr(getattr(carry, "traj_state", None), "traj_no", None)
@@ -343,10 +399,24 @@ class HeightmapTerrain(StaticTerrain):
 
     @property
     def trajectories_in_world_frame(self) -> bool:
+        """
+        Whether episodes start where their clip is instead of at the world origin.
+
+        Returns:
+            bool: Always True, the map is built around the clips of the dataset.
+
+        """
         return True
 
     @property
     def grounds_robot(self) -> bool:
+        """
+        Whether the terrain lifts the robot out of the ground on reset.
+
+        Returns:
+            bool: True if ``ground_clearance`` is not None.
+
+        """
         return self.ground_clearance is not None
 
     def _ground_setup(self, env: Any):
@@ -378,6 +448,21 @@ class HeightmapTerrain(StaticTerrain):
         return self._ground
 
     def ground_robot(self, env: Any, data: Any, backend: ModuleType) -> Any:
+        """
+        Lift the robot so that its terrain-colliding geoms start at least ``ground_clearance`` above the terrain.
+
+        The geoms are sampled at a few points each; the root height is raised by the largest penetration found, and
+        never lowered.
+
+        Args:
+            env (Any): The environment instance.
+            data (Union[MjData, Data]): The simulation data.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+
+        Returns:
+            Union[MjData, Data]: The simulation data with the corrected root height.
+
+        """
         ids, pts, rad, root_z = self._ground_setup(env)
         if backend == np:
             mujoco.mj_kinematics(env._model, data)
@@ -401,13 +486,25 @@ class HeightmapTerrain(StaticTerrain):
     def get_height_at(self, xy: Union[np.ndarray, jnp.ndarray], backend: ModuleType, env: Any = None,
                       carry: Any = None) -> Union[np.ndarray, jnp.ndarray]:
         """
-        Height of the collision surface at world points ``xy`` (..., 2): the heightfield surface, or with box
-        contact the top of the box (or ground plane) under the point.
+        Height of the collision surface at world points.
+
+        The surface is the heightfield surface, or with box contact the top of the box (or ground plane) under the
+        point.
 
         With the JAX backend and an ``env`` whose MJX model holds ``hfield_data`` as a device array, the heights are
         read from the tiles in that array, the same buffer the simulator collides with. A second copy of a large map
         would be embedded in every jitted program as a constant (and XLA sinks constants into loop bodies, copying
         them again), which costs gigabytes for a few-hundred-MB map.
+
+        Args:
+            xy (Union[np.ndarray, jnp.ndarray]): World xy positions, shape ``(..., 2)``.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            env (Any): The environment instance.
+            carry (Any): Additional carry (unused).
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: Terrain heights in metres, shape ``(...)``.
+
         """
         fx = (xy[..., 0] - self.origin[0]) / self.cell
         fy = (xy[..., 1] - self.origin[1]) / self.cell

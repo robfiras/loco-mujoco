@@ -1,3 +1,5 @@
+"""Helper functions for reward computation."""
+
 from typing import Union
 from types import ModuleType
 

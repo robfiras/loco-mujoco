@@ -1,3 +1,5 @@
+"""Video recording from a stream of rendered frames, based on OpenCV with optional ffmpeg compression."""
+
 import os
 import subprocess
 import cv2
@@ -7,7 +9,11 @@ from pathlib import Path
 
 class VideoRecorder(object):
     """
-    Simple video record that creates a video from a stream of images.
+    Simple video recorder that creates an mp4 video from a stream of images.
+
+    Calling the recorder with a frame appends it to the current video, which is opened on the first frame.
+    :meth:`stop` finishes the video; frames added afterwards go into a new file with a running number.
+
     """
 
     def __init__(self, path="./LocoMuJoCo_recordings", tag=None, video_name=None, fps=60, compress=True):
@@ -15,11 +21,13 @@ class VideoRecorder(object):
         Constructor.
 
         Args:
-            path: Path at which videos will be stored.
-            tag: Name of the directory at path in which the video will be stored. If None, a timestamp will be created.
-            video_name: Name of the video without extension. Default is "recording".
-            fps: Frame rate of the video.
-            compress: Whether to compress the video after recording.
+            path (str): Path at which videos will be stored.
+            tag (str): Name of the directory at path in which the video will be stored. If None, a timestamp will be
+                created.
+            video_name (str): Name of the video without extension. Default is "recording".
+            fps (int): Frame rate of the video.
+            compress (bool): Whether to compress the video with ffmpeg after recording.
+
         """
 
         if tag is None:
@@ -51,8 +59,11 @@ class VideoRecorder(object):
 
     def __call__(self, frame):
         """
+        Add a frame to the video.
+
         Args:
-            frame (np.ndarray): Frame to be added to the video (H, W, RGB)
+            frame (np.ndarray): Frame to be added to the video, an RGB image of shape ``(height, width, 3)``.
+
         """
         assert frame is not None
 
@@ -63,6 +74,7 @@ class VideoRecorder(object):
         self._video_writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
     def _create_video_writer(self, height, width):
+        """Create the output directory and open an mp4 writer for frames of the given size."""
 
         name = self._video_name
         if self._counter > 0:
@@ -79,6 +91,15 @@ class VideoRecorder(object):
                                              self._fps, (width, height))
 
     def stop(self):
+        """
+        Finish the current video and, if enabled, compress it with ffmpeg (H.264, 30 frames per second).
+
+        If the compression fails, a message is printed and the uncompressed video is kept.
+
+        Returns:
+            str: Path of the video file.
+
+        """
         cv2.destroyAllWindows()
         self._video_writer.release()
 

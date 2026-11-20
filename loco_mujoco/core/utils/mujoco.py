@@ -1,3 +1,5 @@
+"""Helpers to look up joint and geom indices in MuJoCo models and to query collisions."""
+
 import mujoco
 import numpy as np
 import jax

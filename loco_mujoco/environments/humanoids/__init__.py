@@ -1,3 +1,11 @@
+"""
+Humanoid environments: humanoid robots and (musculo-)skeletal human models.
+
+Importing this package registers all humanoid environments and their Mjx variants in
+:class:`~loco_mujoco.environments.base.LocoEnv` (so that they can be created by name through the task factories)
+and registers the ``LocoMujoco`` Gymnasium environment.
+"""
+
 from .atlas import Atlas
 from .atlas_mjx import MjxAtlas
 from .talos import Talos

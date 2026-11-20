@@ -1,15 +1,19 @@
-"""SAC (Soft Actor-Critic) on top of OffPolicyBase.
+"""
+Soft Actor-Critic (SAC) in JAX, built on :class:`~loco_mujoco.algorithms.experimental.offpolicy_base.OffPolicyBase`.
 
-The shared off-policy machinery (replay buffer, twin Q, target updates,
-collection loop, scan over env steps) lives in `offpolicy_base.py`. This
-module only owns the SAC-specific pieces:
+Implements the off-policy maximum-entropy actor-critic algorithm of Haarnoja et al. (2018). The shared
+off-policy machinery (replay buffer, twin Q-networks, target updates, collection loop, scan over environment
+steps) lives in :mod:`loco_mujoco.algorithms.experimental.offpolicy_base`. This module only owns the
+SAC-specific pieces:
 
-  - Squashed-Gaussian actor (`SACActorNet`)
-  - Sampled-action log-prob (squashed Gaussian)
-  - Entropy bonus in Q-target ( -alpha · log_pi_next )
-  - Actor loss ( E[ alpha · log_pi - min(Q1,Q2) ] )
-  - Learnable temperature (alpha) with target-entropy constraint
-  - Metrics: mean_alpha, mean_entropy, mean_std
+- the squashed-Gaussian actor (:class:`SACActorNet`) and the log-probability of its sampled actions,
+- the entropy bonus in the Q-target, ``-alpha * log_pi(next_action)``,
+- the actor loss ``E[alpha * log_pi - min(Q1, Q2)]``,
+- the learnable temperature ``alpha`` with a target-entropy constraint,
+- the metrics ``mean_alpha``, ``mean_entropy`` and ``mean_std``.
+
+Example: ``examples/training_examples/jax_rl_mimic_sac``.
+
 """
 
 import ast
@@ -39,7 +43,26 @@ from loco_mujoco.algorithms.experimental.offpolicy_base import (
 # ---------------------------------------------------------------------------
 
 class SACActorNet(nn.Module):
-    """Diagonal-Gaussian actor with tanh squashing."""
+    """
+    Diagonal Gaussian actor with tanh squashing.
+
+    The network outputs the mean and the log standard deviation of the Gaussian *before* squashing; sampling and
+    the tanh are applied by the algorithm.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        hidden_layer_dims (tuple): Number of units of each hidden layer.
+        activation (str): Name of the activation function in ``flax.linen``.
+        init_std (float): Initial standard deviation.
+        learnable_std (bool): If False, the gradient with respect to the log standard deviation is stopped.
+        state_dependent_std (bool): If True, the log standard deviation is a network output, otherwise a
+            state-independent parameter ``log_std``.
+        log_std_min (float): Lower clipping bound of the log standard deviation.
+        log_std_max (float): Upper clipping bound of the log standard deviation.
+        use_obs_norm (bool): If True, the observation is normalized by a
+            :class:`~loco_mujoco.algorithms.common.networks.RunningMeanStd` layer.
+
+    """
 
     action_dim: int
     hidden_layer_dims: tuple = (256, 256)
@@ -53,6 +76,17 @@ class SACActorNet(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+        """
+        Compute the parameters of the pre-squashing Gaussian.
+
+        Args:
+            x (jax.Array): Observations, shape ``(batch, obs_dim)``.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: Mean and clipped log standard deviation, both of shape
+            ``(batch, action_dim)``.
+
+        """
         activation_fn = get_activation_fn(self.activation)
         if self.use_obs_norm:
             x = RunningMeanStd()(x)
@@ -84,7 +118,19 @@ SACCriticNet = OffPolicyCriticNet
 # ---------------------------------------------------------------------------
 
 def _squashed_gaussian_sample_and_log_prob(mean, log_std, rng):
-    """Sample from a tanh-squashed Gaussian and compute log_prob."""
+    """
+    Sample from a tanh-squashed Gaussian and compute the log-probability of the sample.
+
+    Args:
+        mean (jax.Array): Mean of the Gaussian, shape ``(batch, action_dim)``.
+        log_std (jax.Array): Log standard deviation, shape ``(batch, action_dim)``.
+        rng (jax.Array): PRNG key.
+
+    Returns:
+        Tuple[jax.Array, jax.Array]: The squashed actions in ``(-1, 1)``, shape ``(batch, action_dim)``, and
+        their log-probabilities, shape ``(batch,)``.
+
+    """
     std = jnp.exp(log_std)
     noise = jax.random.normal(rng, shape=mean.shape)
     x = mean + std * noise
@@ -102,6 +148,22 @@ def _squashed_gaussian_sample_and_log_prob(mean, log_std, rng):
 
 @struct.dataclass
 class SACSummaryMetrics(SummaryMetrics):
+    """
+    Training metrics logged by SAC.
+
+    Extends :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics`. Every entry is an average over ``log_every``
+    training iterations (``buffer_size`` and ``max_timestep`` are taken at the end of that window).
+
+    Attributes:
+        mean_critic_loss (float): Mean critic loss (sum of the mean squared errors of all critics).
+        mean_actor_loss (float): Mean actor loss.
+        mean_alpha_loss (float): Temperature loss; currently always reported as zero.
+        mean_alpha (float): Temperature ``alpha``.
+        mean_std (float): Mean standard deviation of the pre-squashing Gaussian policy.
+        mean_entropy (float): Single-sample estimate of the policy entropy, ``-mean(log_pi)``.
+        buffer_size (int): Number of transitions in the replay buffer.
+
+    """
     mean_critic_loss: float = 0.0
     mean_actor_loss: float = 0.0
     mean_alpha_loss: float = 0.0
@@ -117,6 +179,18 @@ class SACSummaryMetrics(SummaryMetrics):
 
 @dataclass(frozen=True)
 class SACAgentConf(AgentConfBase):
+    """
+    Static configuration of a SAC agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        actor_net (SACActorNet): The actor network definition.
+        critic_net (OffPolicyCriticNet): The critic network definition.
+        actor_tx: The Optax optimizer of the actor.
+        critic_tx: The Optax optimizer of the critic.
+        alpha_tx: The Optax optimizer of the temperature.
+
+    """
     config: DictConfig
     actor_net: SACActorNet
     critic_net: OffPolicyCriticNet
@@ -125,6 +199,15 @@ class SACAgentConf(AgentConfBase):
     alpha_tx: Any
 
     def serialize(self):
+        """
+        Serialize the agent configuration and the network definitions.
+
+        The optimizers are not serialized; they are rebuilt from the configuration in :meth:`from_dict`.
+
+        Returns:
+            dict: Dictionary with the keys ``"config"``, ``"actor_net"`` and ``"critic_net"``.
+
+        """
         conf_dict = OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True)
         return {
             "config": conf_dict,
@@ -134,6 +217,16 @@ class SACAgentConf(AgentConfBase):
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            SACAgentConf: The restored configuration with newly built optimizers.
+
+        """
         config = OmegaConf.create(d["config"])
         exp = config.experiment
 
@@ -156,7 +249,15 @@ class SACAgentConf(AgentConfBase):
 
 @struct.dataclass
 class _LogAlphaState:
-    """Wrapper around a learnable log_alpha parameter + its optimiser state."""
+    """
+    Wrapper around the learnable ``log_alpha`` parameter and its optimizer state.
+
+    Attributes:
+        train_state (TrainState): Train state whose parameters are ``{"log_alpha": ...}``.
+        target_entropy (jax.Array): Target entropy of the policy, scalar.
+        learnable (jax.Array): Scalar boolean; if False, the temperature is kept fixed.
+
+    """
     train_state: TrainState
     target_entropy: float
     learnable: bool
@@ -164,10 +265,30 @@ class _LogAlphaState:
 
 @struct.dataclass
 class SACAgentState(OffPolicyAgentState):
-    """SAC agent state — extra_state carries `_LogAlphaState`."""
+    """
+    Dynamic state of a SAC agent.
+
+    Same fields as :class:`~loco_mujoco.algorithms.experimental.offpolicy_base.OffPolicyAgentState`;
+    ``extra_state`` carries the temperature state (``log_alpha`` train state, target entropy and learnable flag).
+
+    """
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Actor, critic, target critic and temperature are restored; the replay buffer is created empty and
+        ``env_state`` and ``last_obs`` are ``None``.
+
+        Args:
+            d (dict): Dictionary created by ``serialize``.
+            agent_conf (SACAgentConf): Agent configuration providing the networks and the optimizers.
+
+        Returns:
+            SACAgentState: The restored agent state.
+
+        """
         exp = agent_conf.config.experiment
         obs_dim = int(exp.obs_dim)
         action_dim = int(exp.action_dim)
@@ -232,12 +353,51 @@ class SACAgentState(OffPolicyAgentState):
 # ---------------------------------------------------------------------------
 
 class SACJax(OffPolicyBase):
+    """
+    Soft Actor-Critic (Haarnoja et al., 2018).
+
+    Off-policy maximum-entropy actor-critic with a tanh-squashed Gaussian policy, an ensemble of Q-networks (two
+    by default) with a Polyak-averaged target, and an automatically tuned temperature. The training loop is
+    implemented in :class:`~loco_mujoco.algorithms.experimental.offpolicy_base.OffPolicyBase`; the usage follows
+    :class:`~loco_mujoco.algorithms.common.base_algorithm.JaxRLAlgorithmBase` (``init_agent_conf``,
+    ``init_agent_state``, ``build_train_fn``, ``save_agent``, ``play_policy``). A complete script is in
+    ``examples/training_examples/jax_rl_mimic_sac``.
+
+    """
     _agent_conf = SACAgentConf
     _agent_state = SACAgentState
 
     # ---------- Conf init -----------------------------------------------
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived hyperparameters, the networks and the optimizers.
+
+        The hyperparameters are read from ``config.experiment``:
+
+        - ``num_envs``, ``total_timesteps``: number of parallel environments and total number of environment steps.
+        - ``buffer_size``, ``batch_size``, ``learning_starts``, ``gradient_steps``: replay buffer capacity, minibatch
+          size, number of stored transitions before learning starts (default ``batch_size``) and gradient steps per
+          environment step (default 1).
+        - ``gamma``, ``tau``: discount factor and Polyak rate of the target critic (default 0.005).
+        - ``lr_actor``, ``lr_critic``, ``lr_alpha``, ``max_grad_norm``: optimizer settings.
+        - ``init_alpha``, ``learnable_alpha``, ``target_entropy``: temperature settings; the target entropy defaults
+          to ``-action_dim``.
+        - ``hidden_layers``, ``activation``, ``init_std``, ``learnable_std``, ``state_dependent_std``,
+          ``log_std_min``, ``log_std_max``, ``use_obs_norm``: network settings.
+        - ``log_every``: number of training iterations aggregated into one row of the logged metrics.
+
+        The keys ``obs_dim``, ``action_dim`` and ``num_updates`` (``total_timesteps // num_envs``) are written to
+        ``config.experiment`` (the configuration is modified in place).
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            SACAgentConf: The agent configuration.
+
+        """
         obs_dim = int(env.info.observation_space.shape[0])
         action_dim = int(env.info.action_space.shape[0])
 
@@ -279,6 +439,19 @@ class SACJax(OffPolicyBase):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf, rng):
+        """
+        Initialize the SAC agent state (actor, critic, target critic, temperature and an empty replay buffer).
+
+        Args:
+            env: The environment (unused; the dimensions are taken from the configuration).
+            agent_conf (SACAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            SACAgentState: The initial agent state; ``env_state`` and ``last_obs`` are ``None`` and get initialized
+            by the training function.
+
+        """
         exp = agent_conf.config.experiment
         obs_dim = int(exp.obs_dim)
         action_dim = int(exp.action_dim)
@@ -324,6 +497,18 @@ class SACJax(OffPolicyBase):
     # ---------- OffPolicyBase hooks -------------------------------------
     @classmethod
     def _init_extra_state(cls, rng, exp, alpha_tx=None):
+        """
+        Create the temperature state.
+
+        Args:
+            rng (jax.Array): PRNG key (unused).
+            exp (DictConfig): The ``experiment`` node of the configuration.
+            alpha_tx: Optimizer of the temperature; if ``None``, Adam with learning rate ``lr_alpha`` is used.
+
+        Returns:
+            _LogAlphaState: The temperature state initialized to ``init_alpha`` (default 0.1).
+
+        """
         if alpha_tx is None:
             alpha_tx = optax.adam(float(exp.lr_alpha))
         init_log_alpha = jnp.log(float(getattr(exp, 'init_alpha', 0.1)))
@@ -344,6 +529,7 @@ class SACJax(OffPolicyBase):
     @classmethod
     def _select_action(cls, actor_state, obs, rng, exp,
                        extra_state, deterministic=False):
+        """Sample a squashed-Gaussian action, or return ``tanh(mean)`` if ``deterministic``; see the base class."""
         (mean, log_std), updates = actor_state.apply_fn(
             {"params": actor_state.params, "run_stats": actor_state.run_stats},
             obs, mutable=["run_stats"],
@@ -357,6 +543,11 @@ class SACJax(OffPolicyBase):
 
     @classmethod
     def _next_action_and_q_bonus(cls, actor_state, next_obs, rng, exp, extra_state):
+        """
+        Sample the next action from the current policy and return the entropy bonus ``-alpha * log_pi``; see the base
+        class.
+
+        """
         (next_mean, next_log_std), _ = actor_state.apply_fn(
             {"params": actor_state.params, "run_stats": actor_state.run_stats},
             next_obs, mutable=["run_stats"],
@@ -372,6 +563,11 @@ class SACJax(OffPolicyBase):
     def _actor_loss(cls, actor_params, actor_apply_fn, actor_run_stats,
                     critic_st, critic_apply_fn,
                     obs_b, rng, exp, extra_state):
+        """
+        Compute the SAC actor loss ``mean(alpha * log_pi - min_k Q_k(s, a))`` for reparameterized actions; see the
+        base class.
+
+        """
         (mean_a, log_std_a), updates = actor_apply_fn(
             {"params": actor_params, "run_stats": actor_run_stats},
             obs_b, mutable=["run_stats"],
@@ -397,6 +593,11 @@ class SACJax(OffPolicyBase):
 
     @classmethod
     def _update_extra(cls, extra_state, actor_aux, rng, exp):
+        """
+        Take a gradient step on the temperature loss ``-mean(log_alpha * (log_pi + target_entropy))`` if the
+        temperature is learnable; see the base class.
+
+        """
         log_pi = actor_aux["log_pi"]
         target_entropy = extra_state.target_entropy
         la_st = extra_state.train_state
@@ -420,6 +621,7 @@ class SACJax(OffPolicyBase):
 
     @classmethod
     def _extra_metrics(cls, actor_state, obs, rng, extra_state, exp):
+        """Compute the temperature, the mean policy standard deviation and an entropy estimate for logging."""
         (mean_pi, log_std), _ = actor_state.apply_fn(
             {"params": actor_state.params, "run_stats": actor_state.run_stats},
             obs, mutable=["run_stats"],
@@ -436,6 +638,7 @@ class SACJax(OffPolicyBase):
 
     @classmethod
     def _build_summary_metric(cls, base_kwargs, extra):
+        """Assemble a :class:`SACSummaryMetrics` from the base and the extra metrics."""
         return SACSummaryMetrics(
             mean_alpha=extra.get("mean_alpha", 0.0),
             mean_std=extra.get("mean_std", 0.0),
@@ -451,6 +654,29 @@ class SACJax(OffPolicyBase):
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
                     train_state_seed=None, traj=None):
+        """
+        Roll out a trained policy in a Python loop and render it.
+
+        By default the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU
+        MuJoCo environment instead. The environment is stopped at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (SACAgentConf): Agent configuration.
+            agent_state (SACAgentState): Agent state holding the trained actor.
+            n_envs (int): Number of parallel environments; use 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Unused; the environment is rendered at every step.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action noise. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the action ``tanh(mean)`` is applied instead of a sample.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            train_state_seed (int): Unused; agents trained with several seeds are not supported here.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
         import numpy as np
 
         exp = agent_conf.config.experiment

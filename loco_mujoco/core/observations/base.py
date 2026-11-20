@@ -1,3 +1,11 @@
+"""
+Observation types and the container that assembles them into the observation vector of an environment.
+
+Simple observation types read entries of the Mujoco data structure (joint positions, body poses, ...);
+stateful observations compute their values from the model, the data and the carry, and may keep a state.
+
+"""
+
 from __future__ import annotations
 from copy import deepcopy
 from typing import List, Sequence, Union
@@ -23,6 +31,14 @@ class ObservationIndexContainer:
     Container for indices of different non-stateful observation types, used to store indices
     related to observations within Mujoco data structures or observations
     created in an environment.
+
+    The container has one attribute per non-stateful observation type, named like the type, that holds the
+    indices of all observations of that type.
+
+    Attributes:
+        concatenated_indices (np.ndarray): Permutation that sorts the concatenation of all index lists; None
+            until :meth:`convert_to_numpy` is called.
+
     """
 
     def __init__(self):
@@ -34,9 +50,7 @@ class ObservationIndexContainer:
         self.concatenated_indices = None
 
     def convert_to_numpy(self):
-        """
-        Converts all list attributes of the class to NumPy arrays in place.
-        """
+        """Converts all list attributes of the class to NumPy arrays in place and computes ``concatenated_indices``."""
         ind = []
         # Iterate through all attributes of the class
         for attr_name in vars(self):
@@ -53,8 +67,13 @@ class ObservationIndexContainer:
 
 class ObservationContainer(UserDict):
     """
-    Container for observations. This is a dictionary with additional functionality to set the container reference
-    for each observation.
+    Container for the observations of an environment.
+
+    This is a dictionary from observation names to :class:`Observation` instances with additional functionality:
+    it sets the container reference of each observation, keeps track of the stateful observations, and gives
+    access to the indices of observation groups. The order of insertion defines the layout of the observation
+    vector.
+
     """
 
     def __init__(self, *args, **kwargs):
@@ -63,6 +82,18 @@ class ObservationContainer(UserDict):
         self._locked = False
 
     def __setitem__(self, key, observation: Observation):
+        """
+        Add an observation to the container.
+
+        Args:
+            key (str): Name under which the observation is stored.
+            observation (Observation): The observation to add.
+
+        Raises:
+            KeyError: If an observation with the same name is already in the container.
+            ValueError: If the container is locked.
+
+        """
 
         if not self._locked:
 
@@ -81,14 +112,27 @@ class ObservationContainer(UserDict):
             raise ValueError("Container is locked and cannot be modified.")
 
     def names(self):
-        """Return a view of the dictionary's keys, same as keys()."""
+        """
+        Return a view of the dictionary's keys, same as keys().
+
+        Returns:
+            KeysView: The names of the observations.
+
+        """
         return self.keys()
 
     def entries(self):
-        """Return a view of the dictionary's values, same as values()."""
+        """
+        Return a view of the dictionary's values, same as values().
+
+        Returns:
+            ValuesView: The observations.
+
+        """
         return self.values()
 
     def __eq__(self, other):
+        """Two containers are equal if they hold the same names and the same observation types in the same order."""
         if not isinstance(other, ObservationContainer):
             return False
 
@@ -102,6 +146,10 @@ class ObservationContainer(UserDict):
     def list_all_stateful(self):
         """
         Returns a list of all stateful observations in the container.
+
+        Returns:
+            List[StatefulObservation]: The stateful observations, in the order of insertion.
+
         """
         return self._stateful_obs
 
@@ -117,7 +165,20 @@ class ObservationContainer(UserDict):
 
     def init_state(self, env, key, model, data, backend, traj=None):
         """
-        Builds a dataclass from the stateful observations in the container.
+        Builds a dataclass from the states of the stateful observations in the container.
+
+        Args:
+            env (Any): The environment instance.
+            key (jax.Array): JAX random key.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment.
+
+        Returns:
+            Any: Instance of a dynamically created flax dataclass with one field per stateful observation, named
+            like the observation and holding its initial state.
+
         """
 
         # Get all stateful observations
@@ -146,11 +207,11 @@ class ObservationContainer(UserDict):
         Filter observations by group name.
 
         Args:
-            obs (Union[np.ndarray, jnp.ndarray]): The observation array.
-            group_name (str): The group name to filter by.
+            obs (Union[np.ndarray, jnp.ndarray]): The observation array, shape ``(..., obs_dim)``.
+            group_name (str | list[str]): The group name, or several names, to filter by.
 
         Returns:
-            Union[np.ndarray, jnp.ndarray]: The filtered observation array.
+            Union[np.ndarray, jnp.ndarray]: The entries of the observation that belong to the group(s).
 
         """
         obs_ind_group = self.get_obs_ind_by_group(group_name)
@@ -191,6 +252,21 @@ class ObservationContainer(UserDict):
         return np.concatenate([obs.obs_ind for obs in self.values() if obs.allow_randomization]).astype(int)
 
     def reset_state(self, env, model, data, carry, backend, traj=None):
+        """
+        Reset the states of all stateful observations in the container.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Additional carry.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment.
+
+        Returns:
+            Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
+
+        """
         # Get all stateful observations
         stateful_obs = self.list_all_stateful()
         # Reset the state of each stateful observation
@@ -199,9 +275,7 @@ class ObservationContainer(UserDict):
         return data, carry
 
     def lock(self):
-        """
-        Lock the container to prevent further modifications.
-        """
+        """Lock the container to prevent further modifications."""
         self._locked = True
 
 
@@ -210,9 +284,22 @@ class Observation:
     Base class for all observation types.
 
     Args:
-        obs_name: The name of the observation.
-        group: The group name of the observation.
-        allow_randomization: Whether the observation is allowed to be randomized.
+        obs_name (str): The name of the observation.
+        group (Union[str, List[str]]): The group name(s) of the observation. Groups are used to select parts
+            of the observation, for example for the actor and the critic.
+        allow_randomization (bool): Whether the observation is allowed to be randomized.
+
+    Attributes:
+        registered (dict): Registry of observation classes by name.
+        name (str): The name of the observation.
+        obs_container (ObservationContainer): The container the observation was added to.
+        group (List[str]): The groups the observation belongs to.
+        allow_randomization (bool): Whether the observation is allowed to be randomized.
+        obs_ind (np.ndarray): Indices of this observation in the observation vector.
+        data_type_ind (np.ndarray): Indices of this observation in the respective attribute of the Mujoco data
+            structure.
+        min (list): Lower limits of the observation.
+        max (list): Upper limits of the observation.
 
     """
 
@@ -236,10 +323,11 @@ class Observation:
         Initialize the observation type from the Mujoco data structure and model.
 
         Args:
-            env: Environment instance.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            current_obs_size: The current size of the observation space.
+            env (Any): Environment instance.
+            model (MjModel): The Mujoco model.
+            data (MjData): The Mujoco data structure.
+            current_obs_size (int): The current size of the observation space, i.e. the index at which this
+                observation starts.
             data_ind_cont (ObservationIndexContainer): The data indices container.
             obs_ind_cont (ObservationIndexContainer): The observation indices container.
 
@@ -262,10 +350,11 @@ class Observation:
         - max: Maximum values of the observation in the observation space.
 
         Args:
-            env: Environment instance.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            current_obs_size: The current size of the observation space.
+            env (Any): Environment instance.
+            model (MjModel): The Mujoco model.
+            data (MjData): The Mujoco data structure.
+            current_obs_size (int): The current size of the observation space, i.e. the index at which this
+                observation starts.
 
         """
         raise NotImplementedError
@@ -296,17 +385,17 @@ class Observation:
     @classmethod
     def get_all_obs_of_type(cls, env, model, data, data_ind_cont, backend):
         """
-        Default getter for all the observations from the Mujoco data structure.
+        Default getter for all the observations of this type from the Mujoco data structure.
 
         Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
             data_ind_cont (ObservationIndexContainer): The indices of *all* observations of all types.
-            backend: The backend to use for the observation.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
 
         Returns:
-            The observation regarding this observation type.
+            Union[np.ndarray, jax.Array]: The flattened values of all observations of this type.
 
         """
         obs_type_name = cls.__name__
@@ -330,18 +419,36 @@ class Observation:
         If not provided, a dedicated get_obs method must be implemented.
 
         Returns:
-            The attribute name in the Mujoco data structure.
+            str: The attribute name in the Mujoco data structure, or None.
+
         """
         return None
 
     @property
     def initialized_from_mj(self):
+        """
+        Whether the observation has been initialized from a Mujoco model and data.
+
+        Returns:
+            bool: True after the indices and limits have been set.
+
+        """
         return self._initialized_from_mj
 
     @staticmethod
     def to_list(val):
         """
         Convert the input to a list of integers.
+
+        Args:
+            val (Union[int, np.ndarray]): An integer or an integer array.
+
+        Returns:
+            List[int]: The input as a list.
+
+        Raises:
+            ValueError: If the input is neither an integer nor an integer array.
+
         """
         if isinstance(val, int):
             return [val]
@@ -352,10 +459,7 @@ class Observation:
 
     @classmethod
     def register(cls):
-        """
-        Register observation in the list and as an observation type.
-
-        """
+        """Register the observation class in the registry and as an attribute of :class:`ObservationType`."""
         obs_type_name = cls.__name__
 
         if obs_type_name not in Observation.registered:
@@ -370,7 +474,7 @@ class Observation:
         List registered Observations.
 
         Returns:
-             The list of the registered goals.
+            List[str]: The names of the registered observation classes.
 
         """
         return list(Observation.registered.keys())
@@ -378,8 +482,16 @@ class Observation:
 
 class SimpleObs(Observation):
     """
+    Base class of observations that read the quantities of a single named element of the model.
+
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the element (joint, body, site, ...) in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     def __init__(self, obs_name: str, xml_name: str, **kwargs):
@@ -388,6 +500,14 @@ class SimpleObs(Observation):
 
 
 class StatefulObservation(Observation, StatefulObject):
+    """
+    Base class of observations that are computed by a function instead of being read from the data structure.
+
+    A stateful observation implements :meth:`get_obs_and_update_state`, which has access to the environment, the
+    model, the data and the carry, and may keep its own state in the carry
+    (see :class:`~loco_mujoco.core.stateful_object.StatefulObject`).
+
+    """
 
     def init_from_mj(self, env, model, data, current_obs_size, data_ind_cont: ObservationIndexContainer,
                      obs_ind_cont: ObservationIndexContainer):
@@ -395,12 +515,13 @@ class StatefulObservation(Observation, StatefulObject):
         Initialize the observation type from the Mujoco data structure and model.
 
         Args:
-            env: Environment instance.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            current_obs_size: The current size of the observation space.
-            data_ind_cont (ObservationIndexContainer): The data indices container.
-            obs_ind_cont (ObservationIndexContainer): The observation indices container.
+            env (Any): Environment instance.
+            model (MjModel): The Mujoco model.
+            data (MjData): The Mujoco data structure.
+            current_obs_size (int): The current size of the observation space, i.e. the index at which this
+                observation starts.
+            data_ind_cont (ObservationIndexContainer): The data indices container (unused).
+            obs_ind_cont (ObservationIndexContainer): The observation indices container (unused).
 
         """
         # extract all information from data and model
@@ -408,7 +529,7 @@ class StatefulObservation(Observation, StatefulObject):
 
     @classmethod
     def get_all_obs_of_type(cls, env, model, data, data_ind_cont, backend):
-        """ this function is not allowed to be called in this class. """
+        """Not supported by stateful observations; raises ``NotImplementedError``."""
         raise NotImplementedError("Stateful observations do not support this function.")
 
     def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
@@ -416,15 +537,15 @@ class StatefulObservation(Observation, StatefulObject):
         Get the observation and update the state.
 
         Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            carry: The state carry.
-            backend: The backend to use, either np or jnp.
-            traj: Trajectory to use (optional).
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
+            carry (Any): The additional carry.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
-            The observation and the updated state.
+            Tuple[Union[np.ndarray, jax.Array], Any]: The observation and the updated carry.
 
         """
         raise NotImplementedError
@@ -434,13 +555,23 @@ class BodyPos(SimpleObs):
     """
     Observation Type holding x, y, z position of the body.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the body in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 3
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.xpos`` as well as its limits."""
         dim = len(data.body(self.xml_name).xpos)
         assert dim == self.dim
         self.min, self.max = [-np.inf] * dim, [np.inf] * dim
@@ -450,6 +581,13 @@ class BodyPos(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"xpos"``.
+
+        """
         return "xpos"
 
 
@@ -457,13 +595,23 @@ class BodyRot(SimpleObs):
     """
     Observation Type holding the quaternion of the body.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the body in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 4
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.xquat`` as well as its limits."""
         dim = len(data.body(self.xml_name).xquat)
         assert dim == self.dim
         self.min, self.max = [-np.inf] * dim, [np.inf] * dim
@@ -473,6 +621,13 @@ class BodyRot(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"xquat"``.
+
+        """
         return "xquat"
 
 
@@ -480,13 +635,23 @@ class BodyVel(SimpleObs):
     """
     Observation Type holding the angular velocity around x, y, z and the linear velocity for x, y, z.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the body in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 6
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.cvel`` as well as its limits."""
         dim = len(data.body(self.xml_name).cvel)
         assert dim == self.dim
         self.min, self.max = [-np.inf] * dim, [np.inf] * dim
@@ -496,6 +661,13 @@ class BodyVel(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"cvel"``.
+
+        """
         return "cvel"
 
 
@@ -503,13 +675,23 @@ class FreeJointPos(SimpleObs):
     """
     Observation Type holding the 3D position and the 4D quaternion of a free joint.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the free joint in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 7
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.qpos`` as well as its limits."""
         # note: free joints do not have limits
         self.min, self.max = [-np.inf] * FreeJointPos.dim, [np.inf] * FreeJointPos.dim
         self.data_type_ind = np.array(mj_jntname2qposid(self.xml_name, model))
@@ -518,6 +700,13 @@ class FreeJointPos(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qpos"``.
+
+        """
         return "qpos"
 
 
@@ -525,8 +714,13 @@ class EntryFromFreeJointPos(FreeJointPos):
     """
     Observation Type holding *a single entry* of a free joint pose.
 
+    Args:
+        entry_index (int): Index of the entry in the 7D pose (position, then quaternion).
+        **kwargs: Arguments of :class:`FreeJointPos`.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 1
@@ -537,6 +731,7 @@ class EntryFromFreeJointPos(FreeJointPos):
         super().__init__(**kwargs)
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Initialize like :class:`FreeJointPos` and keep only the selected entry of the pose."""
         super()._init_from_mj(None, model, data, current_obs_size)
         self.min, self.max = [self.min[self._entry_index]], [self.max[self._entry_index]]
         self.data_type_ind = np.array([self.data_type_ind[self._entry_index]])
@@ -545,6 +740,13 @@ class EntryFromFreeJointPos(FreeJointPos):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qpos"``.
+
+        """
         return "qpos"
 
 
@@ -552,13 +754,23 @@ class FreeJointPosNoXY(FreeJointPos):
     """
     Observation Type holding the height and the 4D quaternion of a free joint pose, neglecting the x and y position.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the free joint in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 5
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Initialize like :class:`FreeJointPos` and drop the x and y position."""
         super()._init_from_mj(None, model, data, current_obs_size)
         self.min, self.max = self.min[2:], self.max[2:]
         self.data_type_ind = self.data_type_ind[2:]
@@ -567,20 +779,39 @@ class FreeJointPosNoXY(FreeJointPos):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qpos"``.
+
+        """
         return "qpos"
 
 
 class JointPos(SimpleObs):
     """
-    Observation Type holding the rotation of the joint.
+    Observation Type holding the position of a joint with a single degree of freedom.
+
+    The limits are taken from the joint range, if the joint is limited.
+
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the joint in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
 
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 1
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.qpos`` as well as its limits."""
         dim = len(data.joint(self.xml_name).qpos)
         assert dim == self.dim
         jh = model.joint(mj_jnt_name2id(self.xml_name, model))
@@ -594,15 +825,28 @@ class JointPos(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qpos"``.
+
+        """
         return "qpos"
 
 
 class JointPosArray(Observation):
     """
-    Observation Type holding the rotation of an array of joints.
+    Observation Type holding the positions of an array of joints.
+
+    Args:
+        obs_name (str): The name of the observation.
+        xml_names (List[str]): The names of the joints in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
 
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     def __init__(self, obs_name: str, xml_names: List[str], **kwargs):
@@ -611,6 +855,7 @@ class JointPosArray(Observation):
         self.dim = None
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.qpos`` as well as its limits."""
         dim = 0
         self.min, self.max, self.data_type_ind, self.obs_ind = [], [], [], []
         for name in self._xml_names:
@@ -633,21 +878,39 @@ class JointPosArray(Observation):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qpos"``.
+
+        """
         return "qpos"
 
 
 class FreeJointVel(SimpleObs):
     """
     Observation Type holding the 3D linear velocity and the 3D angular velocity of a free joint.
-    Note: Different to the BODY_VEL observation type!
+
+    Note: Different to the :class:`BodyVel` observation type!
+
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the free joint in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
 
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 6
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.qvel`` as well as its limits."""
         dim = len(data.joint(self.xml_name).qvel)
         # note: free joints do not have limits
         self.min, self.max = [-np.inf] * dim, [np.inf] * dim
@@ -657,15 +920,27 @@ class FreeJointVel(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qvel"``.
+
+        """
         return "qvel"
 
 
 class EntryFromFreeJointVel(FreeJointVel):
     """
-    Observation Type holding a single entry from of a free joint velocity.
+    Observation Type holding a single entry of a free joint velocity.
+
+    Args:
+        entry_index (int): Index of the entry in the 6D velocity (linear, then angular).
+        **kwargs: Arguments of :class:`FreeJointVel`.
 
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
     dim = 1
 
@@ -675,6 +950,7 @@ class EntryFromFreeJointVel(FreeJointVel):
         super().__init__(**kwargs)
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Initialize like :class:`FreeJointVel` and keep only the selected entry of the velocity."""
         super()._init_from_mj(None, model, data, current_obs_size)
         self.min, self.max = [self.min[self._entry_index]], [self.max[self._entry_index]]
         self.data_type_ind = np.array([self.data_type_ind[self._entry_index]])
@@ -682,6 +958,13 @@ class EntryFromFreeJointVel(FreeJointVel):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qvel"``.
+
+        """
         return "qvel"
 
 
@@ -689,13 +972,23 @@ class JointVel(SimpleObs):
     """
     Observation Type holding the velocity of the joint.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the joint in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 1
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.qvel`` as well as its limits."""
         dim = len(data.joint(self.xml_name).qvel)
         assert dim == self.dim
         self.min, self.max = [-np.inf] * dim, [np.inf] * dim
@@ -705,6 +998,13 @@ class JointVel(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qvel"``.
+
+        """
         return "qvel"
 
 
@@ -712,8 +1012,14 @@ class JointVelArray(Observation):
     """
     Observation Type holding the velocity of an array of joints.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_names (List[str]): The names of the joints in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     def __init__(self, obs_name: str, xml_names: List[str], **kwargs):
@@ -722,6 +1028,7 @@ class JointVelArray(Observation):
         self.dim = None
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the indices of this observation in the observation vector and in ``data.qvel`` as well as its limits."""
         dim = 0
         self.min, self.max, self.data_type_ind, self.obs_ind = [], [], [], []
         for name in self._xml_names:
@@ -741,6 +1048,13 @@ class JointVelArray(Observation):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"qvel"``.
+
+        """
         return "qvel"
 
 
@@ -748,13 +1062,26 @@ class SitePos(SimpleObs):
     """
     Observation Type holding the x, y, z position of the site.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the site in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 3
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """
+        Set the indices of this observation in the observation vector and in ``data.site_xpos`` as well as its limits.
+
+        """
         dim = len(data.site(self.xml_name).xpos)
         assert dim == self.dim
         self.min, self.max = [-np.inf] * dim, [np.inf] * dim
@@ -764,6 +1091,13 @@ class SitePos(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"site_xpos"``.
+
+        """
         return "site_xpos"
 
 
@@ -771,13 +1105,26 @@ class SiteRot(SimpleObs):
     """
     Observation Type holding the flattened rotation matrix of the site.
 
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the site in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    Attributes:
+        dim (int): Dimension of the observation.
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 9
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """
+        Set the indices of this observation in the observation vector and in ``data.site_xmat`` as well as its limits.
+
+        """
         # Sites don't have rotation quaternion for some reason...
         # x_mat is rotation matrix with shape (9, )
         dim = len(data.site(self.xml_name).xmat)
@@ -789,20 +1136,30 @@ class SiteRot(SimpleObs):
 
     @classmethod
     def data_type(cls):
+        """
+        Name of the attribute of the Mujoco data structure this observation is read from.
+
+        Returns:
+            str: ``"site_xmat"``.
+
+        """
         return "site_xmat"
 
 
 class ProjectedGravityVector(Observation):
     """
-    Observation Type holding the gravity vector.
+    Observation Type holding the gravity direction expressed in the frame of a free joint.
 
+    The unit vector ``(0, 0, -1)`` is rotated with the inverse of the orientation of the free joint.
 
     Args:
-        obs_name: The name of the observation.
-        xml_name: The name of the free joint in the Mujoco XML to calculate the gravity vector from.
+        obs_name (str): The name of the observation.
+        xml_name (str): The name of the free joint in the Mujoco XML to calculate the gravity vector from.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
 
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 3
@@ -812,6 +1169,10 @@ class ProjectedGravityVector(Observation):
         super().__init__(obs_name, **kwargs)
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """
+        Set the observation indices, the indices of the quaternion of the free joint in ``data.qpos`` and the limits.
+
+        """
         self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim
         self.data_type_ind = np.array(mj_jntname2qposid(self.xml_name, model))[3:]  # only the quaternion part is needed
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
@@ -823,14 +1184,14 @@ class ProjectedGravityVector(Observation):
         Default getter for all the projected gravity vectors from the Mujoco data structure.
 
         Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
             data_ind_cont (ObservationIndexContainer): The indices of *all* observations of all types.
-            backend: The backend to use for the observation.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
 
         Returns:
-            The observation regarding this observation type.
+            Union[np.ndarray, jax.Array]: The flattened projected gravity vectors of all observations of this type.
 
         """
 
@@ -860,8 +1221,17 @@ class Force(Observation):
     Observation Type holding the collision forces/torques [3D force + 3D torque]
     between two geoms.
 
+    The forces are only computed in the CPU (MuJoCo) backend; in the MJX backend the observation is zero.
+
+    Args:
+        obs_name (str): The name of the observation.
+        xml_name_geom1 (str): The name of the first geom in the Mujoco XML.
+        xml_name_geom2 (str): The name of the second geom in the Mujoco XML.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     dim = 6
@@ -876,6 +1246,7 @@ class Force(Observation):
         self.data_geom_id2 = None
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Look up the ids of the two geoms and set the observation indices and limits."""
         # get all required information from data
         self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim
         self.data_geom_id1 = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, self.xml_name_geom1)
@@ -886,6 +1257,20 @@ class Force(Observation):
 
     @classmethod
     def get_all_obs_of_type(cls, env, model, data, data_ind_cont, backend):
+        """
+        Getter for the collision forces of all observations of this type.
+
+        Args:
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
+            data_ind_cont (ObservationIndexContainer): The indices of *all* observations of all types.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
+
+        Returns:
+            Union[np.ndarray, jax.Array]: The flattened forces and torques, 6 entries per observation.
+
+        """
         ind = data_ind_cont.Force
         if backend == np:
             return backend.ravel(cls.mj_collision_force(model, data, ind))
@@ -896,6 +1281,20 @@ class Force(Observation):
 
     @staticmethod
     def mj_collision_force(model, data, ind):
+        """
+        Compute the contact forces between pairs of geoms with MuJoCo.
+
+        Args:
+            model (MjModel): The Mujoco model.
+            data (MjData): The Mujoco data structure.
+            ind (np.ndarray): Pairs of geom ids, shape ``(n_pairs, 2)``. A contact is only matched if its geoms are
+                in the same order as in the pair.
+
+        Returns:
+            np.ndarray: Contact force and torque in the contact frame (``mujoco.mj_contactForce``) for every pair,
+            shape ``(n_pairs, 6)``; zero for pairs that are not in contact.
+
+        """
 
         c_array = np.zeros((len(ind), 6), dtype=np.float64)
         for i, geom_ids in enumerate(ind):
@@ -912,18 +1311,39 @@ class Force(Observation):
 
     @staticmethod
     def mjx_collision_force(model, data, ind):
+        """
+        Placeholder for the contact forces in MJX, which are not implemented yet.
+
+        Args:
+            model (Model): The Mujoco model.
+            data (Data): The Mujoco data structure.
+            ind (np.ndarray): Pairs of geom ids, shape ``(n_pairs, 2)``.
+
+        Returns:
+            np.ndarray: Zeros of shape ``(n_pairs, 6)``.
+
+        """
         # will be added once mjx adds the collision force function to the official release
         c_array = np.zeros((len(ind), 6), dtype=np.float64)
         return c_array
 
 
 class LastAction(StatefulObservation):
+    """
+    Observation Type holding the action of the previous step, taken from ``carry.last_action``.
+
+    Args:
+        obs_name (str): The name of the observation.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    """
 
     def __init__(self, obs_name: str, **kwargs):
         super().__init__(obs_name, **kwargs)
         self.dim = None
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Set the dimension to the action dimension of the environment, and the observation indices and limits."""
         self.dim = env.action_dim
         self.min, self.max = [-np.inf] * self.dim, [np.inf] * self.dim
         self.obs_ind = np.array([j for j in range(current_obs_size, current_obs_size + self.dim)])
@@ -931,23 +1351,34 @@ class LastAction(StatefulObservation):
 
     def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
-        Get the observation and update the state.
+        Get the last action from the carry.
 
         Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            carry: The state carry.
-            backend: The backend to use, either np or jnp.
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
+            carry (Any): The additional carry.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
-            The observation and the updated state.
+            Tuple[Union[np.ndarray, jax.Array], Any]: The observation and the unchanged carry.
 
         """
         return backend.ravel(carry.last_action), carry
 
 
 class ModelInfo(StatefulObservation):
+    """
+    Observation Type holding attributes of the model, for example quantities that are randomized.
+
+    Args:
+        obs_name (str): The name of the observation.
+        model_attributes (Union[str, List[str]]): Name(s) of the attributes of the Mujoco model to observe. The
+            flattened attributes are concatenated in the given order.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
+    """
 
     def __init__(self, obs_name: str, model_attributes: Union[str, List[str]], **kwargs):
         self._model_attributes = [model_attributes] if isinstance(model_attributes, str) else model_attributes
@@ -955,6 +1386,10 @@ class ModelInfo(StatefulObservation):
         self.dim = None
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """
+        Set the dimension to the total size of the observed model attributes, and the observation indices and limits.
+
+        """
         dim = 0
         for attr in self._model_attributes:
             dim += getattr(model, attr).size
@@ -965,18 +1400,18 @@ class ModelInfo(StatefulObservation):
 
     def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
-        Get the observation and update the state.
+        Get the flattened model attributes.
 
         Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            carry: The state carry.
-            backend: The backend to use, either np or jnp.
-            traj: Trajectory to use (optional).
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
+            carry (Any): The additional carry.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
-            The observation and the updated state.
+            Tuple[Union[np.ndarray, jax.Array], Any]: The observation and the unchanged carry.
 
         """
         obs = []
@@ -992,13 +1427,18 @@ class RelativeSiteQuantaties(StatefulObservation):
     This observation type is typically included in the observation space of imitation learning algorithms like
     AMP or DeepMimic, where the agent is supposed to mimic the trajectory of a reference agent.
 
+    For every site except the main site, the observation holds 3 entries for the relative position, 3 for the
+    relative rotation and 6 for the relative velocity.
+
     Args:
-        obs_name: The name of the observation.
-        site_names: List of site names to calculate the relative quantities from. The first site in the list is
-            considered as the main site. If None, the environment's sites for mimic are used instead.
+        obs_name (str): The name of the observation.
+        site_names (List[str]): List of site names to calculate the relative quantities from. The first site in
+            the list is considered as the main site. If None, the environment's sites for mimic are used instead.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
 
     See also:
-        :class:`Obs` for the base observation class.
+        :class:`Observation` for the base observation class.
+
     """
 
     def __init__(self, obs_name: str, site_names: List[str] = None, **kwargs):
@@ -1012,6 +1452,7 @@ class RelativeSiteQuantaties(StatefulObservation):
         super().__init__(obs_name, **kwargs)
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Look up the site ids and set the dimension, observation indices and limits."""
         if self.site_names is None:
             self.site_names = env.sites_for_mimic
             assert len(self.site_names) > 0, "No sites for mimic are defined in the environment."
@@ -1027,18 +1468,19 @@ class RelativeSiteQuantaties(StatefulObservation):
 
     def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         """
-        Get the observation and update the state.
+        Get the relative site quantities.
 
         Args:
-            env: The environment.
-            model: The Mujoco model.
-            data: The Mujoco data structure.
-            carry: The state carry.
-            backend: The backend to use, either np or jnp.
-            traj: Trajectory to use (optional).
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
+            carry (Any): The additional carry.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): Trajectory to use.
 
         Returns:
-            The observation and the updated state.
+            Tuple[Union[np.ndarray, jax.Array], Any]: The observation (all relative positions, then all relative
+            rotations, then all relative velocities) and the unchanged carry.
 
         """
 
@@ -1065,16 +1507,19 @@ class HeightScan(StatefulObservation):
     also in jitted code on MJX and MjWarp.
 
     Args:
-        obs_name: The name of the observation.
-        size: Grid extent (forward, lateral) in metres.
-        resolution: Grid spacing in metres.
-        forward_offset: Shift of the grid centre along the heading, in metres.
-        offset: Subtracted from every entry (e.g. the nominal root height), in metres.
-        clip: (low, high) clipping range of the output.
-        xml_name: Name of the free joint giving the root pose. Defaults to the env's root free joint.
-        differentiable: Let gradients flow through the scan into the root pose. Off by default: for methods that
-            backpropagate through the observation (e.g. SuperMimic's BPTT through a world model), step edges turn the
-            scan into near-discontinuities whose gradients with respect to the root position are spurious.
+        obs_name (str): The name of the observation.
+        size (Sequence[float]): Grid extent (forward, lateral) in metres.
+        resolution (float): Grid spacing in metres.
+        forward_offset (float): Shift of the grid centre along the heading, in metres.
+        offset (float): Subtracted from every entry (e.g. the nominal root height), in metres.
+        clip (Sequence[float]): (low, high) clipping range of the output.
+        xml_name (str): Name of the free joint giving the root pose. Defaults to the env's root free joint.
+        differentiable (bool): Let gradients flow through the scan into the root pose. Off by default: for
+            methods that backpropagate through the observation (e.g. SuperMimic's BPTT through a world model),
+            step edges turn the scan into near-discontinuities whose gradients with respect to the root position
+            are spurious.
+        **kwargs: Further arguments of :class:`Observation` (``group`` and ``allow_randomization``).
+
     """
 
     def __init__(self, obs_name: str, size: Sequence[float] = (1.6, 1.0), resolution: float = 0.1,
@@ -1093,6 +1538,7 @@ class HeightScan(StatefulObservation):
         self._xml_name = xml_name
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Look up the indices of the root free joint in ``data.qpos`` and set the observation indices and limits."""
         # the terrain is set up after the observations, so it is only looked up when the observation is computed
         name = env.root_free_joint_xml_name if self._xml_name is None else self._xml_name
         self._qpos_ids = np.array(mj_jntname2qposid(name, model))
@@ -1101,6 +1547,22 @@ class HeightScan(StatefulObservation):
         self._initialized_from_mj = True
 
     def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
+        """
+        Compute the height scan around the current root pose.
+
+        Args:
+            env (Any): The environment.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data structure.
+            carry (Any): The additional carry.
+            backend (ModuleType): The backend to use, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): Trajectory to use.
+
+        Returns:
+            Tuple[Union[np.ndarray, jax.Array], Any]: The scan, shape ``(dim,)`` with the grid flattened forward
+            index first, and the unchanged carry.
+
+        """
         q = data.qpos[self._qpos_ids]
         w, x, y, z = q[3], q[4], q[5], q[6]
         yaw = backend.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
@@ -1117,6 +1579,10 @@ class HeightScan(StatefulObservation):
 class ObservationType:
     """
     Namespace for all observation types for easy access.
+
+    Every registered observation class is available as an attribute with the name of the class, for example
+    ``ObservationType.JointPos``.
+
     """
     BodyPos = BodyPos
     BodyRot = BodyRot
@@ -1145,10 +1611,10 @@ class ObservationType:
         Get an observation type by name.
 
         Args:
-            obs_name: The name of the observation type.
+            obs_name (str): The name of the observation type.
 
         Returns:
-            The observation type.
+            type: The observation type.
 
         """
         return getattr(cls, obs_name)
@@ -1159,7 +1625,10 @@ class ObservationType:
         Register a new observation type.
 
         Args:
-            new_obs_type: The new observation type to register.
+            new_obs_type (type): The new observation type to register.
+
+        Raises:
+            TypeError: If the argument is not a class or does not inherit from :class:`Observation`.
 
         """
         # Check if new_obs_type is a class
@@ -1176,6 +1645,10 @@ class ObservationType:
     def list_all(cls):
         """
         List all observation types.
+
+        Returns:
+            List[type]: All registered observation classes.
+
         """
         return [getattr(ObservationType, obs_type) for obs_type in dir(cls) if not obs_type.startswith("__")
                 and obs_type not in ["register", "list_all", "list_all_non_stateful", "get"]]
@@ -1184,6 +1657,10 @@ class ObservationType:
     def list_all_non_stateful(cls):
         """
         List all observation types, which are not stateful.
+
+        Returns:
+            List[type]: All registered observation classes that do not inherit from :class:`StatefulObservation`.
+
         """
         return [getattr(ObservationType, obs_type) for obs_type in dir(cls) if not obs_type.startswith("__")
                 and obs_type not in ["register", "list_all", "list_all_non_stateful", "get"]

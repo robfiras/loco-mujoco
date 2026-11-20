@@ -1,3 +1,5 @@
+"""Observations: the observation types, the container that assembles them and the goal observations."""
+
 from .base import (Observation, ObservationIndexContainer, ObservationContainer, ObservationType,
                    StatefulObservation, HeightScan)
 from .goals import *

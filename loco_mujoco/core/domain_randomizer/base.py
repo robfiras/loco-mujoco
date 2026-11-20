@@ -1,3 +1,5 @@
+"""Base class of the domain randomizers."""
+
 from typing import Any, Dict, List, Union, Tuple
 from types import ModuleType
 
@@ -46,6 +48,7 @@ class DomainRandomizer(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -72,6 +75,7 @@ class DomainRandomizer(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjModel, Model], Union[MjData, Data], Any]: The updated simulation model, data, and carry.
@@ -100,6 +104,7 @@ class DomainRandomizer(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jax.Array], Any]: The updated observation and carry.
@@ -128,6 +133,7 @@ class DomainRandomizer(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jax.Array], Any]: The updated action and carry.

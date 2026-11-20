@@ -1,3 +1,5 @@
+"""Base class of the terrains and the height lookup on MuJoCo heightfields."""
+
 from typing import Dict, Any, List, Union, Tuple
 from types import ModuleType
 
@@ -17,22 +19,23 @@ class Terrain(StatefulObject):
     The environment drives a terrain through these hooks, identically on MuJoCo (CPU, NumPy backend) and on MJX /
     MuJoCo Warp (JAX backend, one env per vmapped world):
 
-        - ``modify_spec``: once, while the model is built. Adds the terrain's assets and geoms.
-        - ``init_state``: per env, when the carry is created. Returns the terrain's per-env state
-          (``carry.terrain_state``).
-        - ``reset``: per env, on every reset, after the trajectory state has been reset and before the initial state
-          is set. May change the data and the carry, not the model.
-        - ``shift_to_env_origin`` (if ``has_env_origins``) and ``ground_robot`` (if ``grounds_robot``): per env, on
-          every reset, after the initial state has been set.
-        - ``update``: per env, before every physics step. The model is not stored per env: the env passes the same
-          base model every step, so a terrain that changes the model per env (e.g. a heightfield or geoms of its
-          own) re-applies the change here from its state in the carry, as the domain randomizer does.
-        - ``get_height_at``: terrain height at world points, for observations (``HeightScan``) and reset logic.
+    - ``modify_spec``: once, while the model is built. Adds the terrain's assets and geoms.
+    - ``init_state``: per env, when the carry is created. Returns the terrain's per-env state
+      (``carry.terrain_state``).
+    - ``reset``: per env, on every reset, after the trajectory state has been reset and before the initial state
+      is set. May change the data and the carry, not the model.
+    - ``shift_to_env_origin`` (if ``has_env_origins``) and ``ground_robot`` (if ``grounds_robot``): per env, on
+      every reset, after the initial state has been set.
+    - ``update``: per env, before every physics step. The model is not stored per env: the env passes the same
+      base model every step, so a terrain that changes the model per env (e.g. a heightfield or geoms of its
+      own) re-applies the change here from its state in the carry, as the domain randomizer does.
+    - ``get_height_at``: terrain height at world points, for observations (``HeightScan``) and reset logic.
 
     Placement of the robot: by default every episode starts at the world origin in xy (the environment recenters
     the trajectory, ``recenter_root_xy``). A terrain that spreads envs over the map returns ``has_env_origins``
     and moves each env to its own origin in ``shift_to_env_origin``. A terrain whose map is built around the clips
     of a dataset returns ``trajectories_in_world_frame``, and episodes then start where the clip is.
+
     """
 
     registered: Dict[str, type] = dict()
@@ -196,6 +199,10 @@ class Terrain(StatefulObject):
         """
         Whether the terrain lifts the robot out of the ground after the initial state has been set on reset (see
         ``ground_robot``). False by default: a flat floor needs no correction.
+
+        Returns:
+            bool: False by default.
+
         """
         return False
 
@@ -312,15 +319,20 @@ def hfield_surface_height(H: Union[np.ndarray, jnp.ndarray], fx: Union[np.ndarra
     interpolation.
 
     Args:
-        H: Flat row-major samples; row r runs along y, column c along x.
-        fx, fy: Fractional column and row coordinates of the points, shape (...). Clamped to the heightfield.
-        nrow, ncol: Rows and columns of the heightfield (both at least 2).
-        backend: numpy or jax.numpy.
-        adr: Index of sample (0, 0) in H (a scalar, or one per point).
-        nearest: Return the nearest sample instead.
+        H (Union[np.ndarray, jnp.ndarray]): Flat row-major samples; row r runs along y, column c along x.
+        fx (Union[np.ndarray, jnp.ndarray]): Fractional column coordinates of the points, shape (...). Clamped to
+            the heightfield.
+        fy (Union[np.ndarray, jnp.ndarray]): Fractional row coordinates of the points, shape (...). Clamped to
+            the heightfield.
+        nrow (int): Rows of the heightfield (at least 2).
+        ncol (int): Columns of the heightfield (at least 2).
+        backend (ModuleType): numpy or jax.numpy.
+        adr (Union[int, np.ndarray, jnp.ndarray]): Index of sample (0, 0) in H (a scalar, or one per point).
+        nearest (bool): Return the nearest sample instead.
 
     Returns:
-        The interpolated sample values, shape (...).
+        Union[np.ndarray, jnp.ndarray]: The interpolated sample values, shape (...).
+
     """
     H = H.reshape(-1)
     fx = backend.clip(fx, 0.0, ncol - 1.0)

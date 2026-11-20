@@ -1,3 +1,23 @@
+"""
+Proximal Policy Optimization (PPO) in JAX.
+
+Implements the clipped-surrogate PPO algorithm of Schulman et al., "Proximal Policy Optimization Algorithms"
+(2017), with generalized advantage estimation, a clipped value loss, optional reward normalization and an
+optional adaptive learning rate driven by the KL divergence between consecutive policies. Rollout collection,
+advantage computation and the gradient updates are fused into one function built from ``jax.lax.scan`` that
+can be jit-compiled, vmapped across seeds and, for data-parallel training on several GPUs, pmapped across
+devices.
+
+PPO is the default reinforcement-learning algorithm of LocoMuJoCo. Combined with
+:class:`~loco_mujoco.core.reward.trajectory_based.MimicReward` it yields DeepMimic-style motion tracking, and
+:class:`~loco_mujoco.algorithms.gail_jax.GAILJax` and :class:`~loco_mujoco.algorithms.amp_jax.AMPJax` reuse
+its policy update.
+
+Examples: ``examples/training_examples/jax_rl`` (plain reinforcement learning) and
+``examples/training_examples/jax_rl_mimic`` (DeepMimic).
+
+"""
+
 import ast
 from omegaconf import open_dict
 import warnings
@@ -20,6 +40,23 @@ from loco_mujoco.core.wrappers import LogWrapper, NStepWrapper, LogEnvState, Vec
 
 @struct.dataclass
 class PPOSummaryMetrics(SummaryMetrics):
+    """
+    Training metrics logged by PPO once per update.
+
+    Extends :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics` (mean episode return, mean episode length and
+    the largest global timestep) by statistics of the policy update. The loss statistics are means over all
+    epochs and minibatches of the update.
+
+    Attributes:
+        mean_value_loss (float): Mean (clipped) value loss.
+        mean_actor_loss (float): Mean clipped surrogate loss of the actor.
+        mean_entropy (float): Mean entropy of the policy.
+        mean_approx_kl (float): Mean approximate KL divergence between the data-collecting and the updated
+            policy, estimated as ``mean(old_log_prob - new_log_prob)``.
+        mean_clip_fraction (float): Mean fraction of samples whose probability ratio left the clipping range.
+        learning_rate (float): Learning rate after the update.
+
+    """
     mean_value_loss: float = 0.0
     mean_actor_loss: float = 0.0
     mean_entropy: float = 0.0
@@ -31,16 +68,28 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 
 @dataclass(frozen=True)
 class PPOAgentConf(AgentConfBase):
+    """
+    Static configuration of a PPO agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        network (ActorCritic): The actor-critic network definition.
+        tx (optax.GradientTransformation): The optimizer.
+
+    """
     config: DictConfig
     network: ActorCritic
     tx: Any
 
     def serialize(self):
         """
-        Serialize the agent configuration and network configuration.
+        Serialize the agent configuration and the network definition.
+
+        The optimizer is not serialized; it is rebuilt from the configuration in :meth:`from_dict`.
 
         Returns:
-            Serialized agent configuration as a dictionary.
+            dict: Dictionary with the keys ``"config"`` (the resolved configuration as a plain container) and
+            ``"network"`` (the state dictionary of the network definition).
 
         """
         conf_dict = OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True)
@@ -49,6 +98,16 @@ class PPOAgentConf(AgentConfBase):
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            PPOAgentConf: The restored configuration with a newly built optimizer.
+
+        """
         config = OmegaConf.create(d["config"])
         tx = PPOJax._get_optimizer(config)
         return cls(config=config,
@@ -58,12 +117,36 @@ class PPOAgentConf(AgentConfBase):
 
 @struct.dataclass
 class PPOAgentState(AgentStateBase):
+    """
+    Dynamic state of a PPO agent.
+
+    Attributes:
+        train_state (TrainState): Parameters, optimizer state and running observation statistics of the
+            actor-critic network.
+        env_state: Environment state at the end of the last training chunk. It is carried over so that training
+            can continue seamlessly; it is not saved to disk.
+        last_obs (jax.Array): Last observations of the previous training chunk, shape ``(num_envs, obs_dim)``;
+            not saved to disk.
+        reward_norm_stats (RewardNormStats): Running statistics of the reward normalization; ``None`` if
+            ``normalize_env`` is disabled or training has not started yet.
+
+    """
     train_state: TrainState
     env_state: Any = None              # carried across chunks so chunk boundary is seamless
     last_obs: Any = None               # last observation from previous chunk
     reward_norm_stats: Any = None      # RewardNormStats; survives env_state reset and is serialized
 
     def serialize(self):
+        """
+        Serialize the agent state.
+
+        Only the train state and, if present, the reward normalization statistics are serialized; ``env_state`` and
+        ``last_obs`` are dropped.
+
+        Returns:
+            dict: Dictionary with the key ``"train_state"`` and optionally ``"reward_norm_stats"``.
+
+        """
         serialized_train_state = flax.serialization.to_state_dict(self.train_state)
         out = {"train_state": serialized_train_state}  # env_state/last_obs not saved to disk
         if self.reward_norm_stats is not None:
@@ -72,6 +155,18 @@ class PPOAgentState(AgentStateBase):
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+            agent_conf (PPOAgentConf): Agent configuration providing the network and the optimizer.
+
+        Returns:
+            PPOAgentState: The restored state, including the optimizer state; ``env_state`` and ``last_obs`` are
+            ``None``.
+
+        """
         train_state = TrainState.create(
             apply_fn=agent_conf.network.apply,
             tx=agent_conf.tx,
@@ -91,12 +186,75 @@ class PPOAgentState(AgentStateBase):
 
 
 class PPOJax(JaxRLAlgorithmBase):
+    """
+    Proximal Policy Optimization (Schulman et al., 2017).
+
+    On-policy actor-critic algorithm with a diagonal Gaussian policy
+    (:class:`~loco_mujoco.algorithms.common.networks.ActorCritic`). Every update collects ``num_steps`` steps
+    from ``num_envs`` parallel MJX environments, computes advantages with GAE and runs ``update_epochs`` epochs
+    of minibatch updates on the clipped surrogate objective.
+
+    The class is stateless; see :class:`~loco_mujoco.algorithms.common.base_algorithm.JaxRLAlgorithmBase` for the
+    general workflow. Usage::
+
+        agent_conf = PPOJax.init_agent_conf(env, config)
+        agent_state = PPOJax.init_agent_state(env, agent_conf, rng)
+        train_fn = jax.jit(PPOJax.build_train_fn(env, agent_conf, mh=mh))
+        out = train_fn(rng, agent_state, traj)
+        PPOJax.save_agent(result_dir, agent_conf, out["agent_state"])
+        PPOJax.play_policy(env, agent_conf, out["agent_state"], n_envs=20, n_steps=200, traj=traj)
+
+    Complete training and evaluation scripts are in ``examples/training_examples/jax_rl`` and
+    ``examples/training_examples/jax_rl_mimic``.
+
+    """
 
     _agent_conf = PPOAgentConf
     _agent_state = PPOAgentState
 
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived hyperparameters, the network and the optimizer.
+
+        The hyperparameters are read from ``config.experiment``:
+
+        - ``num_envs``, ``num_steps``, ``total_timesteps``: number of parallel environments, rollout length per
+          update and total number of environment steps.
+        - ``update_epochs``, ``num_minibatches``: epochs per update and minibatches per epoch.
+        - ``gamma``, ``gae_lambda``, ``clip_eps``, ``ent_coef``, ``vf_coef``, ``max_grad_norm``: the usual PPO
+          coefficients.
+        - ``lr``, ``weight_decay``, ``anneal_lr``, ``desired_kl``: AdamW settings. ``anneal_lr`` linearly decays the
+          learning rate to zero; otherwise, if ``desired_kl`` is set, the learning rate is adapted to keep the
+          approximate KL divergence near that value.
+        - ``hidden_layers``, ``activation``, ``init_std``, ``learnable_std``: network settings.
+        - ``normalize_env``: whether rewards are normalized by a running estimate of the return standard deviation.
+        - ``validation.num``, ``validation.num_envs``, ``validation.num_steps``: number of validation runs during
+          training and their size.
+        - ``actor_obs_group``, ``critic_obs_group`` (optional): observation groups seen by the actor and the critic;
+          by default both see the full observation.
+        - ``len_obs_history``, ``obs_history_group`` (optional): if ``len_obs_history > 1``, the environment is
+          wrapped in an :class:`~loco_mujoco.core.wrappers.mjx.NStepWrapper`. Without ``obs_history_group`` the
+          whole observation is stacked and both actor and critic see the history; with it only that group is
+          stacked and only the actor sees the history.
+        - ``n_devices`` (optional): number of devices for data-parallel training.
+
+        The following keys are written to ``config.experiment`` (the configuration is modified in place):
+        ``num_updates``, ``minibatch_size``, ``validation_interval``, ``num_envs_total`` and a recomputed
+        ``validation.num``. If ``n_devices > 1``, ``num_envs`` is replaced by the per-device number of environments
+        while ``num_envs_total`` keeps the global one.
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            PPOAgentConf: The agent configuration.
+
+        Raises:
+            ValueError: If ``num_envs`` is not divisible by ``n_devices``.
+
+        """
 
         with (open_dict(config.experiment)):
             # Data parallelism. `num_envs` in the config is the GLOBAL env count;
@@ -180,7 +338,19 @@ class PPOJax(JaxRLAlgorithmBase):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf: PPOAgentConf, rng) -> PPOAgentState:
-        """ Initializes and returns the PPO agent state (network params + optimizer). """
+        """
+        Initialize the PPO agent state (network parameters, running statistics and optimizer state).
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            agent_conf (PPOAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            PPOAgentState: The initial agent state; ``env_state``, ``last_obs`` and ``reward_norm_stats`` are
+            ``None`` and get initialized by the training function.
+
+        """
         config, network, tx = agent_conf.config.experiment, agent_conf.network, agent_conf.tx
         wrapped_env = cls._wrap_env(env, config)
         rng, _rng = jax.random.split(rng)
@@ -196,6 +366,20 @@ class PPOJax(JaxRLAlgorithmBase):
 
     @classmethod
     def _get_optimizer(cls, config):
+        """
+        Build the optimizer: gradient clipping by global norm followed by AdamW.
+
+        Depending on the configuration the learning rate is linearly annealed (``anneal_lr``), exposed as an
+        injectable hyperparameter for the adaptive KL schedule (``desired_kl``), or constant. Non-finite updates are
+        skipped via ``optax.apply_if_finite``.
+
+        Args:
+            config (DictConfig): The full configuration (with the ``experiment`` node).
+
+        Returns:
+            optax.GradientTransformation: The optimizer.
+
+        """
         desired_kl = getattr(config.experiment, 'desired_kl', None)
         if config.experiment.anneal_lr:
             tx = optax.chain(
@@ -228,6 +412,36 @@ class PPOJax(JaxRLAlgorithmBase):
                   agent_state: PPOAgentState = None,
                   traj=None,
                   mh: MetricsHandler = None):
+        """
+        Run PPO for ``num_updates`` updates.
+
+        If ``agent_state`` carries an environment state from a previous call, training continues from it; otherwise
+        the environments are reset. Every update consists of a rollout of ``num_steps`` steps, GAE, and
+        ``update_epochs`` epochs of minibatch updates. Every ``validation_interval`` updates a validation rollout is
+        run and evaluated with ``mh`` (if given). When ``pmap_axis_name`` is set in the configuration, the function
+        is expected to run inside ``jax.pmap`` and gradients and losses are averaged across devices.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (PPOAgentConf): Static agent configuration.
+            agent_state (PPOAgentState): Agent state to start or resume from. If ``None``, a new train state is
+                initialized.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Optional metrics handler computing the validation metrics.
+
+        Returns:
+            dict: Dictionary with the keys
+
+            - ``"agent_state"`` (:class:`PPOAgentState`): the agent state after training, including the last
+              environment state, observation and reward normalization statistics.
+            - ``"training_metrics"`` (:class:`PPOSummaryMetrics`): training metrics with a leading axis of length
+              ``num_updates``. The mean episode return and length are averaged over the episodes that finished
+              during the rollout of the update and are NaN if none finished.
+            - ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`): validation metrics
+              with a leading axis of length ``num_updates``; entries of updates without validation are zero.
+
+        """
 
         # extract static agent info
         config, network, tx =\
@@ -589,13 +803,27 @@ class PPOJax(JaxRLAlgorithmBase):
                  agent_state: PPOAgentState,
                  traj=None,
                  mh: MetricsHandler = None):
-        """Standalone eval rollout, same signature as _train_fn.
+        """
+        Run a standalone evaluation rollout; same signature as :meth:`_train_fn`.
 
-        Resets a fresh set of eval envs (`config.validation.num_envs`) and
-        scans the policy for `config.validation.num_steps` steps. Returns
-        episode-return/length summary plus the `mh` validation summary if a
-        MetricsHandler is provided. Does not touch the agent's training
-        state — run_stats updates during eval live only in the scan carry.
+        Resets a fresh set of ``config.validation.num_envs`` environments and rolls out the stochastic policy for
+        ``config.validation.num_steps`` steps. The agent's training state is not touched: updates of the running
+        statistics made during the evaluation live only in the scan carry.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (PPOAgentConf): Static agent configuration.
+            agent_state (PPOAgentState): Agent state to evaluate.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Optional metrics handler computing the validation metrics.
+
+        Returns:
+            dict: Dictionary with the keys ``"eval_summary"``
+            (:class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics` with the mean return and length of the episodes
+            finished during the rollout) and ``"validation_metrics"``
+            (:class:`~loco_mujoco.utils.metrics.ValidationSummary`; empty if ``mh`` is ``None``).
+
         """
         config = agent_conf.config.experiment
         network = agent_conf.network
@@ -658,6 +886,31 @@ class PPOJax(JaxRLAlgorithmBase):
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
                     train_state_seed=None, traj=None):
+        """
+        Roll out a trained policy in a Python loop and render it.
+
+        By default the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU
+        MuJoCo environment instead. The environment is stopped at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (PPOAgentConf): Agent configuration.
+            agent_state (PPOAgentState): Agent state holding the trained policy.
+            n_envs (int): Number of parallel environments; must be 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Only used to warn about a call that neither renders, records nor terminates; the
+                environment is rendered at every step regardless.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action sampling. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the standard deviation of the policy is set to zero so that the mean
+                action is applied. This overwrites ``log_std`` in the parameters of ``agent_state`` in place.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            train_state_seed (int): Index of the seed to play if the agent was trained with ``n_seeds > 1``.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
 
         if use_mujoco and wrap_env:
             if hasattr(agent_conf.config.experiment, "len_obs_history"):
@@ -744,12 +997,44 @@ class PPOJax(JaxRLAlgorithmBase):
                            n_steps=None, render=True,
                            record=False, rng=None, deterministic=False,
                            train_state_seed=None):
+        """
+        Roll out a trained policy in the CPU MuJoCo environment.
+
+        Convenience wrapper around :meth:`play_policy` with one environment, ``use_mujoco=True`` and
+        ``wrap_env=False``. Observation histories (``len_obs_history > 1``) are not supported.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (PPOAgentConf): Agent configuration.
+            agent_state (PPOAgentState): Agent state holding the trained policy.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): See :meth:`play_policy`.
+            record (bool): See :meth:`play_policy`.
+            rng (jax.Array): PRNG key for action sampling. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the mean action is applied; see :meth:`play_policy`.
+            train_state_seed (int): Index of the seed to play if the agent was trained with ``n_seeds > 1``.
+
+        """
 
         cls.play_policy(env, agent_conf, agent_state, 1, n_steps, render, record, rng, deterministic,
                         True, False, train_state_seed)
 
     @staticmethod
     def _wrap_env(env, config):
+        """
+        Wrap the environment for training.
+
+        Applies an :class:`~loco_mujoco.core.wrappers.mjx.NStepWrapper` if ``len_obs_history > 1``, then a
+        :class:`~loco_mujoco.core.wrappers.mjx.LogWrapper` and a :class:`~loco_mujoco.core.wrappers.mjx.VecEnv`.
+
+        Args:
+            env: The (unwrapped) environment.
+            config (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            The wrapped, vectorized environment.
+
+        """
 
         if "len_obs_history" in config and config.len_obs_history > 1:
             env = NStepWrapper(env, config.len_obs_history,

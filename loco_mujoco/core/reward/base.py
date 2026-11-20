@@ -1,3 +1,5 @@
+"""Base class of the reward functions."""
+
 from types import ModuleType
 from typing import Any, Dict, List, Tuple, Union
 
@@ -66,6 +68,7 @@ class Reward(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.
@@ -91,6 +94,7 @@ class Reward(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         """
         return data, carry
