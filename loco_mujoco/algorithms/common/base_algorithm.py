@@ -359,6 +359,27 @@ class JaxRLAlgorithmBase:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def _validation_schedule(num_updates, validation_num):
+        """
+        Compute how often a validation rollout is run during training.
+
+        Args:
+            num_updates (int): Total number of updates of the training run.
+            validation_num (int): Requested number of validation rollouts. Zero (or a negative number) disables
+                validation.
+
+        Returns:
+            Tuple[int, int]: The number of updates between two validation rollouts and the number of validation
+            rollouts that are actually run. If validation is disabled, the interval is ``num_updates + 1``, which
+            is never reached, and the number is 0.
+
+        """
+        if validation_num is None or validation_num <= 0:
+            return int(num_updates) + 1, 0
+        validation_interval = max(int(num_updates) // int(validation_num), 1)
+        return validation_interval, int(num_updates) // validation_interval
+
     @classmethod
     def _linear_lr_schedule(cls, count, num_minibatches, update_epochs, lr, num_updates):
         """

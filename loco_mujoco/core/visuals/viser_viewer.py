@@ -186,7 +186,7 @@ class ViserViewer:
             port (int): Port the viser server binds to.
             verbose (bool): If True, viser logs client connections and disconnections. The
                 server URL is printed by viser regardless.
-            logo (str): Logo shown in the bottom right corner. Either a URL, which the browser
+            logo (str): Logo shown in the top left corner. Either a URL, which the browser
                 fetches itself, or a path to a local image file, which is embedded in the page.
                 Set to None to disable the overlay.
             logo_width (int): Width of the logo overlay in pixels.

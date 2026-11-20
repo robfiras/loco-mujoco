@@ -73,7 +73,7 @@ class ImitationFactory(TaskFactory):
 
         Raises:
             KeyError: If the specified environment is not registered.
-            ValueError: If a dataset type or dataset group is unknown.
+            ValueError: If no dataset configuration is given, or if a dataset type or dataset group is unknown.
 
         """
 
@@ -82,6 +82,12 @@ class ImitationFactory(TaskFactory):
 
         # Get environment class
         env_cls = LocoEnv.registered_envs[env_name]
+
+        if all(conf is None for conf in (default_dataset_conf, amass_dataset_conf,
+                                         lafan1_dataset_conf, custom_dataset_conf)):
+            raise ValueError("ImitationFactory.make needs at least one dataset configuration: "
+                             "default_dataset_conf, amass_dataset_conf, lafan1_dataset_conf or "
+                             "custom_dataset_conf. Use RLFactory for an environment without a trajectory.")
 
         # Create and return the environment
         env = env_cls(init_state_type=init_state_type, terminal_state_type=terminal_state_type, **kwargs)

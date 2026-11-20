@@ -282,9 +282,8 @@ class PPOJax(JaxRLAlgorithmBase):
                     config.experiment.total_timesteps // config.experiment.num_steps // num_envs_total)
             config.experiment.minibatch_size = (
                     config.experiment.num_envs * config.experiment.num_steps // config.experiment.num_minibatches)
-            config.experiment.validation_interval = config.experiment.num_updates // config.experiment.validation.num
-            config.experiment.validation.num = int(
-                config.experiment.num_updates // config.experiment.validation_interval)
+            config.experiment.validation_interval, config.experiment.validation.num = cls._validation_schedule(
+                config.experiment.num_updates, config.experiment.validation.num)
 
         # INIT NETWORK
         hidden_layers = config.experiment.hidden_layers \
@@ -387,7 +386,7 @@ class PPOJax(JaxRLAlgorithmBase):
                 optax.clip_by_global_norm(config.experiment.max_grad_norm),
                 optax.adamw(weight_decay=config.experiment.weight_decay, eps=1e-5,
                             learning_rate=lambda count: cls._linear_lr_schedule(count, config.experiment.num_minibatches,
-                                                                                config.experiment.update_epochs, config.lr,
+                                                                                config.experiment.update_epochs, config.experiment.lr,
                                                                                 config.experiment.num_updates))
             )
         elif desired_kl is not None:
@@ -494,7 +493,7 @@ class PPOJax(JaxRLAlgorithmBase):
         else:
             rew_stats = None
 
-        train_state_buffer = TrainStateBuffer.create(train_state, config.validation.num)
+        train_state_buffer = TrainStateBuffer.create(train_state, max(config.validation.num, 1))
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
@@ -914,8 +913,8 @@ class PPOJax(JaxRLAlgorithmBase):
         """
 
         if use_mujoco and wrap_env:
-            if hasattr(agent_conf.experiment, "len_obs_history"):
-                assert agent_conf.experiment.len_obs_history == 1, "len_obs_history must be 1 for mujoco envs."
+            if hasattr(agent_conf.config.experiment, "len_obs_history"):
+                assert agent_conf.config.experiment.len_obs_history == 1, "len_obs_history must be 1 for mujoco envs."
         if use_mujoco:
             assert n_envs == 1, "Only one mujoco env can be run at a time."
 
@@ -929,7 +928,9 @@ class PPOJax(JaxRLAlgorithmBase):
         train_state = agent_state.train_state
 
         if deterministic:
-            train_state.params["log_std"] = np.ones_like(train_state.params["log_std"]) * -np.inf
+            # replace log_std in a copy, so that the parameters of the given agent_state are not modified
+            train_state = train_state.replace(params={
+                **train_state.params, "log_std": np.ones_like(train_state.params["log_std"]) * -np.inf})
 
         if config.n_seeds > 1:
             assert train_state_seed is not None, ("Loaded train state has multiple seeds. Please specify "

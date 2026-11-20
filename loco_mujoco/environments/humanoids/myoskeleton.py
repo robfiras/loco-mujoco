@@ -401,12 +401,11 @@ class MyoSkeleton(LocoEnv):
         if spec is None:
             spec = self.get_default_xml_file_path()
 
-            # check if file exists, if not exit
+            # check if file exists, if not raise
             if not os.path.exists(spec):
-                print(
-                    "MyoSkeleton model not initialized. Please run \"loco-mujoco-myomodel-init\" to accept the license "
-                    "and download the model. Exiting...")
-                exit()
+                raise FileNotFoundError(
+                    f"MyoSkeleton model not found at {spec}. Please run \"loco-mujoco-myomodel-init\" to accept "
+                    f"the license and download the model.")
 
         # load the model specification
         spec = mujoco.MjSpec.from_file(spec) if not isinstance(spec, MjSpec) else spec

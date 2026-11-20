@@ -89,7 +89,7 @@ Defaults are the values of `jax_rl/conf.yaml`.
 | `num_minibatches` | 32 | Minibatches per epoch. `num_envs * num_steps` must be divisible by it. |
 | `lr` | 1e-4 | Initial learning rate of AdamW. |
 | `desired_kl` | 0.01 | Target KL divergence of the adaptive learning rate, see below. Remove the key or set it to `null` for a constant learning rate. |
-| `anneal_lr` | false | Linear decay of the learning rate. Leave it off and use `desired_kl`. |
+| `anneal_lr` | false | Linear decay of the learning rate to zero over the run. If true, `desired_kl` is not used. |
 | `weight_decay` | 0.0 | Weight decay of AdamW. |
 | `max_grad_norm` | 0.5 | Global gradient-norm clipping. |
 | `gamma` | 0.99 | Discount factor. |

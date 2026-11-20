@@ -56,7 +56,6 @@ class MjvGeom:
     mat: Union[np.ndarray, jnp.ndarray] = field(default_factory=lambda: np.eye(3).reshape(-1))  # Cartesian orientation
 
     # Type info
-    type: int = 0  # geom type (mjtGeom)
     dataid: int = -1  # mesh, hfield, or plane id; -1: none
     objtype: int = 0  # mujoco object type; mjOBJ_UNKNOWN for decor
     objid: int = -1  # mujoco object id; -1 for decor

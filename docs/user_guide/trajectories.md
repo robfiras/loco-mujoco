@@ -117,7 +117,7 @@ print(data.qpos.shape, data.split_points)    # (11990, 26) [    0  5995 11990]
 
 ```{important}
 The padded size defaults to 100,000 samples and 100 clips, which is 1,000 seconds of motion at 100 Hz. Larger
-datasets raise an `AssertionError` that asks you to increase the limits. Pass them through the trajectory
+datasets raise an `AssertionError` that names the limit to increase. Pass the limits through the trajectory
 handler parameters: `th_params=dict(max_n_samples=500_000, max_n_trajs=300)`.
 ```
 

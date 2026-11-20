@@ -352,8 +352,8 @@ class BaseSkeleton(LocoEnv):
             body.pos *= body_scaling
             body.mass *= body_scaling ** 3
             body.fullinertia *= body_scaling ** 5
-            assert np.array_equal(body.fullinertia[3:], np.zeros(3)), "Some of the diagonal elements of the" \
-                                                                      "inertia matrix are not zero! Scaling is" \
+            assert np.array_equal(body.fullinertia[3:], np.zeros(3)), "Some of the off-diagonal elements of the " \
+                                                                      "inertia matrix are not zero! Scaling is " \
                                                                       "not done correctly. Double-Check!"
 
         # scale actuators

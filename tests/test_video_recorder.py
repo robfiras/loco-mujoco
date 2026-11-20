@@ -86,3 +86,21 @@ def test_compress_failure_is_swallowed(tmp_path, monkeypatch):
     out = rec.stop()
     assert (tmp_path / "run" / "clip.mp4").exists()
     assert out.endswith("clip.mp4")
+
+
+def test_file_path_and_viewer_video_file_path(tmp_path):
+    """The viewers return the path of the recorder; they used to read an attribute that does not exist."""
+    from types import SimpleNamespace
+    from loco_mujoco.core.visuals.viewer import MujocoViewer
+    from loco_mujoco.core.visuals.viser_viewer import ViserViewer
+
+    rec = VideoRecorder(path=str(tmp_path), tag="run", video_name="clip", compress=False)
+    assert rec.file_path is None
+    for f in _frames():
+        rec(f)
+    assert rec.file_path.endswith("clip.mp4")
+    assert rec.stop() == rec.file_path
+
+    for viewer_cls in (MujocoViewer, ViserViewer):
+        assert viewer_cls.video_file_path.fget(SimpleNamespace(_recorder=rec)) == rec.file_path
+        assert viewer_cls.video_file_path.fget(SimpleNamespace(_recorder=None)) is None

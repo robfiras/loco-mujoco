@@ -479,9 +479,8 @@ class BPTTPPOJax(PPOJax):
             # For BPTT, minibatch_size is over environments not flattened steps
             config.experiment.minibatch_size = (
                 config.experiment.num_envs // config.experiment.num_minibatches)
-            config.experiment.validation_interval = config.experiment.num_updates // config.experiment.validation.num
-            config.experiment.validation.num = int(
-                config.experiment.num_updates // config.experiment.validation_interval)
+            config.experiment.validation_interval, config.experiment.validation.num = cls._validation_schedule(
+                config.experiment.num_updates, config.experiment.validation.num)
             config.experiment.action_dim = env.info.action_space.shape[0]
 
         hidden_layers = config.experiment.hidden_layers \
@@ -628,7 +627,7 @@ class BPTTPPOJax(PPOJax):
         else:
             prev_action = jnp.zeros((config.num_envs, action_dim))
 
-        train_state_buffer = TrainStateBuffer.create(train_state, config.validation.num)
+        train_state_buffer = TrainStateBuffer.create(train_state, max(config.validation.num, 1))
 
         # ---- training loop ----
         def _update_step(runner_state, unused):
@@ -997,7 +996,9 @@ class BPTTPPOJax(PPOJax):
 
         train_state = agent_state.train_state
         if deterministic:
-            train_state.params["log_std_a"] = np.ones_like(train_state.params["log_std_a"]) * -np.inf
+            # replace log_std in a copy, so that the parameters of the given agent_state are not modified
+            train_state = train_state.replace(params={
+                **train_state.params, "log_std_a": np.ones_like(train_state.params["log_std_a"]) * -np.inf})
 
         if config.n_seeds > 1:
             assert train_state_seed is not None, (

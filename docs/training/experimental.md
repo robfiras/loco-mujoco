@@ -24,7 +24,7 @@ them depends on that task; they optimise whatever reward the environment returns
 | Algorithm | Class | Example folder | Scripts |
 |---|---|---|---|
 | [SAC](#sac) | {class}`~loco_mujoco.algorithms.experimental.sac_jax.SACJax` | `jax_rl_mimic_sac` | `experiment.py`, `experiment_resume.py`, `eval.py` |
-| [TD3](#td3) | {class}`~loco_mujoco.algorithms.experimental.td3_jax.TD3Jax` | `jax_rl_mimic_td3` | `experiment.py`, `eval.py` |
+| [TD3](#td3) | {class}`~loco_mujoco.algorithms.experimental.td3_jax.TD3Jax` | `jax_rl_mimic_td3` | `experiment.py`, `experiment_resume.py`, `eval.py` |
 | [S2PG](#s2pg) | {class}`~loco_mujoco.algorithms.experimental.s2pg_ppo_jax.S2PGPPOJax` | `jax_rl_mimic_s2pg` | `experiment.py` |
 | [BPTT-PPO](#bptt-ppo) | {class}`~loco_mujoco.algorithms.experimental.bptt_ppo_jax.BPTTPPOJax` | `jax_rl_mimic_bptt` | `experiment.py` |
 | [History-aware PPO](#history-aware-ppo) | {class}`~loco_mujoco.algorithms.experimental.history_ppo_jax.HistoryPPOJax` | `jax_rl_mimic_history` | `experiment.py` |
@@ -95,7 +95,8 @@ the logarithm of the desired standard deviation. The example sets such a low tar
 
 `experiment_resume.py` with `conf_resume.yaml` trains in chunks of `timesteps_per_chunk` steps and logs after
 each, in the same way as the [DeepMimic resume script](deepmimic.md#training-in-chunks-and-resuming). The replay
-buffer is part of the agent state and is carried from chunk to chunk.
+buffer is part of the agent state and is carried from chunk to chunk. The TD3 example has the same pair of
+files.
 
 ### TD3
 

@@ -46,6 +46,17 @@ class VideoRecorder(object):
         self._video_writer = None
         self._video_writer_path = None
 
+    @property
+    def file_path(self):
+        """
+        Path of the video file that is currently written or was written last.
+
+        Returns:
+            str: The path, or None if no frame has been recorded yet.
+
+        """
+        return self._video_writer_path
+
     def __call__(self, frame):
         """
         Add a frame to the video.

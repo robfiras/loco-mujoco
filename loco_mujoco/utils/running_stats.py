@@ -73,8 +73,8 @@ class RunningStandardization:
 
         """
 
-        running_std_state = RunningStandardizationState(mean=jnp.zeros(1, *self._shape),
-                                                        std=jnp.ones(1, *self._shape),
+        running_std_state = RunningStandardizationState(mean=jnp.zeros((1, *self._shape)),
+                                                        std=jnp.ones((1, *self._shape)),
                                                         count=1)
         return running_std_state
 
@@ -128,7 +128,7 @@ class RunningAveragedWindow:
             RunningAverageWindowState: State with an empty window.
 
         """
-        state = RunningAverageWindowState(storage=jnp.zeros(self._window_size, *self._shape),
+        state = RunningAverageWindowState(storage=jnp.zeros((self._window_size, *self._shape)),
                                           index=0,
                                           curr_size=0)
 
@@ -146,7 +146,7 @@ class RunningAveragedWindow:
             RunningAverageWindowState: The updated state.
 
         """
-        value = jnp.atleast_2d(value)
+        value = jnp.reshape(jnp.asarray(value), self._shape)
         new_storage = state.storage.at[state.index].set(value)
         new_index = jax.lax.cond(state.index+1 >= self._window_size,
                                  lambda: 0, lambda: state.index+1)

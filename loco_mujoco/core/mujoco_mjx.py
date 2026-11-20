@@ -841,11 +841,6 @@ class Mjx(Mujoco):
                                   **vars(carry))
 
     @property
-    def n_envs(self) -> int:
-        """Returns the number of environments."""
-        return self._n_envs
-
-    @property
     def mjx_env(self) -> bool:
         """Indicates whether this is an MJX environment."""
         return True

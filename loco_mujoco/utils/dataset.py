@@ -305,7 +305,7 @@ def _set_path_in_yaml_conf(path: str, attr: str, path_to_conf: str, quiet: bool 
 
     # load yaml file
     with open(path_to_conf, "r") as file:
-        data = yaml.load(file, Loader=yaml.FullLoader)
+        data = yaml.load(file, Loader=yaml.FullLoader) or {}  # an empty file is loaded as None
 
     # set the path
     data[attr] = path

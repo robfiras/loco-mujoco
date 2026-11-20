@@ -76,20 +76,17 @@ LAFAN1DatasetConf(["dance2_subject4", "walk1_subject1"])
 
 Three lists of clip names are defined in {mod}`loco_mujoco.datasets.humanoids.LAFAN1`:
 `LAFAN1_LOCOMOTION_DATASETS` (16 walking and running clips), `LAFAN1_DANCE_DATASETS` (8 clips) and
-`LAFAN1_ALL_DATASETS` (all 40). Their entries carry a `.csv` suffix that has to be removed before they are
-used as clip names:
+`LAFAN1_ALL_DATASETS` (all 40). Select one of them by name with the field `dataset_group`, or pass a list
+directly:
 
 ```python
 from loco_mujoco.datasets.humanoids.LAFAN1 import LAFAN1_LOCOMOTION_DATASETS
 
-clips = [name.removesuffix(".csv") for name in LAFAN1_LOCOMOTION_DATASETS]
-conf = LAFAN1DatasetConf(clips)
+conf = LAFAN1DatasetConf(dataset_group="LAFAN1_LOCOMOTION_DATASETS")
+conf = LAFAN1DatasetConf(LAFAN1_LOCOMOTION_DATASETS[:4])       # the first four clips of the list
 ```
 
-```{warning}
-Select LAFAN1 clips by name as shown above. The `dataset_group` field of `LAFAN1DatasetConf` passes the list
-entries on with their `.csv` suffix, and such a clip is not found.
-```
+A group holds many clips; see [Combining sources](#combining-sources) for the limits on the number of samples and clips.
 
 ### AMASS
 

@@ -311,10 +311,8 @@ class HistoryPPOJax(PPOJax):
             config.experiment.minibatch_size = (
                 config.experiment.num_envs * config.experiment.num_steps
                 // config.experiment.num_minibatches)
-            config.experiment.validation_interval = (
-                config.experiment.num_updates // config.experiment.validation.num)
-            config.experiment.validation.num = int(
-                config.experiment.num_updates // config.experiment.validation_interval)
+            config.experiment.validation_interval, config.experiment.validation.num = cls._validation_schedule(
+                config.experiment.num_updates, config.experiment.validation.num)
             config.experiment.obs_dim = int(env.info.observation_space.shape[0])
             config.experiment.action_dim = int(env.info.action_space.shape[0])
 
@@ -444,7 +442,9 @@ class HistoryPPOJax(PPOJax):
 
         train_state = agent_state.train_state
         if deterministic:
-            train_state.params["log_std"] = np.ones_like(train_state.params["log_std"]) * -np.inf
+            # replace log_std in a copy, so that the parameters of the given agent_state are not modified
+            train_state = train_state.replace(params={
+                **train_state.params, "log_std": np.ones_like(train_state.params["log_std"]) * -np.inf})
         if config.n_seeds > 1:
             assert train_state_seed is not None
             train_state = jax.tree.map(lambda x: x[train_state_seed], train_state)
@@ -591,7 +591,7 @@ class HistoryPPOJax(PPOJax):
         else:
             rew_stats = None
 
-        ts_buf = TrainStateBuffer.create(train_state, config.validation.num)
+        ts_buf = TrainStateBuffer.create(train_state, max(config.validation.num, 1))
 
         # ---- initial history carries (zeros = no prior context) ----
         # obs_carry:  last (N-1) raw observations → (N-1, num_envs, obs_dim)

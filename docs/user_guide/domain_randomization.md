@@ -45,12 +45,11 @@ leaves the model untouched.
 :language: python
 ```
 
-```{important}
-The randomizer reads its configuration without defaults. Pass all keys of the tables below, with the
-switches you do not need set to `False`. A missing key raises a `KeyError` at the first reset. The four keys
-for the PD gains are only read when the environment uses `PDControl`. Keys that the randomizer does not know
-are ignored, which in the example above applies to the two `joint_stiffness` entries.
-```
+A switch that is not in the configuration is off, so a configuration only has to contain the parameters you
+want to randomize, for example `dict(randomize_gravity=True, gravity_range=[9.51, 10.11])`. A switch that is
+on without its range or scale key raises a `ValueError` when the environment is created. The four keys for the
+PD gains only have an effect when the environment uses `PDControl`. Keys that the randomizer does not know are
+ignored.
 
 ### Model parameters
 

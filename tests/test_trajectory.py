@@ -1472,3 +1472,18 @@ def test_trajectory_transitions_get_attribute_names():
         "rewards",
     ]
     assert attribute_names == expected_names
+
+
+def test_trajectory_data_pad_limits_name_the_parameter(standing_trajectory):
+    """The errors for trajectories above the limits say how the limits are raised."""
+    data = standing_trajectory.data
+    n_samples = data.qpos.shape[0]
+    n_trajs = len(data.split_points) - 1
+
+    with pytest.raises(AssertionError, match=r"th_params=dict\(max_n_samples"):
+        data.pad(n_samples - 1, n_trajs)
+    with pytest.raises(AssertionError, match=r"th_params=dict\(max_n_trajs"):
+        data.pad(n_samples, n_trajs - 1)
+
+    padded = data.pad(n_samples + 10, n_trajs + 2)
+    assert padded.qpos.shape[0] == n_samples + 10

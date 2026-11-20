@@ -327,7 +327,7 @@ class HumanoidTorque(SkeletonTorque):
     def __init__(self, *args, **kwargs):
         warnings.warn(
             f"{self.__class__.__name__} is deprecated and will be removed in a future release. "
-            f"Please use {super().__class__.__name__} instead.",
+            f"Please use SkeletonTorque instead.",
             DeprecationWarning,
             stacklevel=2
         )
@@ -819,7 +819,7 @@ class HumanoidMuscle(SkeletonMuscle):
     def __init__(self, *args, **kwargs):
         warnings.warn(
             f"{self.__class__.__name__} is deprecated and will be removed in a future release. "
-            f"Please use {super().__class__.__name__} instead.",
+            f"Please use SkeletonMuscle instead.",
             DeprecationWarning,
             stacklevel=2
         )

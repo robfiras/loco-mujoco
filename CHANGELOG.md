@@ -28,11 +28,60 @@ Every version below is a git tag and a
   `pyproject.toml`). No behaviour changed.
 - `README.md` and the package READMEs were shortened and now point to the documentation site.
 
+### Removed
+
+- `examples/training_examples/jax_rl_mimic_s2pg4`. The example imported `S2PG4Jax`, an algorithm that is not
+  part of LocoMuJoCo, and could not be run.
+
 ### Fixed
 
 - `examples/tutorials/11_creating_custom_modules.py` failed at `env.reset()` because its custom modules did
   not accept the `traj` argument introduced in 1.2.0.
 - Stale statements in the READMEs of the training examples (robot, algorithm and file names).
+- `anneal_lr: true` failed in `PPOJax`, `GAILJax` and `AMPJax` with a `ConfigAttributeError`, because the
+  optimizer read the learning rate from `config.lr` instead of `config.experiment.lr`.
+- `validation.num: 0` divided by zero in `init_agent_conf` of the PPO-based algorithms. It now disables the
+  validation rollouts, as the example configurations say. A `validation.num` larger than the number of updates
+  no longer leads to a validation interval of zero.
+- `play_policy(use_mujoco=True, wrap_env=True)` of `PPOJax` and `GAILJax` raised an `AttributeError`
+  (`agent_conf.experiment` instead of `agent_conf.config.experiment`).
+- `play_policy(deterministic=True)` of the PPO-based algorithms no longer overwrites `log_std` in the
+  parameters of the agent state that is passed in.
+- `BestTrainStates.create` raised a `TypeError` because it did not set the field `step`.
+- `DefaultRandomizer` required every configuration key and raised a `KeyError` at the first reset if one was
+  missing. Switches that are not given are now off, and a switch that is on without its range or scale raises a
+  `ValueError` at construction. Complete configurations behave as before. The tutorial
+  `08_domain_randomization.py` no longer sets the two `joint_stiffness` keys, which were never read.
+- The errors for a trajectory with more samples or clips than the trajectory handler holds (100,000 samples and
+  100 clips by default) now say how to raise the limits: `th_params=dict(max_n_samples=..., max_n_trajs=...)`.
+- `video_file_path` of `MujocoViewer` and `ViserViewer` raised an `AttributeError`; `VideoRecorder` has a new
+  property `file_path` that both use.
+- The "Ran out of geoms" error of `MujocoViewer` failed with an `AttributeError` while building its message,
+  and the capacity checks were off by one.
+- `MjvGeom` declared the field `type` twice, and `TargetVelocityGoalReward` called the constructor of its base
+  class twice.
+- `MyoSkeleton` ended the Python process with `exit()` when its model had not been downloaded. It now raises a
+  `FileNotFoundError` that names `loco-mujoco-myomodel-init`.
+- The deprecation warnings of `HumanoidTorque` and `HumanoidMuscle` now name `SkeletonTorque` and
+  `SkeletonMuscle` as replacements (they named the deprecated class itself), and the error of
+  `LocoEnv.get_default_xml_file_path` names the environment class instead of `type`.
+- `Mjx.n_envs` was removed. It returned an attribute that was never set and always raised an `AttributeError`;
+  the number of parallel environments is the batch size of the state.
+- `RunningStandardization.reset` and `RunningAveragedWindow.reset` only worked for scalar data (the shape was
+  passed as the `dtype` argument), and `RunningAveragedWindow.update_state` failed for every shape.
+- Setting a path variable (`loco-mujoco-set-*`) failed if the variables file existed but was empty.
+- `examples/training_examples/jax_rl_mimic_td3`: `eval.py` and `experiment_resume.py` loaded and trained
+  `SACJax` instead of `TD3Jax`, and `conf_resume.yaml` was the SAC configuration.
+- `examples/training_examples/jax_distill/conf_traj_swap.yaml` contained absolute paths of a developer machine;
+  they are placeholders now.
+- Wrong comments in the example configurations: `rnn_type` of S2PG accepts `gru`, `lstm` and `vanilla` (not
+  `none`), and the commented domain randomization block of the SuperMimic example is a valid configuration.
+- `ImitationFactory.make` without any dataset configuration failed with "Need at least one array to
+  concatenate" after building the environment. It now raises a `ValueError` that names the four dataset
+  arguments.
+- `LAFAN1DatasetConf(dataset_group=...)` could not load any clip, because the names in
+  `LAFAN1_LOCOMOTION_DATASETS`, `LAFAN1_DANCE_DATASETS` and `LAFAN1_ALL_DATASETS` carried a `.csv` suffix. The
+  suffix was removed from the lists, and `load_lafan1_trajectory` ignores it if it is passed.
 
 ## [1.2.0] - 2026-11-18
 

@@ -151,9 +151,7 @@ class TargetVelocityGoalReward(Reward):
 
         # find the goal velocity observation
         assert "GoalRandomRootVelocity" in env.obs_container, \
-            f"GoalRandomRootVelocity is the required goal for the reward for{self.__class__.__name__}"
-
-        super().__init__(env, **kwargs)
+            f"GoalRandomRootVelocity is the required goal for the reward {self.__class__.__name__}"
 
     def __call__(self,
                  state: Union[np.ndarray, jnp.ndarray],
