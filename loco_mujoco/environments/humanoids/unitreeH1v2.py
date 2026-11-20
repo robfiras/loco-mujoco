@@ -188,7 +188,7 @@ class UnitreeH1v2(BaseRobotHumanoid):
             **kwargs: Additional parameters for the environment.
         """
 
-        self._disable_handss = disable_hands
+        self._disable_hands = disable_hands
 
         if spec is None:
             spec = self.get_default_xml_file_path()
@@ -445,7 +445,6 @@ class UnitreeH1v2(BaseRobotHumanoid):
         Returns:
             List[str]: A list of actuator names.
         """
-        ...
         action_spec = [
             "left_hip_yaw_joint",
             "left_hip_pitch_joint",

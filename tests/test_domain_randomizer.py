@@ -842,3 +842,59 @@ def test_sample_d_gains_noise(backend, mock_random):
         ],
         atol=_DOMRAND_ATOL, rtol=_DOMRAND_RTOL,
     )
+
+
+# ---------------------------------------------------------------------------
+# Partial configurations: switches that are not given are off.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("backend", ["jax", "numpy"])
+def test_partial_config(backend):
+    partial_conf = {"randomize_gravity": True, "gravity_range": [5.0, 6.0],
+                    "add_joint_pos_noise": True, "joint_pos_noise_scale": 0.01}
+    env = DummyHumamoidEnv(enable_mjx=backend == "jax",
+                           domain_randomization_type="DefaultRandomizer",
+                           domain_randomization_params=partial_conf,
+                           **DEFAULTS)
+    rand_conf = env._domain_randomizer.rand_conf
+    for switch, (value_key, _) in env._domain_randomizer.SWITCHES.items():
+        assert switch in rand_conf and value_key in rand_conf
+        assert rand_conf[switch] == (switch in partial_conf)
+
+    key = jax.random.PRNGKey(0)
+    if backend == "jax":
+        state = env.mjx_reset(key)
+        state = env.mjx_step(state, jnp.zeros(env.info.action_space.shape[0]))
+        dr_state = state.additional_carry.domain_randomizer_state
+        model = env._model
+    else:
+        numpy.random.seed(0)
+        env.reset(key)
+        env.step(np.zeros(env.info.action_space.shape[0]))
+        dr_state = env._additional_carry.domain_randomizer_state
+        model = env._model
+
+    # gravity is randomized within the given range ...
+    assert 5.0 <= -float(dr_state.gravity[2]) <= 6.0
+    # ... and the switched-off parameters keep their neutral values
+    assert np.allclose(np.asarray(dr_state.link_mass_multipliers), 1.0)
+    assert np.allclose(np.asarray(dr_state.base_mass_to_add), 0.0)
+    assert np.allclose(np.asarray(dr_state.com_displacement), 0.0)
+
+
+def test_empty_config_is_valid():
+    env = DummyHumamoidEnv(enable_mjx=False,
+                           domain_randomization_type="DefaultRandomizer",
+                           domain_randomization_params={},
+                           **DEFAULTS)
+    assert not any(env._domain_randomizer.rand_conf[switch] for switch in env._domain_randomizer.SWITCHES)
+    env.reset(jax.random.PRNGKey(0))
+    env.step(np.zeros(env.info.action_space.shape[0]))
+
+
+def test_enabled_switch_without_range_raises():
+    with pytest.raises(ValueError, match="gravity_range"):
+        DummyHumamoidEnv(enable_mjx=False,
+                         domain_randomization_type="DefaultRandomizer",
+                         domain_randomization_params={"randomize_gravity": True},
+                         **DEFAULTS)

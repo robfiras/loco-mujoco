@@ -223,3 +223,10 @@ def test_remove_variable_unsupported_type(var_file):
         yaml.dump({"WEIRD_VAR": 5}, f)
     with pytest.raises(TypeError):
         ds.remove_variable("WEIRD_VAR")
+
+
+def test_set_path_in_empty_yaml_file(var_file):
+    """An existing but empty variables file is loaded as None by PyYAML and used to fail."""
+    var_file.write_text("")
+    ds.add_variable("LOCOMUJOCO_AMASS_PATH", "/data/amass", quiet=True)
+    assert _load(var_file)["LOCOMUJOCO_AMASS_PATH"] == "/data/amass"

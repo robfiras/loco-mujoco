@@ -360,6 +360,10 @@ class MujocoViewer:
     def _add_user_scene_geoms(self):
         for i in range(self._user_scene.ngeom):
             j = self._scene.ngeom
+            if j >= self._scene.maxgeom:
+                raise RuntimeError(
+                    'Ran out of geoms. maxgeom: %d' %
+                    self._scene.maxgeom)
             # Copy all attributes from obj1 to obj2
             mujoco.mjv_initGeom(self._scene.geoms[j],
                                 self._user_scene.geoms[i].type,
@@ -368,10 +372,6 @@ class MujocoViewer:
                                 self._user_scene.geoms[i].mat.reshape(-1),
                                 self._user_scene.geoms[i].rgba)
             self._scene.ngeom += 1
-            if self._scene.ngeom >= self._scene.maxgeom:
-                raise RuntimeError(
-                    'Ran out of geoms. maxgeom: %d' %
-                    self._scene.ngeom.maxgeom)
 
     def render(self, data, carry, record):
         """
@@ -401,10 +401,10 @@ class MujocoViewer:
             # add visual geoms
             carry_visual_start_idx = self._scene.ngeom
             for j in range(carry.user_scene.ngeoms):
-                if self._scene.ngeom > self._scene.maxgeom:
+                if self._scene.ngeom >= self._scene.maxgeom:
                     raise RuntimeError(
                         'Ran out of geoms. maxgeom: %d' %
-                        self._scene.ngeom.maxgeom)
+                        self._scene.maxgeom)
                 mujoco.mjv_initGeom(self._scene.geoms[carry_visual_start_idx + j],
                                     carry.user_scene.geoms.type[j],
                                     carry.user_scene.geoms.size[j],
@@ -564,10 +564,10 @@ class MujocoViewer:
                 # add visual geoms
                 carry_visual_start_idx = self._scene.ngeom
                 for j in range(n_visual_geoms):
-                    if self._scene.ngeom > self._scene.maxgeom:
+                    if self._scene.ngeom >= self._scene.maxgeom:
                         raise RuntimeError(
                             'Ran out of geoms. maxgeom: %d' %
-                            self._scene.ngeom.maxgeom)
+                            self._scene.maxgeom)
                     mujoco.mjv_initGeom(
                         self._scene.geoms[carry_visual_start_idx + j],
                         int(np.asarray(visual_geoms_type[i, j]).item()),

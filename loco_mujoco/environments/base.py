@@ -889,7 +889,7 @@ class LocoEnv(Mjx):
         Returns the default path to the xml file of the environment.
         """
         raise NotImplementedError(f"Please implement the default_xml_file_path property "
-                                  f"in the {type(cls).__name__} environment.")
+                                  f"in the {cls.__name__} environment.")
 
     @info_property
     def root_body_name(self) -> str:

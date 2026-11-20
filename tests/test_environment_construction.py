@@ -13,7 +13,7 @@ file builds each real robot via ``RLFactory`` (no dataset / network needed) and:
   shared ``mujoco_mjx`` step/reset path once (jit-compiled, so kept to one env).
 
 ``MyoSkeleton`` is skipped: it requires a license-gated model download that is
-unavailable in CI (and its loader calls ``exit()`` when the model is absent).
+unavailable in CI.
 """
 import numpy as np
 import jax
@@ -81,3 +81,38 @@ def test_mjx_reset_step_roundtrip():
     state2 = env.mjx_step(state, action)
     jax.block_until_ready(state2.observation)
     assert state2.observation.shape == state.observation.shape
+
+
+# ---------------------------------------------------------------------------
+# Error and deprecation messages
+# ---------------------------------------------------------------------------
+
+def test_myoskeleton_without_model_raises(monkeypatch, tmp_path):
+    """A missing MyoSkeleton model raises an error instead of ending the process with exit()."""
+    from loco_mujoco.environments.humanoids.myoskeleton import MyoSkeleton
+    monkeypatch.setattr(MyoSkeleton, "get_default_xml_file_path",
+                        classmethod(lambda cls: str(tmp_path / "missing" / "myoskeleton.xml")))
+    with pytest.raises(FileNotFoundError, match="loco-mujoco-myomodel-init"):
+        MyoSkeleton()
+
+
+@pytest.mark.parametrize("deprecated, replacement", [("HumanoidTorque", "SkeletonTorque"),
+                                                     ("HumanoidMuscle", "SkeletonMuscle")])
+def test_deprecated_skeleton_names_point_to_the_new_class(monkeypatch, deprecated, replacement):
+    from loco_mujoco.environments.humanoids import skeletons
+    # the warning is emitted before the environment is built, so the build can be skipped
+    monkeypatch.setattr(getattr(skeletons, replacement), "__init__", lambda self, *args, **kwargs: None)
+    with pytest.warns(DeprecationWarning, match=f"{deprecated} is deprecated.*use {replacement} instead"):
+        getattr(skeletons, deprecated)()
+
+
+def test_missing_default_xml_names_the_environment():
+    with pytest.raises(NotImplementedError, match="in the LocoEnv environment"):
+        LocoEnv.get_default_xml_file_path()
+
+
+def test_mjx_has_no_dead_n_envs_property():
+    """Mjx.n_envs returned an attribute that was never set; the number of environments is the batch size of
+    the state."""
+    from loco_mujoco.core.mujoco_mjx import Mjx
+    assert not hasattr(Mjx, "n_envs")

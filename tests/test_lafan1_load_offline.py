@@ -186,3 +186,40 @@ def test_incomplete_clip_is_extended_with_forward_kinematics(tmp_path, monkeypat
     assert traj.data.xpos.shape == (n_out, model.nbody, 3)
     assert traj.data.site_xpos.shape[0] == n_out
     assert np.allclose(traj.data.qpos, qpos[:n_out], atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Dataset groups. The group lists used to carry the ".csv" suffix of the original
+# files, so that a group was looked up as "<name>.csv.npz" and never found.
+# ---------------------------------------------------------------------------
+
+def test_lafan1_group_names_have_no_file_suffix():
+    from loco_mujoco.datasets.humanoids.LAFAN1 import (
+        LAFAN1_LOCOMOTION_DATASETS, LAFAN1_DANCE_DATASETS, LAFAN1_ALL_DATASETS)
+
+    for group in (LAFAN1_LOCOMOTION_DATASETS, LAFAN1_DANCE_DATASETS, LAFAN1_ALL_DATASETS):
+        assert len(group) > 0 and len(set(group)) == len(group)
+        assert all("." not in name for name in group)
+    assert set(LAFAN1_LOCOMOTION_DATASETS) <= set(LAFAN1_ALL_DATASETS)
+    assert set(LAFAN1_DANCE_DATASETS) <= set(LAFAN1_ALL_DATASETS)
+
+
+def test_load_lafan1_strips_csv_suffix(lafan1_cache, standing_trajectory):
+    # names with the suffix of the original LAFAN1 files keep working
+    _stash(lafan1_cache, "MyTestEnv", "dance1_subject1", standing_trajectory)
+    traj = load_lafan1_trajectory("MyTestEnv", "dance1_subject1.csv")
+    assert isinstance(traj, Trajectory)
+
+
+def test_lafan1_dataset_group_loads_from_cache(lafan1_cache, standing_trajectory):
+    from loco_mujoco.task_factories import ImitationFactory, LAFAN1DatasetConf
+    from loco_mujoco.datasets.humanoids.LAFAN1 import LAFAN1_DANCE_DATASETS
+
+    env = DummyHumamoidEnv(enable_mjx=False, goal_type="NoGoal", reward_type="NoReward",
+                           horizon=1000, gamma=0.99)
+    for name in LAFAN1_DANCE_DATASETS:
+        _stash(lafan1_cache, type(env).__name__, name, standing_trajectory)
+
+    traj = ImitationFactory.get_lafan1_traj(env, LAFAN1DatasetConf(dataset_group="LAFAN1_DANCE_DATASETS"))
+    assert isinstance(traj, Trajectory)
+    assert len(traj.data.split_points) - 1 == len(LAFAN1_DANCE_DATASETS)

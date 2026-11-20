@@ -37,9 +37,64 @@ class DefaultRandomizer(DomainRandomizer):
     """
     A domain randomizer class that modifies typical simulation parameters.
 
+    Every group of parameters has a switch and a range (or noise scale). Switches that are not given in the
+    configuration are off, so a configuration only needs the entries of the parameters that are randomized. A
+    switch that is on without its range or scale raises a ``ValueError``.
+
+    Attributes:
+        SWITCHES (Dict[str, Tuple[str, Any]]): Maps every switch to the name of its range or scale key and to the
+            placeholder value that key gets while the switch is off (the placeholder is never applied).
+
     """
 
+    SWITCHES = {
+        # model parameters
+        "randomize_gravity": ("gravity_range", (9.81, 9.81)),
+        "randomize_geom_friction_tangential": ("geom_friction_tangential_range", (1.0, 1.0)),
+        "randomize_geom_friction_torsional": ("geom_friction_torsional_range", (0.005, 0.005)),
+        "randomize_geom_friction_rolling": ("geom_friction_rolling_range", (0.0001, 0.0001)),
+        "randomize_geom_damping": ("geom_damping_range", (80.0, 80.0)),
+        "randomize_geom_stiffness": ("geom_stiffness_range", (1000.0, 1000.0)),
+        "randomize_joint_damping": ("joint_damping_range", (0.0, 0.0)),
+        "randomize_joint_friction_loss": ("joint_friction_loss_range", (0.0, 0.0)),
+        "randomize_joint_armature": ("joint_armature_range", (0.0, 0.0)),
+        "randomize_base_mass": ("base_mass_to_add_range", (0.0, 0.0)),
+        "randomize_com_displacement": ("com_displacement_range", (0.0, 0.0)),
+        "randomize_link_mass": ("link_mass_multiplier_range", {"root_body": (1.0, 1.0),
+                                                                "other_bodies": (1.0, 1.0)}),
+        # PD gains
+        "add_p_gains_noise": ("p_gains_noise_scale", 0.0),
+        "add_d_gains_noise": ("d_gains_noise_scale", 0.0),
+        # observation noise
+        "add_joint_pos_noise": ("joint_pos_noise_scale", 0.0),
+        "add_joint_vel_noise": ("joint_vel_noise_scale", 0.0),
+        "add_gravity_noise": ("gravity_noise_scale", 0.0),
+        "add_free_joint_lin_vel_noise": ("lin_vel_noise_scale", 0.0),
+        "add_free_joint_ang_vel_noise": ("ang_vel_noise_scale", 0.0),
+    }
+
     def __init__(self, env, **kwargs):
+        """
+        Constructor.
+
+        Args:
+            env (Any): The environment instance.
+            **kwargs (Any): The randomization configuration, see the class description. Keys that the randomizer
+                does not know are ignored.
+
+        Raises:
+            ValueError: If a switch is on and its range or scale key is missing.
+
+        """
+
+        # fill in the switches and ranges that were not given
+        for switch, (value_key, placeholder) in self.SWITCHES.items():
+            if kwargs.setdefault(switch, False):
+                if value_key not in kwargs:
+                    raise ValueError(f"The domain randomization config enables '{switch}', but '{value_key}' "
+                                     f"is missing.")
+            else:
+                kwargs.setdefault(value_key, placeholder)
 
         # store initial values for reset (only needed for numpy backend)
         self._init_gravity = None

@@ -214,7 +214,6 @@ def add_mocap_bodies(mjspec: MjSpec,
 
             if robot_conf is not None:
                 if hasattr(robot_conf.site_joint_matches[b1], "solref"):
-                    test = len(robot_conf.site_joint_matches[b1].solref)
                     assert len(robot_conf.site_joint_matches[b1].solref) == 2, "solref must be a list of length 2"
                     e.solref = robot_conf.site_joint_matches[b1].solref
                 if hasattr(robot_conf.site_joint_matches[b1], "solimp"):

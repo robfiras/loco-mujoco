@@ -61,7 +61,7 @@ class ImitationFactory(TaskFactory):
                 preloaded, and the processed trajectory.
 
         Raises:
-            ValueError: If the `dataset_type` is unknown.
+            ValueError: If no dataset configuration is given or the `dataset_type` is unknown.
         """
 
         if env_name not in LocoEnv.registered_envs:
@@ -69,6 +69,12 @@ class ImitationFactory(TaskFactory):
 
         # Get environment class
         env_cls = LocoEnv.registered_envs[env_name]
+
+        if all(conf is None for conf in (default_dataset_conf, amass_dataset_conf,
+                                         lafan1_dataset_conf, custom_dataset_conf)):
+            raise ValueError("ImitationFactory.make needs at least one dataset configuration: "
+                             "default_dataset_conf, amass_dataset_conf, lafan1_dataset_conf or "
+                             "custom_dataset_conf. Use RLFactory for an environment without a trajectory.")
 
         # Create and return the environment
         env = env_cls(init_state_type=init_state_type, terminal_state_type=terminal_state_type, **kwargs)
@@ -120,7 +126,7 @@ class ImitationFactory(TaskFactory):
             Trajectory: The default trajectories.
 
         Raises:
-            ValueError: If the `dataset_type` is unknown.
+            ValueError: If no dataset configuration is given or the `dataset_type` is unknown.
         """
         env_name = env.__class__.__name__
         if "Mjx" in env_name:
