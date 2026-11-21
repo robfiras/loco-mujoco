@@ -1,3 +1,12 @@
+"""
+Functional wrappers for MJX environments.
+
+The wrappers expose a gymnax-like interface, ``reset(rng_key) -> (obs, state)`` and
+``step(state, action) -> (obs, reward, absorbing, done, info, state)``, and can be stacked. Every wrapper that
+needs its own state nests the state of the wrapped environment in a :class:`BaseWrapperState`.
+
+"""
+
 from copy import deepcopy
 from functools import partial
 from typing import Optional, Tuple, Union, Any
@@ -27,21 +36,60 @@ SEED_AXIS_NAME = "seed"
 
 
 class LocoMjxWrapper:
+    """
+    Innermost wrapper that turns an :class:`~loco_mujoco.core.mujoco_mjx.Mjx` environment into the functional
+    ``reset`` / ``step`` interface the other wrappers build on.
+
+    All other attributes are forwarded to the environment.
+
+    """
 
     def __init__(self, env):
+        """
+        Constructor.
+
+        Args:
+            env (Mjx): The environment to wrap.
+
+        """
         self.env = env
 
     def __getattr__(self, name):
-        """
-        Allow proxy access to regular attributes of Mjx env.
-        """
+        """Allow proxy access to regular attributes of Mjx env."""
         return getattr(self.env, name)
 
     def reset(self, rng_key, traj=None):
+        """
+        Reset the environment.
+
+        Args:
+            rng_key (jax.Array): JAX random key.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, MjxState]: The first observation and the environment state.
+
+        """
         state = self.env.mjx_reset(rng_key, traj)
         return state.observation, state
 
     def step(self, state, action, traj=None):
+        """
+        Step the environment.
+
+        The environment resets itself when an episode ends. In that case the returned observation is the final
+        observation of the finished episode, while the returned state already belongs to the new episode.
+
+        Args:
+            state (MjxState): Current environment state.
+            action (jax.Array): Action to apply, shape ``(action_dim,)``.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, float, bool, bool, dict, MjxState]: Next observation, reward, absorbing flag, done flag,
+            info dictionary and next environment state.
+
+        """
         next_state = self.env.mjx_step(state, action, traj)
         next_obs = jnp.where(next_state.done, next_state.additional_carry.final_observation, next_state.observation)
         return (next_obs, next_state.reward, next_state.absorbing, next_state.done,
@@ -50,11 +98,17 @@ class LocoMjxWrapper:
 
 @struct.dataclass
 class BaseWrapperState:
+    """
+    Base class of the states of all wrappers.
+
+    A wrapper state holds the state of the wrapped environment in the field ``env_state``. Attributes that are not
+    found on a wrapper state are looked up in the nested states, down to the
+    :class:`~loco_mujoco.core.mujoco_mjx.MjxState`.
+
+    """
 
     def __getattr__(self, name):
-        """
-        Allow proxy access to all attributes of all States.
-        """
+        """Allow proxy access to all attributes of all States."""
         try:
             if name in self.__dict__.keys():
                 return self.__dict__[name]
@@ -64,6 +118,19 @@ class BaseWrapperState:
             raise AttributeError(f"Attribute '{name}' not found in any env state nor the MjxState.") from e
 
     def find(self, cls):
+        """
+        Return the state of the given class from the chain of nested wrapper states.
+
+        Args:
+            cls (type): Class of the state to look for, e.g. :class:`LogEnvState` or ``MjxState``.
+
+        Returns:
+            Any: The first state in the chain that is an instance of ``cls``.
+
+        Raises:
+            AttributeError: If no state of that class is found.
+
+        """
 
         if isinstance(self, cls):
             return self
@@ -74,8 +141,22 @@ class BaseWrapperState:
 
 
 class BaseWrapper:
+    """
+    Base class of all wrappers for MJX environments.
+
+    Forwards ``reset`` and ``step`` as well as all other attributes to the wrapped environment. A bare
+    :class:`~loco_mujoco.core.mujoco_mjx.Mjx` environment is wrapped in a :class:`LocoMjxWrapper` first.
+
+    """
 
     def __init__(self, env):
+        """
+        Constructor.
+
+        Args:
+            env (Union[Mjx, BaseWrapper]): The environment or wrapper to wrap.
+
+        """
         # if it's the bare Mjx class, wrap it in the LocoMjxWrapper first
         if issubclass(env.__class__, Mjx):
             self.env = LocoMjxWrapper(env)
@@ -83,9 +164,33 @@ class BaseWrapper:
             self.env = env
 
     def reset(self, rng_key, traj=None):
+        """
+        Reset the wrapped environment.
+
+        Args:
+            rng_key (jax.Array): JAX random key.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, Any]: The first observation and the state.
+
+        """
         return self.env.reset(rng_key, traj)
 
     def step(self, state, action, traj=None):
+        """
+        Step the wrapped environment.
+
+        Args:
+            state (Any): Current state.
+            action (jax.Array): Action to apply.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, float, bool, bool, dict, Any]: Next observation, reward, absorbing flag, done flag, info
+            dictionary and next state.
+
+        """
         return self.env.step(state, action, traj)
 
     def __getattr__(self, name):
@@ -93,6 +198,20 @@ class BaseWrapper:
         return getattr(self.env, name)
 
     def find_attr(self, state, attr_name):
+        """
+        Search an attribute in a state and, recursively, in its nested ``env_state``.
+
+        Args:
+            state (Any): Wrapper or environment state to search in.
+            attr_name (str): Name of the attribute.
+
+        Returns:
+            Any: Value of the attribute from the outermost state that has it.
+
+        Raises:
+            AttributeError: If no state in the chain has the attribute.
+
+        """
         # Recursively search for the attribute
         if hasattr(state, attr_name):
             return getattr(state, attr_name)
@@ -105,6 +224,13 @@ class BaseWrapper:
         raise AttributeError(f"Attribute '{attr_name}' not found")
 
     def unwrapped(self):
+        """
+        Return the environment at the bottom of the wrapper stack.
+
+        Returns:
+            Mjx: The bare environment without any wrapper.
+
+        """
         # find first env which is not a subclass of BaseWrapper
         if isinstance(self.env, BaseWrapper):
             return self.env.unwrapped()
@@ -113,6 +239,16 @@ class BaseWrapper:
 
 @struct.dataclass
 class SummaryMetrics:
+    """
+    Metrics an algorithm reports during training, averaged over the environments.
+
+    Attributes:
+        mean_episode_return (float): Mean return of the episodes that ended most recently.
+        mean_episode_length (float): Mean length of the episodes that ended most recently.
+        max_timestep (int): Largest number of steps any environment has taken.
+
+    """
+
     mean_episode_return: float = 0.0
     mean_episode_length: float = 0.0
     max_timestep: int = 0.0
@@ -120,6 +256,19 @@ class SummaryMetrics:
 
 @struct.dataclass
 class Metrics:
+    """
+    Episode statistics tracked by the :class:`LogWrapper`.
+
+    Attributes:
+        episode_returns (float): Sum of the rewards of the running episode.
+        episode_lengths (int): Number of steps of the running episode.
+        returned_episode_returns (float): Return of the last finished episode.
+        returned_episode_lengths (int): Length of the last finished episode.
+        timestep (int): Number of steps taken since the wrapper was reset.
+        done (bool): Whether the last step ended an episode.
+
+    """
+
     episode_returns: float
     episode_lengths: int
     returned_episode_returns: float
@@ -130,21 +279,60 @@ class Metrics:
 
 @struct.dataclass
 class LogEnvState(BaseWrapperState):
+    """
+    State of the :class:`LogWrapper`.
+
+    Attributes:
+        env_state (MjxState): State of the wrapped environment.
+        metrics (Metrics): Episode statistics.
+
+    """
+
     env_state: MjxState
     metrics: Metrics
 
 
 class LogWrapper(BaseWrapper):
-    """Log the episode returns and lengths."""
+    """
+    Wrapper that logs the episode returns and lengths in its state.
+
+    The statistics are stored in :class:`Metrics` and can be read from ``state.metrics``. ``reset`` and ``step``
+    are jitted.
+
+    """
 
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, rng_key, traj=None):
+        """
+        Reset the wrapped environment and the metrics.
+
+        Args:
+            rng_key (jax.Array): JAX random key.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, LogEnvState]: The first observation and the state.
+
+        """
         obs, env_state = self.env.reset(rng_key, traj)
         state = LogEnvState(env_state, metrics=Metrics(0, 0, 0, 0, 0, False))
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
     def step(self, state: LogEnvState, action: Union[int, float], traj=None):
+        """
+        Step the wrapped environment and update the metrics.
+
+        Args:
+            state (LogEnvState): Current state.
+            action (jax.Array): Action to apply.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, float, bool, bool, dict, LogEnvState]: Next observation, reward, absorbing flag, done
+            flag, info dictionary and next state.
+
+        """
 
         # make a step
         next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
@@ -168,13 +356,24 @@ class LogWrapper(BaseWrapper):
 
 @struct.dataclass
 class NStepWrapperState(BaseWrapperState):
+    """
+    State of the :class:`NStepWrapper`.
+
+    Attributes:
+        env_state (MjxState): State of the wrapped environment.
+        observation_buffer (jnp.ndarray): Rolling buffer of past entries, oldest first. Shape
+            ``(n_steps, entry_dim)`` without a group and ``(n_steps - 1, group_dim)`` with a group.
+
+    """
+
     env_state: MjxState
     observation_buffer: jnp.ndarray
 
 
 class NStepWrapper(BaseWrapper):
 
-    """Append a rolling history of past observations to the current one.
+    """
+    Append a rolling history of past observations to the current one.
 
     Two modes:
 
@@ -195,9 +394,27 @@ class NStepWrapper(BaseWrapper):
     full at the head, so including it again would feed the network the same numbers
     twice. The same arrangement can also be reached by pushing the current frame out of a
     longer window with a one-step lag.
+
+    The attribute ``info`` holds a copy of the environment's ``MDPInfo`` with the enlarged observation space.
+
     """
 
     def __init__(self, env, n_steps, include_actions=False, group=None):
+        """
+        Constructor.
+
+        Args:
+            env (Union[Mjx, BaseWrapper]): The environment or wrapper to wrap.
+            n_steps (int): Length of the history, including the current step.
+            include_actions (bool): If True, the action that led to an observation is stored with it, so that an
+                entry of the history is ``[observation, action]``. Only supported without a group.
+            group (str, optional): Name of the observation group to stack. If None, the whole observation is
+                stacked.
+
+        Raises:
+            ValueError: If ``include_actions`` is combined with a group, or if the group is empty.
+
+        """
         super().__init__(env)
         self.n_steps = n_steps
         self.include_actions = include_actions
@@ -219,6 +436,18 @@ class NStepWrapper(BaseWrapper):
         self.info = self.update_info(env.info)
 
     def update_info(self, info):
+        """
+        Create the ``MDPInfo`` of the wrapped environment with the observation space of the stacked observation.
+
+        As a side effect, the size of one history entry is stored on the wrapper.
+
+        Args:
+            info (MDPInfo): Info of the wrapped environment.
+
+        Returns:
+            MDPInfo: Copy of ``info`` with the enlarged observation space.
+
+        """
         new_info = deepcopy(info)
         obs_dim = info.observation_space.high.shape[0]
         if self.group is not None:
@@ -250,6 +479,22 @@ class NStepWrapper(BaseWrapper):
         return new_info
 
     def reset(self, rng_key, traj=None):
+        """
+        Reset the wrapped environment and the history.
+
+        With a group, all past slots are filled with the current reading of the group. Without a group, the history
+        is zero except for the newest entry (with zero action if actions are included).
+
+        Args:
+            rng_key (jax.Array): JAX random key.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, NStepWrapperState]: The stacked observation and the state. Without a group the
+            observation is the flattened history, oldest entry first; with a group it is the current observation
+            followed by the past frames of the group, newest first.
+
+        """
         obs, env_state = self.env.reset(rng_key, traj)
         if self.group is not None:
             # Seed every past slot with the CURRENT reading rather than zeros: at t=0
@@ -274,6 +519,19 @@ class NStepWrapper(BaseWrapper):
         return obs, state
 
     def step(self, state: NStepWrapperState, action: Union[int, float], traj=None):
+        """
+        Step the wrapped environment and update the history.
+
+        Args:
+            state (NStepWrapperState): Current state.
+            action (jax.Array): Action to apply.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            Tuple[jax.Array, float, bool, bool, dict, NStepWrapperState]: Stacked next observation (same layout as
+            in :meth:`reset`), reward, absorbing flag, done flag, info dictionary and next state.
+
+        """
 
         # make a step
         next_observation, reward, absorbing, done, info, env_state = self.env.step(state.env_state, action, traj)
@@ -306,8 +564,24 @@ class NStepWrapper(BaseWrapper):
 
 
 class VecEnv(BaseWrapper):
+    """
+    Wrapper that runs a batch of environments in parallel with ``jax.vmap``.
+
+    ``reset`` expects a batch of random keys with shape ``(n_envs, ...)`` and ``step`` a batched state and actions
+    of shape ``(n_envs, action_dim)``; all outputs gain the same leading dimension. The optional trajectory
+    argument is shared by all environments. The mapped axis is named ``VECENV_AXIS_NAME``, so that an environment
+    can look up its own index inside the mapped function.
+
+    """
 
     def __init__(self, env):
+        """
+        Constructor.
+
+        Args:
+            env (Union[Mjx, BaseWrapper]): The environment or wrapper to vectorize.
+
+        """
         super().__init__(env)
         # axis_name is what lets AdditionalCarry.env_id be filled in from inside the
         # vmap; without it there is no way for an environment to know which world it is,

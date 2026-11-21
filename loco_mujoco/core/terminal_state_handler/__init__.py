@@ -1,3 +1,5 @@
+"""Terminal state handlers, which decide whether a state is absorbing and ends the episode."""
+
 from .base import TerminalStateHandler
 from .no_terminal import NoTerminalStateHandler
 from .height import HeightBasedTerminalStateHandler

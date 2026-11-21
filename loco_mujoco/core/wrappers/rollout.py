@@ -1,3 +1,5 @@
+"""Rollout helpers that collect transitions with a policy, for the CPU and the MJX version of the environments."""
+
 import functools
 import jax
 import jax.numpy as jnp
@@ -5,16 +7,40 @@ import numpy as np
 
 
 class RolloutWrapper:
+    """
+    Rollout helper for the CPU (MuJoCo) version of the environments.
+
+    Collects transitions by running a policy, or random actions if no policy is given, in a Python loop.
+
+    """
 
     def __init__(self, env, model_forward=None):
+        """
+        Constructor.
+
+        Args:
+            env (Mujoco): Environment to roll out, used through its ``reset`` and ``step`` methods.
+            model_forward (Callable, optional): Policy, called as ``model_forward(obs, **policy_params)`` and
+                returning an action. If None, actions are sampled uniformly from the action space.
+
+        """
         self.env = env
         self.model_forward = model_forward
 
     def batch_rollout(self, rng_keys, n_steps, policy_params=None):
         """
-        Evaluate a policy on sequential rollouts. The number of sequential rollouts is given by
-        the dimensionality of rng_keys.
-        todo: use multiprocessing
+        Evaluate a policy on sequential rollouts.
+
+        The number of rollouts is given by the number of keys in ``rng_keys``; they are run one after the other.
+
+        Args:
+            rng_keys (jax.Array): Batch of JAX random keys, one per rollout.
+            n_steps (int): Number of environment steps per rollout.
+            policy_params (dict, optional): Keyword arguments passed to ``model_forward``.
+
+        Returns:
+            Tuple[np.ndarray, ...]: Observations, actions, rewards, next observations, absorbing flags, done flags
+            and cumulative returns, each with the leading shape ``(n_rollouts, n_steps)``.
 
         """
         all_obs, all_action, all_reward, all_next_obs, all_absorbing, all_done, cum_return = [], [], [], [], [], [], []
@@ -34,7 +60,20 @@ class RolloutWrapper:
                 np.stack(all_absorbing), np.stack(all_done), np.stack(cum_return))
 
     def single_rollout(self, rng_key, n_steps, policy_params=None):
-        """Rollout an episode."""
+        """
+        Collect ``n_steps`` transitions, resetting the environment whenever an episode ends.
+
+        Args:
+            rng_key (jax.Array): JAX random key, used for the resets and for sampling random actions.
+            n_steps (int): Number of environment steps.
+            policy_params (dict, optional): Keyword arguments passed to ``model_forward``.
+
+        Returns:
+            Tuple[np.ndarray, ...]: Observations, actions, rewards, next observations, absorbing flags, done flags
+            and cumulative returns, each with the leading shape ``(n_steps,)``. The cumulative return starts again
+            after every reset.
+
+        """
         # Reset the environment
         rng_reset, rng_episode = jax.random.split(rng_key)
 
@@ -77,27 +116,67 @@ class RolloutWrapper:
 
 class MjxRolloutWrapper:
     """
-    This is a rollout wrapper for LocoMuJoCo environments motivated by the gymnax rollout wrapper.
-    (https://github.com/RobertTLange/gymnax/blob/main/gymnax/experimental/rollout.py)
+    Rollout helper for the MJX version of the environments.
+
+    Motivated by the gymnax rollout wrapper
+    (https://github.com/RobertTLange/gymnax/blob/main/gymnax/experimental/rollout.py). A rollout is a
+    ``jax.lax.scan`` over ``mjx_step``, and several rollouts are run in parallel with ``jax.vmap``.
 
     """
 
     def __init__(self, env, model_forward=None):
+        """
+        Constructor.
+
+        Args:
+            env (Mjx): Environment to roll out, used through ``mjx_reset`` and ``mjx_step``.
+            model_forward (Callable, optional): Policy, called as ``model_forward(policy_params, obs, rng_key)`` and
+                returning an action. If None, actions are sampled uniformly from the action space.
+
+        """
         self.env = env
         self.model_forward = model_forward
 
     @functools.partial(jax.jit, static_argnums=(0, 2))
     def batch_rollout(self, rng_keys, n_steps, policy_params):
         """
-        Evaluate a policy on parallel rollouts. The number of parallel rollouts is given by
-        the dimensionality of rng_keys.
+        Evaluate a policy on parallel rollouts.
+
+        The number of parallel rollouts is given by the number of keys in ``rng_keys``. The function is jitted;
+        ``n_steps`` is a static argument.
+
+        Args:
+            rng_keys (jax.Array): Batch of JAX random keys, one per rollout.
+            n_steps (int): Number of environment steps per rollout.
+            policy_params (Any): Parameters passed to ``model_forward``.
+
+        Returns:
+            Tuple[jax.Array, ...]: Observations, actions, rewards, next observations, absorbing flags, done flags
+            and cumulative rewards, each with the leading shape ``(n_rollouts, n_steps)``.
+
         """
         batch_rollout = jax.vmap(self.single_rollout, in_axes=(0, None, None))
         return batch_rollout(rng_keys, n_steps, policy_params)
 
     #@functools.partial(jax.jit, static_argnums=(0, 2))
     def single_rollout(self, rng_key, n_steps, policy_params):
-        """Rollout an episode with lax.scan."""
+        """
+        Roll out ``n_steps`` environment steps with ``jax.lax.scan``.
+
+        The environment resets itself when an episode ends. At such a step the next observation is the final
+        observation of the finished episode, not the first one of the new episode.
+
+        Args:
+            rng_key (jax.Array): JAX random key.
+            n_steps (int): Number of environment steps.
+            policy_params (Any): Parameters passed to ``model_forward``.
+
+        Returns:
+            Tuple[jax.Array, ...]: Observations, actions, rewards, next observations, absorbing flags, done flags
+            and cumulative rewards, each with the leading shape ``(n_steps,)``. The cumulative reward only counts
+            the first episode: it stays constant after the first done.
+
+        """
         # Reset the environment
         rng_reset, rng_episode = jax.random.split(rng_key)
         state = self.env.mjx_reset(rng_reset)

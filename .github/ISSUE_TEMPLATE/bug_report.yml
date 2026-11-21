@@ -1,0 +1,56 @@
+name: Bug report
+description: Something does not work as documented or raises an unexpected error.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a problem. Please search the existing issues first.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Script to reproduce
+      description: The shortest script that shows the problem. It is rendered as Python code.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback or output
+      description: The full error message. It is rendered as plain text.
+      render: text
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Simulation backend
+      multiple: true
+      options:
+        - MuJoCo (CPU)
+        - MJX
+        - MuJoCo Warp
+        - Not related to a backend
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LocoMuJoCo version or commit
+      description: Output of `python -c "import loco_mujoco; print(loco_mujoco.__version__)"`, or the commit hash.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, and the versions of `mujoco`, `mujoco-mjx`, `mujoco-warp` and `jax` (`pip list | grep -i -E "mujoco|jax"`). State whether JAX runs on CPU or GPU.
+      render: text
+    validations:
+      required: true

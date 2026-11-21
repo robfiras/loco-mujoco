@@ -1,3 +1,5 @@
+"""Terminal state handlers that compare the root pose to the reference trajectory."""
+
 from typing import Dict, Any, Union, Tuple
 from types import ModuleType
 
@@ -12,6 +14,18 @@ from loco_mujoco.core.utils.backend import assert_backend_is_supported
 
 
 class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
+    """
+    Terminates when the root pose leaves the range covered by the whole reference dataset.
+
+    A state is absorbing if the root height is outside the range of root heights in the trajectories, or the root
+    orientation is further from the centroid of the root orientations in the trajectories than any sample of the
+    trajectories, each enlarged by a margin.
+
+    Attributes:
+        soft_temperature_m (float): Width in meters of the smooth termination around the height limits.
+        soft_temperature_rad (float): Width in radians of the smooth termination around the orientation limit.
+
+    """
 
     # widths of the smooth termination (mjx_absorbing_prob) around the limits
     soft_temperature_m = 0.02
@@ -55,6 +69,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -103,6 +118,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         root rotation is outside the valid threshold. Function for Mjx.
 
         Args:
+            env (Any): The environment instance.
             obs (jnp.ndarray): shape (n_samples, n_obs), the observations
             info (dict): the info dictionary
             data (Data): Mjx data structure
@@ -131,6 +147,7 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
         root rotation is outside the valid threshold.
 
         Args:
+            env (Any): The environment instance.
             obs (Union[np.ndarray, jnp.ndarray]): shape (n_samples, n_obs), the observations
             info (dict): the info dictionary
             data (Union[MjData, Data]): Mujoco data structure
@@ -148,6 +165,18 @@ class RootPoseTrajTerminalStateHandler(TerminalStateHandler):
                            traj=None) -> jnp.ndarray:
         """
         Smooth termination probability of the same conditions, see ``TerminalStateHandler.soft_any``.
+
+        Args:
+            env (Any): The environment instance.
+            obs (jnp.ndarray): Observation of the environment.
+            info (Dict[str, Any]): The info dictionary.
+            data (Data): The Mujoco data structure for Mjx.
+            carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            jnp.ndarray: Probability in [0, 1] that the current state is terminal.
+
         """
         return self.soft_any(self._violations(env, data, carry, jnp, traj))
 
@@ -274,6 +303,7 @@ class RootTrackingTerminalStateHandler(RootPoseTrajTerminalStateHandler):
         too far from the current frame of the reference trajectory.
 
         Args:
+            env (Any): The environment instance.
             obs (Union[np.ndarray, jnp.ndarray]): shape (n_samples, n_obs), the observations
             info (dict): the info dictionary
             data (Union[MjData, Data]): Mujoco data structure

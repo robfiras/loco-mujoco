@@ -1,3 +1,22 @@
+"""
+Retargeting of motions to robots through the SMPL-H body model.
+
+The pipeline has two stages. First, the shape of the SMPL-H body is fitted to the robot (:func:`fit_smpl_shape`):
+with both in a T-pose, the shape coefficients and a global scale are optimized such that the SMPL-H joints
+coincide with the mimic sites of the robot. This is done once per robot and cached. Second, a motion is fitted to
+the robot (:func:`fit_smpl_motion`): the SMPL-H joints of the scaled body are computed for every frame and the
+mimic sites of the robot are pulled towards them with equality constraints in a MuJoCo simulation, which yields
+the joint positions of the robot.
+
+On top of this, :func:`load_retargeted_amass_trajectory` retargets clips of the AMASS dataset, and
+:func:`retarget_traj_from_robot_to_robot` transfers a trajectory from one robot to another by first fitting an
+SMPL-H motion to the trajectory of the source robot. The correspondence between mimic sites and SMPL-H joints and
+the optimization parameters of each robot are defined in the YAML files in ``loco_mujoco/smpl/robot_confs``.
+
+The module requires the optional ``smpl`` dependencies and the SMPL-H model files, see
+``loco_mujoco/smpl/README.MD``.
+"""
+
 import os
 import glob
 from dataclasses import replace
@@ -50,12 +69,29 @@ OPTIMIZED_SHAPE_FILE_NAME = "shape_optimized.pkl"
 
 
 def check_optional_imports():
+    """
+    Check that the optional dependencies of the retargeting pipeline are installed.
+
+    Raises:
+        ImportError: If one of the optional dependencies (e.g. ``torch`` or ``smplx``) could not be imported.
+
+    """
     if not _OPTIONAL_IMPORT_INSTALLED:
         raise ImportError(f"[LocoMuJoCo] Optional smpl depencies not installed. "
                           f"Checkout the README for installation instructions. {_OPTIONAL_IMPORT_EXCEPTION}")
 
 
 def get_amass_dataset_path():
+    """
+    Get the path to the AMASS dataset from the LocoMuJoCo variables.
+
+    Returns:
+        str: Value of the variable ``LOCOMUJOCO_AMASS_PATH``.
+
+    Raises:
+        KeyError: If the variable is not set.
+
+    """
     path_to_conf = loco_mujoco.PATH_TO_VARIABLES
     with open(path_to_conf, "r") as file:
         data = yaml.load(file, Loader=yaml.FullLoader)
@@ -67,6 +103,16 @@ def get_amass_dataset_path():
 
 
 def get_converted_amass_dataset_path():
+    """
+    Get the path in which the retargeted AMASS datasets are stored from the LocoMuJoCo variables.
+
+    Returns:
+        str: Value of the variable ``LOCOMUJOCO_CONVERTED_AMASS_PATH``.
+
+    Raises:
+        KeyError: If the variable is not set.
+
+    """
     path_to_conf = loco_mujoco.PATH_TO_VARIABLES
     with open(path_to_conf, "r") as file:
         data = yaml.load(file, Loader=yaml.FullLoader)
@@ -80,6 +126,16 @@ def get_converted_amass_dataset_path():
 
 
 def get_smpl_model_path():
+    """
+    Get the path to the SMPL model files from the LocoMuJoCo variables.
+
+    Returns:
+        str: Value of the variable ``LOCOMUJOCO_SMPL_MODEL_PATH``.
+
+    Raises:
+        KeyError: If the variable is not set.
+
+    """
     path_to_conf = loco_mujoco.PATH_TO_VARIABLES
     with open(path_to_conf, "r") as file:
         data = yaml.load(file, Loader=yaml.FullLoader)
@@ -91,14 +147,20 @@ def get_smpl_model_path():
 
 
 def load_amass_data(data_path: str) -> dict:
-    """Load AMASS data from a file.
+    """
+    Load a motion from the AMASS dataset.
 
     Args:
-        data_path (str): Path to the AMASS data file.
-
+        data_path (str): Path of the motion file relative to the AMASS directory (``LOCOMUJOCO_AMASS_PATH``), with
+            or without the extension ``.npz``.
 
     Returns:
-        dict: Parsed AMASS data including poses, translations, and other attributes.
+        dict: The motion with the entries ``pose_aa`` (axis-angle poses, shape ``(n_frames, 72)``: global
+        orientation and body pose of the dataset followed by zeros), ``trans`` (root translations, shape
+        ``(n_frames, 3)``), ``betas`` (shape coefficients), ``gender`` and ``fps`` (frame rate).
+
+    Raises:
+        ValueError: If the file contains no frame rate, or if the motion is not found in the AMASS directory.
 
     """
     path_to_amass_datasets = get_amass_dataset_path()
@@ -141,7 +203,23 @@ def load_amass_data(data_path: str) -> dict:
 
 
 def load_robot_conf_file(env_name: str):
-    """Load a robot configuration file."""
+    """
+    Load the retargeting configuration of a robot.
+
+    The file ``<env_name>.yaml`` is searched in ``loco_mujoco/smpl/robot_confs`` first and then in the directories
+    listed in the variable ``LOCOMUJOCO_CUSTOM_ROBOT_CONF_PATH``. The first file found is merged on top of
+    ``defaults.yaml``.
+
+    Args:
+        env_name (str): Name of the environment. A prefix ``Mjx`` is ignored.
+
+    Returns:
+        DictConfig: The robot configuration.
+
+    Raises:
+        FileNotFoundError: If no configuration file exists for the environment.
+
+    """
     if "Mjx" in env_name:
         conf_name = env_name.replace("Mjx", "")
     else:
@@ -167,11 +245,13 @@ def load_robot_conf_file(env_name: str):
 
 def to_t_pose(env, robot_conf):
     """
-    Set the humanoid to a T-pose by modifying the Mujoco Data structure.
+    Set the humanoid to a T-pose by modifying the Mujoco data structure of the environment.
+
+    The entries of ``robot_conf.robot_pose_modifier`` are added to the current joint positions.
 
     Args:
-        env: environment.
-        robot_conf: robot configuration file including the joint positions for the T-pose.
+        env: The environment; its data is modified in place.
+        robot_conf (DictConfig): Robot configuration including the joint position offsets for the T-pose.
 
     """
     data = env._data
@@ -200,19 +280,32 @@ def fit_smpl_motion(
     skip_steps: bool = True,
     visualize: bool = False
 ) -> Trajectory:
-    """Fit SMPL motion data to a robot configuration.
+    """
+    Fit a robot to an SMPL-H motion.
+
+    For every frame, the global poses of the SMPL-H joints are computed for the body shape optimized for the robot
+    and converted to target poses of the robot's mimic sites. Mocap bodies placed at these targets pull the mimic
+    sites towards them through equality constraints while the simulation is stepped, and the resulting joint
+    positions are recorded. Joint velocities are computed with central finite differences, so the first and the last
+    frame are dropped. If height adjustment geoms are configured, the trajectory is shifted vertically by their
+    smallest distance to the floor.
 
     Args:
         env_name (str): Name of the environment.
         robot_conf (DictConfig): Configuration of the robot.
         path_to_smpl_model (str): Path to the SMPL model.
-        motion_data (Dict): Dict containing the motion data to process.
-        path_to_optimized_smpl_shape (str): Path to the optimized SMPL shape file for the robot.
+        motion_data (Dict): The motion to fit, with the entries ``pose_aa`` (axis-angle poses, shape
+            ``(n_frames, d)`` with ``d`` up to 156; missing entries are filled with zeros), ``trans`` (root
+            translations, shape ``(n_frames, 3)``) and ``fps`` (frame rate).
+        path_to_optimized_smpl_shape (str): Path to the optimized SMPL shape file for the robot, as written by
+            :func:`fit_smpl_shape`.
         logger (logging.Logger): Logger for status updates.
+        skip_steps (bool): If True, only every ``robot_conf.optimization_params.skip_frames``-th frame is used,
+            which reduces the frame rate of the result accordingly.
         visualize (bool): Whether to visualize the optimization process.
 
     Returns:
-        Trajectory: The fitted motion trajectory.
+        Trajectory: The fitted motion trajectory, containing joint positions and velocities only.
 
     """
 
@@ -376,17 +469,22 @@ def fit_smpl_motion(
 
 def get_init_qpos_for_motion_retargeting(env, init_mocap_pos, init_mocap_quat, robot_conf):
     """
-    Get the initial qpos for motion retargeting by temporarily disabling joint limits and collisions and
-    running the simulation to solve for the initial qpos. This avoids problems that could arise from bad initialzation
-    from the default qpos (getting stuck in joint limits or collisions).
+    Get the initial qpos for motion retargeting.
+
+    The joint limits and collisions are temporarily disabled (if configured) and the simulation is run to solve for
+    the initial qpos. This avoids problems that could arise from a bad initialization
+    from the default qpos (getting stuck in joint limits or collisions). The original model is restored and the
+    environment is reset afterwards.
 
     Args:
-        env: environment.
-        init_mocap_pos: initial mocap positions.
-        init_mocap_quat: initial mocap quaternions.
+        env: The environment.
+        init_mocap_pos (np.ndarray): Initial positions of the mocap bodies, shape ``(n_mimic_sites, 3)``.
+        init_mocap_quat (np.ndarray): Initial quaternions of the mocap bodies (scalar first), shape
+            ``(n_mimic_sites, 4)``.
+        robot_conf (DictConfig): Configuration of the robot.
 
     Returns:
-        np.ndarray: initial qpos.
+        np.ndarray: The initial qpos.
 
     """
 
@@ -425,7 +523,15 @@ def fit_smpl_shape(
     logger: logging.Logger,
     visualize: bool = False,
 ) -> None:
-    """Fit the SMPL shape to match the robot configuration.
+    """
+    Fit the SMPL-H shape to a robot.
+
+    The robot and the SMPL-H body are put into a T-pose, and the 16 shape coefficients and a global scale are
+    optimized with Adam such that the SMPL-H joints coincide with the corresponding mimic sites of the robot. The
+    result is saved with ``joblib`` as the tuple ``(shape, scale, smpl2robot_pos, smpl2robot_rot_mat, offset_z,
+    height_scale)``: the shape coefficients, the scale, the position and rotation offsets between the SMPL-H joints
+    and the mimic sites, the change of the height of the feet, and the ratio of the body heights after and before the
+    optimization.
 
     Args:
         env_name (str): Name of the environment.
@@ -593,6 +699,37 @@ def motion_transfer_robot_to_robot(
     logger: logging.Logger,
     path_to_fitted_motion_source: str = None,
     visualize: bool = False) -> Trajectory:
+    """
+    Transfer a trajectory from a source robot to a target robot through the SMPL-H body model.
+
+    First, an SMPL-H motion is fitted to the source trajectory: the pose and the root translation of the SMPL-H body
+    with the shape optimized for the source robot are optimized with Adam for all frames, such that the SMPL-H joints
+    match the positions and orientations of the mimic sites of the source robot; the joint rotations are smoothed
+    over time with a Gaussian filter after every iteration. Second, the target robot is fitted to this motion with
+    :func:`fit_smpl_motion`. Shape files that do not exist yet are created with :func:`fit_smpl_shape`.
+
+    Args:
+        env_name_source (str): Name of the source environment.
+        robot_conf_source (DictConfig): Configuration of the source robot.
+        traj_source (Trajectory): Trajectory of the source robot.
+        path_source_robot_smpl_data (str): Directory holding the optimized SMPL shape file of the source robot.
+        env_name_target (str): Name of the target environment.
+        robot_conf_target (DictConfig): Configuration of the target robot.
+        path_target_robot_smpl_data (str): Directory holding the optimized SMPL shape file of the target robot.
+        path_to_smpl_model (str): Path to the SMPL model.
+        logger (logging.Logger): Logger for status updates.
+        path_to_fitted_motion_source (str): Path to an ``.npz`` file with the SMPL-H motion fitted to the source
+            trajectory. If the file exists, it is loaded and the first step is skipped; otherwise the fitted motion
+            is saved there.
+        visualize (bool): Whether to visualize the optimization process.
+
+    Returns:
+        Trajectory: The trajectory of the target robot, containing joint positions and velocities only.
+
+    Raises:
+        ValueError: If the rotation loss becomes NaN during the optimization.
+
+    """
 
     def rotation_matrix_loss_geodesic(R1, R2):
         """
@@ -801,11 +938,15 @@ def extend_motion(
     Extend a motion trajectory to include more model-specific entities
     like body xpos, site positions, etc. and to match the environment's frequency.
 
+    A helper environment is created, the trajectory is interpolated to its control frequency and replayed, and the
+    quantities computed by Mujoco's kinematics are recorded with
+    :class:`~loco_mujoco.datasets.data_generation.utils.ExtendTrajData`.
+
     Args:
         env_name (str): Name of the environment.
-        env_params (DictConfig): Environment params.
+        env_params (DictConfig): Parameters passed to the constructor of the helper environment.
         traj (Trajectory): The original trajectory data.
-        logger (logging.Logger): Logger for status updates.
+        logger (logging.Logger): Not used.
 
     Returns:
         Trajectory: The extended trajectory.
@@ -835,13 +976,16 @@ def extend_motion(
 
 def create_multi_trajectory_hash(names: List[str]) -> str:
     """
-    Generates a stable hash for a list of strings using SHA256 with incremental updates.
+    Generate a stable hash for a list of strings using SHA256 with incremental updates.
+
+    The list is sorted first, so the hash does not depend on the order of the strings.
 
     Args:
         names (list[str]): The list of strings to hash.
 
     Returns:
         str: A hexadecimal hash string.
+
     """
 
     # Sort the list to ensure order invariance
@@ -861,10 +1005,17 @@ def load_retargeted_amass_trajectory(
     """
     Load a retargeted AMASS trajectory for a specific environment.
 
+    Retargeted motions are cached in the directory ``LOCOMUJOCO_CONVERTED_AMASS_PATH/<env_name>``. For every dataset
+    that is not found there, the AMASS motion is loaded, fitted to the robot with :func:`fit_smpl_motion`, extended
+    with the model-specific quantities (:func:`extend_motion`) and saved. The SMPL shape of the robot is fitted with
+    :func:`fit_smpl_shape` first if it does not exist yet. Several datasets are concatenated into one trajectory.
+
     Args:
         env_name (str): Name of the environment.
-        dataset_name (Union[str, List[str]]): Name of the dataset or list of datasets to process.
-        robot_conf (DictConfig): Configuration of the robot.
+        dataset_name (Union[str, List[str]]): Name of the dataset or list of datasets to process, as paths relative
+            to the AMASS directory.
+        robot_conf (DictConfig): Configuration of the robot. Defaults to the configuration file of the environment
+            (:func:`load_robot_conf_file`).
 
     Returns:
         Trajectory: The retargeted trajectories.
@@ -946,6 +1097,26 @@ def retarget_traj_from_robot_to_robot(
         robot_conf_target: DictConfig = None,
         path_to_fitted_motion_source: str = None,
 ):
+    """
+    Retarget a trajectory from one robot to another.
+
+    Convenience wrapper around :func:`motion_transfer_robot_to_robot` that loads the robot configurations and
+    resolves the SMPL model path and the directories of the optimized SMPL shapes
+    (``LOCOMUJOCO_CONVERTED_AMASS_PATH/<env_name>``) from the LocoMuJoCo variables.
+
+    Args:
+        env_name_source (str): Name of the source environment.
+        traj_source (Trajectory): Trajectory of the source robot.
+        env_name_target (str): Name of the target environment.
+        robot_conf_source (DictConfig): Configuration of the source robot. Defaults to its configuration file.
+        robot_conf_target (DictConfig): Configuration of the target robot. Defaults to its configuration file.
+        path_to_fitted_motion_source (str): Optional path to an ``.npz`` file used to cache the SMPL-H motion
+            fitted to the source trajectory.
+
+    Returns:
+        Trajectory: The trajectory of the target robot, containing joint positions and velocities only.
+
+    """
 
     check_optional_imports()
 

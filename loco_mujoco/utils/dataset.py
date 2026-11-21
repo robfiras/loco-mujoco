@@ -1,3 +1,12 @@
+"""
+Management of the LocoMuJoCo variables (dataset, model and cache paths).
+
+The variables are stored in the file ``LOCOMUJOCO_VARIABLES.yaml`` (``loco_mujoco.PATH_TO_VARIABLES``). A variable
+is either a string or a list of strings; the types of the predefined variables are given in ``VARIABLE_TYPES``.
+The functions that parse ``--path`` or ``--name`` arguments are the entry points of the ``loco-mujoco-*``
+command-line tools.
+"""
+
 import os
 import argparse
 from typing import Union, Type
@@ -20,7 +29,10 @@ VARIABLE_TYPES = {
 
 def set_amass_path():
     """
-    Set the path to the AMASS dataset.
+    Set the path to the AMASS dataset (variable ``LOCOMUJOCO_AMASS_PATH``).
+
+    Command-line entry point; the path is read from the argument ``--path``.
+
     """
     parser = argparse.ArgumentParser(description="Set the AMASS dataset path.")
     parser.add_argument("--path", type=str, help="Path to the AMASS dataset.")
@@ -30,7 +42,10 @@ def set_amass_path():
 
 def set_smpl_model_path():
     """
-    Set the path to the SMPL model.
+    Set the path to the SMPL model files (variable ``LOCOMUJOCO_SMPL_MODEL_PATH``).
+
+    Command-line entry point; the path is read from the argument ``--path``.
+
     """
     parser = argparse.ArgumentParser(description="Set the SMPL model path.")
     parser.add_argument("--path", type=str, help="Path to the SMPL model.")
@@ -40,12 +55,14 @@ def set_smpl_model_path():
 
 def set_all_caches():
     """
-    Set the path to which all converted datasets will be stored. This sets the following Variables:
-    - LOCOMUJOCO_CONVERTED_AMASS_PATH
-    - LOCOMUJOCO_CONVERTED_LAFAN1_PATH
-    - LOCOMUJOCO_CONVERTED_DEFAULT_PATH
+    Set the directory in which all converted (retargeted) datasets are stored.
 
-    Returns:
+    Command-line entry point; the directory is read from the argument ``--path``. The following variables are set to
+    the sub-directories ``AMASS``, ``LAFAN1`` and ``DEFAULT`` of that directory:
+
+    - ``LOCOMUJOCO_CONVERTED_AMASS_PATH``
+    - ``LOCOMUJOCO_CONVERTED_LAFAN1_PATH``
+    - ``LOCOMUJOCO_CONVERTED_DEFAULT_PATH``
 
     """
     parser = argparse.ArgumentParser(description="Set the path to which all converted datasets will be stored.")
@@ -64,7 +81,10 @@ def set_all_caches():
 
 def set_converted_amass_path():
     """
-    Set the path to which the converted AMASS dataset is stored.
+    Set the path in which the converted AMASS datasets are stored (variable ``LOCOMUJOCO_CONVERTED_AMASS_PATH``).
+
+    Command-line entry point; the path is read from the argument ``--path``.
+
     """
     parser = argparse.ArgumentParser(description="Set the path to which the converted AMASS dataset is stored.")
     parser.add_argument("--path", type=str, help="Path to which the converted AMASS dataset is stored.")
@@ -75,7 +95,10 @@ def set_converted_amass_path():
 
 def set_lafan1_path():
     """
-    Set the path to the LAFAN1 dataset.
+    Set the path to the LAFAN1 dataset (variable ``LOCOMUJOCO_LAFAN1_PATH``).
+
+    Command-line entry point; the path is read from the argument ``--path``.
+
     """
     parser = argparse.ArgumentParser(description="Set the LAFAN1 dataset path.")
     parser.add_argument("--path", type=str, help="Path to the LAFAN1 dataset.")
@@ -85,7 +108,10 @@ def set_lafan1_path():
 
 def set_converted_lafan1_path():
     """
-    Set the path to which the converted LAFAN1 dataset is stored.
+    Set the path in which the converted LAFAN1 datasets are stored (variable ``LOCOMUJOCO_CONVERTED_LAFAN1_PATH``).
+
+    Command-line entry point; the path is read from the argument ``--path``.
+
     """
     parser = argparse.ArgumentParser(description="Set the path to which the converted LAFAN1 dataset is stored.")
     parser.add_argument("--path", type=str, help="Path to which the converted LAFAN1 dataset is stored.")
@@ -95,6 +121,13 @@ def set_converted_lafan1_path():
 
 
 def add_variable_cli():
+    """
+    Set a variable in ``LOCOMUJOCO_VARIABLES.yaml`` from the command line.
+
+    Command-line wrapper around :func:`add_variable` with the arguments ``--name``, ``--value`` and ``--type``
+    (``str`` or ``list``; only needed for variables that are not predefined).
+
+    """
     parser = argparse.ArgumentParser(description="Set a variable in LOCOMUJOCO_VARIABLES.")
     parser.add_argument("--name", type=str, help="Name of the variable.")
     parser.add_argument("--value", type=str, help="Value to which the variable is set.")
@@ -105,6 +138,13 @@ def add_variable_cli():
 
 
 def remove_variable_cli():
+    """
+    Remove a variable from ``LOCOMUJOCO_VARIABLES.yaml`` from the command line.
+
+    Command-line wrapper around :func:`remove_variable` with the arguments ``--name`` and ``--value`` (the entry to
+    remove, only needed for list variables).
+
+    """
     parser = argparse.ArgumentParser(description="Remove a variable in LOCOMUJOCO_VARIABLES.")
     parser.add_argument("--name", type=str, help="Name of the variable.")
     parser.add_argument("--value", type=str, default=None,
@@ -114,6 +154,13 @@ def remove_variable_cli():
 
 
 def show_variable_cli():
+    """
+    Print one or all variables stored in ``LOCOMUJOCO_VARIABLES.yaml``.
+
+    Command-line entry point with the arguments ``--name`` (the variable to show) or ``--all`` (show all variables);
+    one of the two is required.
+
+    """
     parser = argparse.ArgumentParser(description="Show a variable from LOCOMUJOCO_VARIABLES.")
     parser.add_argument("--name", type=str, default=None,
                         help="Name of the variable (omit and pass --all to show all).")
@@ -161,13 +208,21 @@ def add_variable(
     quiet: bool = False,
 ):
     """
-    Adds a variable to LOCOMUJOCO_VARIABLES.yaml.
+    Add a variable to ``LOCOMUJOCO_VARIABLES.yaml``.
+
+    A variable of type ``"str"`` is set to the value, replacing a previous value. For a variable of type ``"list"``,
+    the value is appended to the list if it is not contained yet.
 
     Args:
         variable_name (str): Name of the variable.
         value (str): Value of the variable.
-        variable_type (str): Type of the variable.
-        quiet (bool): If True, no prints.
+        variable_type (str): Type of the variable, ``"str"`` or ``"list"``. Can be omitted for the predefined
+            variables in ``VARIABLE_TYPES``, and has to match the predefined type if given.
+        quiet (bool): If True, nothing is printed.
+
+    Raises:
+        KeyError: If no type is given for a variable that is not predefined.
+        ValueError: If the type is neither ``"str"`` nor ``"list"``.
 
     """
 
@@ -197,15 +252,20 @@ def add_variable(
 def remove_variable(variable_name: str,
                     value: str = None):
     """
-    Removes a variable from LOCOMUJOCO_VARIABLES.yaml.
+    Remove a variable from ``LOCOMUJOCO_VARIABLES.yaml``.
 
     - If the variable is a string, the entire key is removed.
-    - If it's a list, a specific value must be provided and will be removed.
+    - If it is a list, a specific value must be provided and is removed from the list.
       If the list becomes empty, the key is removed.
 
     Args:
         variable_name (str): Name of the variable to remove.
         value (str, optional): Value to remove from a list. Required if the variable is a list.
+
+    Raises:
+        ValueError: If the variable is a list and no value is given.
+        TypeError: If the stored variable is neither a string nor a list.
+
     """
 
     path_to_conf = loco_mujoco.PATH_TO_VARIABLES

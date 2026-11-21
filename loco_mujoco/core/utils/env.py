@@ -1,3 +1,5 @@
+"""Description of a Markov decision process: the box space and the ``MDPInfo`` container."""
+
 import numpy as np
 
 

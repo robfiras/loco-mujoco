@@ -1,3 +1,5 @@
+"""Terminal state handler based on the height of the root."""
+
 from typing import Dict, Any, Union, Tuple
 from types import ModuleType
 
@@ -47,6 +49,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -73,6 +76,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             info (Dict[str, Any]): The info dictionary.
             data (MjData): The Mujoco data structure.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -96,6 +100,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             info (Dict[str, Any]): The info dictionary.
             data (Data): The Mujoco data structure for Mjx.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -121,6 +126,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): The Mujoco data structure.
             carry (Any): Additional carry information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -132,6 +138,18 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
                            traj=None) -> jnp.ndarray:
         """
         Smooth termination probability of the root height range, see ``TerminalStateHandler.soft_any``.
+
+        Args:
+            env (Any): The environment instance.
+            obs (jnp.ndarray): Observation of the environment.
+            info (Dict[str, Any]): The info dictionary.
+            data (Data): The Mujoco data structure for Mjx.
+            carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            jnp.ndarray: Probability in [0, 1] that the current state is terminal.
+
         """
         return self.soft_any(self._violations(data))
 

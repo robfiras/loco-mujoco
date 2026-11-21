@@ -1,3 +1,11 @@
+"""
+Flax network building blocks shared by the learning algorithms.
+
+Contains a fully connected network, the Gaussian actor-critic used by PPO and the algorithms built on it, and
+a running mean/standard-deviation layer for input normalization.
+
+"""
+
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -8,7 +16,19 @@ import distrax
 
 
 def get_activation_fn(name: str):
-    """ Get activation function by name from the flax.linen module."""
+    """
+    Get an activation function by its name from the ``flax.linen`` module.
+
+    Args:
+        name (str): Name of the activation function as defined in ``flax.linen``, e.g. ``"tanh"`` or ``"relu"``.
+
+    Returns:
+        Callable: The activation function.
+
+    Raises:
+        ValueError: If ``flax.linen`` has no attribute with that name.
+
+    """
     try:
         # Use getattr to dynamically retrieve the activation function from jax.nn
         return getattr(nn, name)
@@ -17,6 +37,24 @@ def get_activation_fn(name: str):
 
 
 class FullyConnectedNet(nn.Module):
+    """
+    Fully connected network (MLP) with optional input normalization.
+
+    Hidden layers are initialized orthogonally with gain ``sqrt(2)``, the output layer orthogonally with gain
+    ``0.01``; all biases are initialized to zero.
+
+    Attributes:
+        hidden_layer_dims (Sequence[int]): Number of units of each hidden layer.
+        output_dim (int): Number of output units.
+        activation (str): Name of the hidden-layer activation function in ``flax.linen``.
+        output_activation (str): Name of the output activation function in ``flax.linen``; ``None`` means a
+            linear output.
+        use_running_mean_stand (bool): If True, the input is normalized by a :class:`RunningMeanStd` layer. The
+            network then has a ``run_stats`` variable collection and has to be applied with
+            ``mutable=["run_stats"]``.
+        squeeze_output (bool): If True, all singleton dimensions are removed from the output.
+
+    """
 
     hidden_layer_dims: Sequence[int]
     output_dim: int
@@ -26,12 +64,25 @@ class FullyConnectedNet(nn.Module):
     squeeze_output: bool = True
 
     def setup(self):
+        """Resolve the activation functions from their names."""
         self.activation_fn = get_activation_fn(self.activation)
         self.output_activation_fn = get_activation_fn(self.output_activation) \
             if self.output_activation is not None else lambda x: x
 
     @nn.compact
     def __call__(self, x):
+        """
+        Apply the network.
+
+        Args:
+            x (jax.Array): Input of shape ``(batch, input_dim)`` or ``(input_dim,)``. With input normalization, the
+                output always has a leading batch dimension (unless it is squeezed away).
+
+        Returns:
+            jax.Array: Output of shape ``(batch, output_dim)``, with singleton dimensions removed if
+            ``squeeze_output`` is True.
+
+        """
 
         if self.use_running_mean_stand:
             x = RunningMeanStd()(x)
@@ -49,6 +100,25 @@ class FullyConnectedNet(nn.Module):
 
 
 class ActorCritic(nn.Module):
+    """
+    Actor-critic network with a diagonal Gaussian policy and a state-value function.
+
+    The input observation is normalized by a :class:`RunningMeanStd` layer, then actor and critic, two separate
+    :class:`FullyConnectedNet` of the same hidden layout, each read their own subset of the normalized
+    observation. The standard deviation of the policy is a state-independent parameter ``log_std``. The network
+    has a ``run_stats`` variable collection and has to be applied with ``mutable=["run_stats"]``.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        activation (str): Name of the hidden-layer activation function in ``flax.linen``.
+        init_std (float): Initial standard deviation of the policy (same for all action dimensions).
+        learnable_std (bool): If False, the gradient with respect to ``log_std`` is stopped, so the standard
+            deviation stays at ``init_std``.
+        hidden_layer_dims (Sequence[int]): Number of units of each hidden layer of the actor and of the critic.
+        actor_obs_ind (jax.Array): Indices of the observation entries the actor sees; ``None`` means all.
+        critic_obs_ind (jax.Array): Indices of the observation entries the critic sees; ``None`` means all.
+
+    """
     action_dim: Sequence[int]
     activation: str = "tanh"
     init_std: float = 1.0
@@ -58,10 +128,23 @@ class ActorCritic(nn.Module):
     critic_obs_ind: jnp.ndarray = None
 
     def setup(self):
+        """Resolve the activation function from its name."""
         self.activation_fn = get_activation_fn(self.activation)
 
     @nn.compact
     def __call__(self, x):
+        """
+        Compute the action distribution and the value estimate.
+
+        Args:
+            x (jax.Array): Observations of shape ``(batch, obs_dim)`` or ``(obs_dim,)``; a single observation is
+                treated as a batch of size one.
+
+        Returns:
+            Tuple[distrax.MultivariateNormalDiag, jax.Array]: The action distribution with event shape
+            ``(action_dim,)`` and batch shape ``(batch,)``, and the value estimates of shape ``(batch,)``.
+
+        """
 
         x = RunningMeanStd()(x)
 
@@ -84,10 +167,29 @@ class ActorCritic(nn.Module):
 
 
 class RunningMeanStd(nn.Module):
-    """Layer that maintains running mean and variance for input normalization."""
+    """
+    Layer that normalizes its input with a running estimate of the mean and variance.
+
+    The statistics are stored in the ``run_stats`` variable collection (``mean``, ``var`` and ``count``). Every
+    call first updates them with the incoming batch and then normalizes the batch with the updated statistics, so
+    the module has to be applied with ``mutable=["run_stats"]``. Whether the update persists is up to the caller:
+    it does only if the returned ``run_stats`` are written back to the train state.
+
+    """
 
     @nn.compact
     def __call__(self, x):
+        """
+        Update the running statistics with ``x`` and return the normalized input.
+
+        Args:
+            x (jax.Array): Input of shape ``(batch, dim)`` or ``(dim,)``; the statistics are taken over the batch
+                axis.
+
+        Returns:
+            jax.Array: Normalized input of shape ``(batch, dim)`` (a single input gets a batch dimension of one).
+
+        """
 
         x = jnp.atleast_2d(x)
 

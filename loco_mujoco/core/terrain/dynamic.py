@@ -1,3 +1,5 @@
+"""Base class of terrains that write their heightfield at runtime."""
+
 from loco_mujoco.core.terrain import Terrain
 
 

@@ -1,3 +1,5 @@
+"""Domain randomizer that does nothing; the default of the environments."""
+
 from typing import Any, Union, Tuple
 from types import ModuleType
 
@@ -30,6 +32,7 @@ class NoDomainRandomization(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The unchanged data and carry.
@@ -52,6 +55,7 @@ class NoDomainRandomization(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjModel, Model], Union[MjData, Data], Any]: The unchanged model, data, and carry
@@ -76,6 +80,7 @@ class NoDomainRandomization(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: The unchanged observation and carry.
@@ -100,6 +105,7 @@ class NoDomainRandomization(DomainRandomizer):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: The unchanged action and carry.

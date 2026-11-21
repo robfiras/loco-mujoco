@@ -1,3 +1,13 @@
+"""
+Constants of the retargeting pipeline.
+
+``SMPL_BONE_ORDER_NAMES``, ``SMPLH_BONE_ORDER_NAMES``, ``MANO_LEFT_BONE_ORDER_NAMES`` and
+``MANO_RIGHT_BONE_ORDER_NAMES`` give the joint names of the SMPL, SMPL-H and MANO models in model order.
+``AMASS_LOCOMOTION_DATASETS`` is a predefined group of walking and running clips of the AMASS dataset, given as
+paths relative to the AMASS directory, which can be selected in
+:class:`~loco_mujoco.task_factories.dataset_confs.AMASSDatasetConf`.
+"""
+
 import os
 import sys
 

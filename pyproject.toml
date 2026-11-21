@@ -97,6 +97,16 @@ exclude_also = [
 show_missing = true
 skip_covered = false
 
+# Docstring coverage of the public API, checked in CI with `interrogate loco_mujoco`.
+[tool.interrogate]
+ignore-private = true
+ignore-magic = true
+ignore-nested-functions = true
+ignore-init-method = true
+fail-under = 95
+exclude = ["loco_mujoco/datasets/create_minidatasets.py"]
+verbose = 0
+
 [project.optional-dependencies]
 # To install SMPL, you need to accept the license as described here https://github.com/vchoutas/smplx
 smpl = [
@@ -120,6 +130,16 @@ usd = [
 blender = [
     "usd-core>=24.5",
     "Pillow",
+]
+# Documentation build. Install with: pip install -e ".[docs]"; keep in sync with docs/requirements.txt.
+docs = [
+    "sphinx>=7.3,<9",
+    "pydata-sphinx-theme>=0.16",
+    "myst-parser>=4.0",
+    "sphinx-design>=0.6",
+    "sphinx-copybutton>=0.5",
+    "sphinx-reredirects>=0.1.5",
+    "interrogate>=1.7",
 ]
 # Test/dev tooling. Install with: pip install -e ".[test]"
 test = [

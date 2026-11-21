@@ -45,7 +45,7 @@ class CustomUnitreeG1(UnitreeG1):
 class CustomInitialStateHandler(InitialStateHandler):
     def reset(self, env: Any, model: Union[MjModel, Model],
               data: Union[MjData, Data], carry: Any,
-              backend: ModuleType) -> Tuple[Union[MjData, Data], Any]:
+              backend: ModuleType, traj=None) -> Tuple[Union[MjData, Data], Any]:
         if backend == np:
             data.qpos[2] = np.random.uniform(2.0, 2.5)
         else:
@@ -62,14 +62,14 @@ class CustomControlFunctionState(PDControlState):
     moving_average: Union[np.ndarray, jnp.ndarray]
 
 class CustomControlFunction(PDControl):
-    def generate_action(self, env, action, model, data, carry, backend):
+    def generate_action(self, env, action, model, data, carry, backend, traj=None):
         orig_action, carry = super().generate_action(env, action, model, data, carry, backend)
         ma = 0.99 * carry.control_func_state.moving_average + 0.01 * orig_action
         state = carry.control_func_state.replace(moving_average=ma)
         carry = carry.replace(control_func_state=state)
         return ma, carry
 
-    def init_state(self, env, key, model, data, backend):
+    def init_state(self, env, key, model, data, backend, traj=None):
         orig_state = super().init_state(env, key, model, data, backend)
         dim = env.info.action_space.shape[0]
         ma = backend.zeros_like(dim)
@@ -80,7 +80,7 @@ class CustomControlFunction(PDControl):
 # custom reward function to penalize the deviation from the robots zero joint position
 class CustomReward(Reward):
     def __call__(self, state, action, next_state, absorbing, info, env,
-                 model, data, carry, backend):
+                 model, data, carry, backend, traj=None):
         reward = backend.exp(-backend.linalg.norm(data.qpos[7:]))
         return reward, carry
 
@@ -88,13 +88,13 @@ class CustomReward(Reward):
 # ----- CUSTOM TERMINAL STATE HANDLER -----
 # custom terminal state handler to terminate the episode with a probability of 0.05
 class CustomTerminalStateHandler(TerminalStateHandler):
-    def reset(self, env, model, data, carry, backend):
+    def reset(self, env, model, data, carry, backend, traj=None):
         return data, carry
 
-    def is_absorbing(self, env, obs, info, data, carry):
+    def is_absorbing(self, env, obs, info, data, carry, traj=None):
         return np.random.uniform() < 0.05, carry
 
-    def mjx_is_absorbing(self, env, obs, info, data, carry):
+    def mjx_is_absorbing(self, env, obs, info, data, carry, traj=None):
         key, subkey = jax.random.split(carry.key)
         absorbing = jax.random.uniform(subkey) < 0.05
         return absorbing, carry.replace(key=key)
@@ -138,10 +138,10 @@ class CustomBodyCOMPosMovingAverage(StatefulObservation):
         self.data_type_ind = np.array(self.to_list(data.body(self.xml_name).id))
         self._initialized_from_mj = True
 
-    def init_state(self, env, key, model, data, backend):
+    def init_state(self, env, key, model, data, backend, traj=None):
         return CustomBodyCOMPosMovingAverageState(moving_average=backend.zeros(self.dim))
 
-    def get_obs_and_update_state(self, env, model, data, carry, backend):
+    def get_obs_and_update_state(self, env, model, data, carry, backend, traj=None):
         obs_states = carry.observation_states
         obs_state = getattr(obs_states, self.name)
         xipos = backend.squeeze(data.xipos[self.data_type_ind])

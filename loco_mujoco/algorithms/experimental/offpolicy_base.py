@@ -1,29 +1,37 @@
 """
 Off-policy actor-critic base class shared by SAC and TD3.
 
-Owns:
-  - ReplayBuffer
-  - Twin Q-network architecture (`OffPolicyCriticNet`)
-  - Target critic with soft (Polyak) updates
-  - Environment collection / replay-buffer add
-  - Outer scan over env steps (one transition per env per step + N gradient updates)
-  - Conditional learning-starts logic
-  - Metric struct skeleton
+This module owns:
 
-Subclasses provide algorithm-specific pieces via hook methods:
-  - `_build_actor_net(action_dim, exp)`
-  - `_init_extra_state(rng, exp)`                         # optional (alpha for SAC, none for TD3)
-  - `_select_action(actor_state, obs, rng, exp, ...)`     # for env interaction
-  - `_next_action_and_q_bonus(actor_state, next_obs, rng, exp, extra_state)`
-        returns (next_action, next_bonus)
-        target_q = reward + gamma * (1-done) * (min(Q1, Q2)(next_obs, next_action) + next_bonus)
-        SAC: next_bonus = -alpha * log_pi(next_action)
-        TD3: next_bonus = 0  (action is target-smoothed)
-  - `_actor_loss(actor_params, ..., extra_state)`         # alpha*log_pi-Q for SAC, -Q for TD3
-  - `_update_extra(extra_state, aux, rng, exp)`           # alpha update for SAC
-  - `_should_update_actor(step_count, exp)`               # for TD3 policy delay (default: always)
-  - `_extra_metrics(actor_state, obs, rng, extra_state, exp)`
-  - `_build_summary_metric(base_kwargs, extra)`
+- the Q-network ensemble (:class:`OffPolicyCriticNet`, twin critics by default),
+- the target critic with soft (Polyak) updates,
+- environment collection and insertion into the
+  :class:`~loco_mujoco.algorithms.common.dataclasses.ReplayBuffer` (re-exported here for backwards
+  compatibility),
+- the outer scan over environment steps (one transition per environment per step, followed by
+  ``gradient_steps`` gradient updates),
+- the ``learning_starts`` logic and the skeleton of the logged metrics.
+
+Subclasses of :class:`OffPolicyBase` provide the algorithm-specific pieces via hook methods:
+
+- ``_build_actor_net(action_dim, exp)``
+- ``_init_extra_state(rng, exp)``: optional extra state (the temperature for SAC, the target actor for TD3).
+- ``_select_action(actor_state, obs, rng, exp, extra_state, deterministic)``: action for environment
+  interaction.
+- ``_next_action_and_q_bonus(actor_state, next_obs, rng, exp, extra_state)``: returns
+  ``(next_action, next_bonus, aux)`` for the target
+  ``reward + gamma * (1 - done) * (min(Q1, Q2)(next_obs, next_action) + next_bonus)``. SAC uses
+  ``next_bonus = -alpha * log_pi(next_action)``, TD3 uses ``next_bonus = 0`` with a target-smoothed action.
+- ``_actor_loss(actor_params, ..., extra_state)``: ``alpha * log_pi - Q`` for SAC, ``-Q`` for TD3.
+- ``_update_extra(extra_state, aux, rng, exp)``: e.g. the temperature update of SAC.
+- ``_should_update_actor(step_count, exp)``: for the policy delay of TD3 (default: always).
+- ``_extra_metrics(actor_state, obs, rng, extra_state, exp)``
+- ``_build_summary_metric(base_kwargs, extra)``
+
+The module additionally contains helpers for optional critic variants (batch normalization, weight
+normalization, categorical critics, pessimistic ensemble targets) that are used by
+:class:`~loco_mujoco.algorithms.experimental.td3_jax.TD3Jax`.
+
 """
 
 from typing import Any
@@ -51,17 +59,18 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 # ---------------------------------------------------------------------------
 
 class _QNet(nn.Module):
-    """One Q-network sub-module (s,a) -> q.
+    """
+    One Q-network sub-module mapping the concatenated ``(obs, action)`` input to a Q-value.
 
-    Optional pieces (all gated; defaults preserve the original MLP critic):
-      - `use_batch_norm`: insert BatchNorm into each hidden block. With
-        `pre_activation_bn=True`: `Dense(no bias) -> BN -> activation`.
-        With `pre_activation_bn=False`: `Dense -> activation -> BN`.
-      - `num_atoms > 1`: replace the scalar head with a categorical head
-        of `num_atoms` logits. Returns the scalar value `sum(softmax * z)`
-        where `z = linspace(min_v, max_v, num_atoms)`. The per-atom
-        log-probs are stashed via `self.sow("log_probs_collection", ...)`
-        so the categorical CE loss can retrieve them.
+    Optional pieces (all gated; the defaults give a plain MLP critic):
+
+    - ``use_batch_norm``: insert BatchNorm into each hidden block. With ``pre_activation_bn=True`` a block is
+      ``Dense(no bias) -> BN -> activation``, with ``pre_activation_bn=False`` it is ``Dense -> activation -> BN``.
+    - ``num_atoms > 1``: replace the scalar head with a categorical head of ``num_atoms`` logits. The network then
+      returns the scalar value ``sum(softmax * z)`` with ``z = linspace(min_v, max_v, num_atoms)``. The per-atom
+      log-probabilities are stashed via ``self.sow("log_probs_collection", ...)`` so that a categorical
+      cross-entropy loss can retrieve them.
+
     """
 
     hidden_layer_dims: tuple = (256, 256)
@@ -113,21 +122,23 @@ class _QNet(nn.Module):
 
 
 def aggregate_q_target(qs, pessimism_penalty=None):
-    """Reduce an ensemble of target Q values to a single bootstrap value.
+    """
+    Reduce an ensemble of target Q-values to a single bootstrap value.
+
+    The spread term of the pessimistic variant is the ensemble *range* rather than the standard deviation, so that
+    the two-critic case reproduces the usual formula exactly: for two heads ``max - min == |Q1 - Q2|``, hence
+    ``mean - k * range`` with ``k = 0.5`` is identical to ``min(Q1, Q2)``. This makes ``pessimism_penalty`` a
+    continuous dial: ``k = 0`` is a plain ensemble mean (no pessimism), ``k = 0.5`` is standard TD3 and
+    ``k > 0.5`` is more conservative than TD3.
 
     Args:
-        qs: sequence of K arrays, each shape (batch,) -- one per critic head.
-        pessimism_penalty: if None (default), take the elementwise ``min``,
-            i.e. standard TD3/SAC worst-case pessimism. Otherwise use
-            ``mean(Q) - k * (max(Q) - min(Q))``.
+        qs (Sequence[jax.Array]): ``K`` arrays of shape ``(batch,)``, one per critic head.
+        pessimism_penalty (float): If ``None``, the elementwise minimum over the heads is taken, i.e. the standard
+            TD3/SAC worst-case pessimism. Otherwise ``mean(Q) - pessimism_penalty * (max(Q) - min(Q))`` is used.
 
-    The spread term is the ensemble RANGE rather than the standard deviation so
-    that the K=2 case reproduces the historical formula exactly: for two heads
-    ``max - min == |Q1 - Q2|``, so ``mean - k*range`` is the documented
-    ``mean - k*|Q1-Q2|``, and ``k=0.5`` is then *identically* ``min(Q1, Q2)``.
-    That algebra is the reason this is a continuous dial rather than a flag:
-    k=0 is a plain ensemble mean (no pessimism), k=0.5 is standard TD3, and
-    k>0.5 is more conservative than TD3.
+    Returns:
+        jax.Array: The aggregated target Q-values, shape ``(batch,)``.
+
     """
     q_stack = jnp.stack(qs, axis=0)
     if pessimism_penalty is None:
@@ -138,22 +149,28 @@ def aggregate_q_target(qs, pessimism_penalty=None):
 
 
 def pessimistic_mixture_weights(num_critics, pessimism_penalty):
-    """Weights for blending K categorical target distributions.
+    """
+    Compute the weights for blending the categorical target distributions of ``num_critics`` critic heads.
 
-    The distributional critic cannot average Q values -- it needs a single
-    coherent distribution -- so ``aggregate_q_target``'s arithmetic does not
-    transfer. The analogue is a mixture that concentrates on the most
-    pessimistic head as k rises:
+    A distributional critic cannot average Q-values, it needs a single coherent distribution, so the arithmetic of
+    :func:`aggregate_q_target` does not transfer. The analogue is a mixture that concentrates on the most
+    pessimistic head as ``k = pessimism_penalty`` rises: the head with the smallest Q-value gets the weight
+    ``1/K + (k / 0.5) * (1 - 1/K)``, clipped to ``[1/K, 1]``, and the other heads share the remainder equally.
+    ``k = 0.5`` puts all mass on the most pessimistic head (a hard pick) and ``k = 0`` gives the uniform mixture
+    (no pessimism). The mixing is meant to be done on probabilities, not log-probabilities, so that the result
+    stays a valid distribution for the C51 projection.
 
-        w_argmin = 1/K + (k / 0.5) * (1 - 1/K),  the rest share the remainder.
-
-    k=0.5 puts all mass on the argmin head, reproducing the historical
-    hard-pick exactly; k=0 gives the uniform mixture (no pessimism). Mixing is
-    done on probabilities, not log-probabilities, so the result stays a valid
-    distribution for the C51 projection.
+    Args:
+        num_critics (int): Number of critic heads ``K``.
+        pessimism_penalty (float): Pessimism coefficient ``k``.
 
     Returns:
-        (w_argmin, w_other) as Python floats.
+        Tuple[float, float]: ``(w_argmin, w_other)``, the weight of the most pessimistic head and the weight of
+        each other head, as Python floats.
+
+    Raises:
+        ValueError: If ``num_critics < 1``.
+
     """
     K = int(num_critics)
     if K < 1:
@@ -167,14 +184,27 @@ def pessimistic_mixture_weights(num_critics, pessimism_penalty):
 
 
 class OffPolicyCriticNet(nn.Module):
-    """Ensemble of ``num_critics`` Q-networks, optionally with input
-    observation normalisation.
+    """
+    Ensemble of ``num_critics`` Q-networks, optionally with running normalization of the observation.
 
-    Defaults to 2 -- the classic TD3/SAC twin -- in which case the sub-modules
-    are named ``q1``/``q2`` and the return value is the 2-tuple ``(q1, q2)``
-    exactly as before, so existing checkpoints and every ``(q1, q2) = ...``
-    call site keep working unchanged. With ``num_critics=K`` the return is a
-    K-tuple and the sub-modules are ``q1``..``qK``.
+    The default is two critics, the classic TD3/SAC twin. The sub-modules are named ``q1`` ... ``qK`` and the
+    network returns a ``K``-tuple of Q-values, so that with two critics ``q1, q2 = critic(obs, action)`` works.
+
+    Attributes:
+        hidden_layer_dims (tuple): Number of units of each hidden layer of every Q-network.
+        activation (str): Name of the activation function in ``flax.linen``.
+        use_obs_norm (bool): If True, the observation is normalized by a
+            :class:`~loco_mujoco.algorithms.common.networks.RunningMeanStd` layer (adds a ``run_stats``
+            collection).
+        use_batch_norm (bool): If True, BatchNorm is inserted into every hidden block (adds a ``batch_stats``
+            collection).
+        pre_activation_bn (bool): If True, BatchNorm is applied before the activation, otherwise after it.
+        num_atoms (int): Number of atoms of the categorical value head; ``1`` gives a scalar head.
+        min_v (float): Lower end of the support of the categorical head.
+        max_v (float): Upper end of the support of the categorical head.
+        obs_ind (jax.Array): Indices of the observation entries the critics see; ``None`` means all.
+        num_critics (int): Number of Q-networks in the ensemble.
+
     """
 
     hidden_layer_dims: tuple = (256, 256)
@@ -190,6 +220,19 @@ class OffPolicyCriticNet(nn.Module):
 
     @nn.compact
     def __call__(self, obs, action, *, training=False):
+        """
+        Evaluate all Q-networks.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(batch, obs_dim)``.
+            action (jax.Array): Actions, shape ``(batch, action_dim)``.
+            training (bool): Whether BatchNorm layers use batch statistics (and update their running averages)
+                instead of the running averages.
+
+        Returns:
+            Tuple[jax.Array, ...]: One array of Q-values of shape ``(batch,)`` per critic.
+
+        """
         if self.obs_ind is not None:
             obs = obs[..., self.obs_ind]
         if self.use_obs_norm:
@@ -222,16 +265,20 @@ class OffPolicyCriticNet(nn.Module):
 
 
 def _normalize_dense_kernels(params, normalize_last_layer: bool = True):
-    """Renormalize every Dense layer's kernel (and bias if present) so that
-    ``||kernel||_axis=-2 = 1``. Mirrors ``xqc/networks/common.py::norm_network``.
+    """
+    Renormalize the weights of every Dense layer to unit norm per output unit.
+
+    For each Dense layer the kernel (stacked with the bias, if present) is divided by its L2 norm along the input
+    axis (``axis=-2``). Mirrors ``xqc/networks/common.py::norm_network``.
 
     Args:
-        params: Flax params PyTree (FrozenDict).
-        normalize_last_layer: If False, skip the final Dense in each twin's
-            ``_QNet`` (matches the XQC ``normalize_last_layer`` flag).
+        params: Flax parameter pytree.
+        normalize_last_layer (bool): If False, skip the final Dense layer of each Q-network (matches the XQC
+            ``normalize_last_layer`` flag).
 
     Returns:
-        New params PyTree with the same structure.
+        A new parameter pytree with the same structure.
+
     """
     flat = flax.traverse_util.flatten_dict(params, sep="/")
 
@@ -279,17 +326,26 @@ def _normalize_dense_kernels(params, normalize_last_layer: bool = True):
 
 def _c51_project_target(target_log_probs, target_bin_values, num_atoms,
                         min_v, max_v):
-    """Project the next-state log-probabilities onto the C51 support after
-    shifting the bin centers by the bootstrapped target ``r + γ·(z-α·log π)``.
+    """
+    Project a categorical target distribution with shifted bin centers back onto the fixed C51 support.
 
-    Mirrors ``xqc.agents.xqc.critic.categorical_td_loss``:
-      - ``target_bin_values``: (B, num_atoms) bin centers AFTER the
-        ``reward + gamma * (bin - actor_entropy) * (1 - done)`` shift.
-      - Distribute each old bin's probability mass between the two nearest
-        new bins using floor/ceil weights.
+    Mirrors ``xqc.agents.xqc.critic.categorical_td_loss``: the probability mass of each shifted bin is distributed
+    between the two nearest bins of the support using floor/ceil weights.
 
-    Returns the target distribution (B, num_atoms) ready for the cross-entropy
-    against the predicted log-probabilities.
+    Args:
+        target_log_probs (jax.Array): Log-probabilities of the next-state distribution, shape
+            ``(batch, num_atoms)``.
+        target_bin_values (jax.Array): Bin centers after the bootstrap shift
+            ``reward + gamma * (bin + bonus) * (1 - done)``, shape ``(batch, num_atoms)``. Values are clipped to
+            ``[min_v, max_v]``.
+        num_atoms (int): Number of atoms of the support.
+        min_v (float): Lower end of the support.
+        max_v (float): Upper end of the support.
+
+    Returns:
+        jax.Array: The target distribution, shape ``(batch, num_atoms)``, ready for the cross-entropy against the
+        predicted log-probabilities.
+
     """
     target_bin_values = jnp.clip(target_bin_values, min_v, max_v)
 
@@ -321,7 +377,17 @@ def _c51_project_target(target_log_probs, target_bin_values, num_atoms,
 
 @dataclass(frozen=True)
 class OffPolicyAgentConf(AgentConfBase):
-    """Common conf fields for off-policy algos. Subclasses can extend."""
+    """
+    Common static configuration fields of off-policy algorithms; subclasses can extend it.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        actor_net: The actor network definition.
+        critic_net: The critic network definition.
+        actor_tx: The Optax optimizer of the actor.
+        critic_tx: The Optax optimizer of the critic.
+
+    """
     config: DictConfig
     actor_net: Any
     critic_net: Any
@@ -331,6 +397,23 @@ class OffPolicyAgentConf(AgentConfBase):
 
 @struct.dataclass
 class OffPolicyAgentState(AgentStateBase):
+    """
+    Dynamic state of an off-policy agent.
+
+    Attributes:
+        actor_state (TrainState): Parameters, optimizer state and running statistics of the actor.
+        critic_state (TrainState): Parameters and optimizer state of the critic ensemble. Its ``run_stats`` field
+            holds the mutable variable collections of the critic (running observation statistics and, with
+            batch normalization, batch statistics).
+        target_critic_params: Parameters of the target critic.
+        target_critic_run_stats: Mutable variable collections of the target critic.
+        extra_state: Algorithm-specific state (e.g. the temperature for SAC, the target actor for TD3).
+        replay_buffer (ReplayBuffer): The replay buffer.
+        env_state: Environment state at the end of the last training chunk, carried over so that training can
+            continue seamlessly; not saved to disk.
+        last_obs (jax.Array): Last observations of the previous training chunk; not saved to disk.
+
+    """
     actor_state: TrainState
     critic_state: TrainState
     target_critic_params: Any
@@ -341,6 +424,16 @@ class OffPolicyAgentState(AgentStateBase):
     last_obs: Any = None
 
     def serialize(self):
+        """
+        Serialize the agent state.
+
+        The replay buffer, ``env_state`` and ``last_obs`` are not serialized.
+
+        Returns:
+            dict: Dictionary with the keys ``"actor_state"``, ``"critic_state"``, ``"target_critic"`` and
+            ``"extra_state"``.
+
+        """
         return {
             "actor_state": flax.serialization.to_state_dict(self.actor_state),
             "critic_state": flax.serialization.to_state_dict(self.critic_state),
@@ -357,66 +450,204 @@ class OffPolicyAgentState(AgentStateBase):
 # ---------------------------------------------------------------------------
 
 class OffPolicyBase(JaxRLAlgorithmBase):
-    """Shared off-policy actor-critic engine. Subclasses must override the hooks
-    listed in this module's docstring."""
+    """
+    Shared off-policy actor-critic engine.
+
+    Implements the training loop common to SAC and TD3: in every iteration all environments are stepped once, the
+    transitions are added to the replay buffer and, once the buffer holds ``learning_starts`` transitions,
+    ``gradient_steps`` updates of critic, actor and target critic are performed. Subclasses must override the
+    hooks listed in the docstring of this module (see
+    :class:`~loco_mujoco.algorithms.experimental.sac_jax.SACJax` and
+    :class:`~loco_mujoco.algorithms.experimental.td3_jax.TD3Jax`).
+
+    """
 
     # ---------- Hooks (override in subclasses) ---------------------------
     @classmethod
     def _build_actor_net(cls, action_dim: int, exp):
+        """
+        Build the actor network; must be implemented by subclasses that use it.
+
+        Args:
+            action_dim (int): Dimension of the action space.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            nn.Module: The actor network definition.
+
+        """
         raise NotImplementedError
 
     @classmethod
     def _init_extra_state(cls, rng, exp):
-        """Init extra (algorithm-specific) state. Returns pytree."""
+        """
+        Initialize the algorithm-specific extra state.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            A pytree; empty by default.
+
+        """
         return {}
 
     @classmethod
     def _select_action(cls, actor_state, obs, rng, exp,
                        extra_state, deterministic=False):
-        """Returns (action, updated_actor_state). Used at env-collect time."""
+        """
+        Select the action used for environment interaction.
+
+        Args:
+            actor_state (TrainState): Train state of the actor.
+            obs (jax.Array): Observations, shape ``(num_envs, obs_dim)``.
+            rng (jax.Array): PRNG key.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+            extra_state: Algorithm-specific extra state.
+            deterministic (bool): If True, no exploration noise is applied.
+
+        Returns:
+            Tuple[jax.Array, TrainState]: The actions and the actor train state with updated running statistics.
+
+        """
         raise NotImplementedError
 
     @classmethod
     def _next_action_and_q_bonus(cls, actor_state, next_obs, rng, exp,
                                  extra_state):
-        """Returns (next_action, next_q_bonus, aux_dict).
-        Q-target: r + γ(1-d) · ( min(Q1,Q2)(next_obs, next_action) + next_q_bonus ).
-        SAC: next_q_bonus = -alpha · log_pi(next_action)
-        TD3: next_q_bonus = 0  (action is target-policy smoothed)
-        aux_dict can carry log_pi or any signal needed elsewhere."""
+        """
+        Compute the next action and the additive bonus of the Q-target.
+
+        The Q-target is ``r + gamma * (1 - d) * (agg(Q)(next_obs, next_action) + next_q_bonus)``, where ``agg`` is the
+        minimum over the critics by default. SAC returns ``next_q_bonus = -alpha * log_pi(next_action)``; TD3 returns
+        zero (its next action is target-policy smoothed).
+
+        Args:
+            actor_state (TrainState): Train state of the actor.
+            next_obs (jax.Array): Next observations, shape ``(batch, obs_dim)``.
+            rng (jax.Array): PRNG key.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+            extra_state: Algorithm-specific extra state.
+
+        Returns:
+            Tuple[jax.Array, jax.Array, dict]: ``(next_action, next_q_bonus, aux)`` with shapes
+            ``(batch, action_dim)`` and ``(batch,)``; ``aux`` can carry the log-probability or any other signal.
+
+        """
         raise NotImplementedError
 
     @classmethod
     def _actor_loss(cls, actor_params, actor_apply_fn, actor_run_stats,
                     critic_st, critic_apply_fn,
                     obs_b, rng, exp, extra_state):
-        """Compute actor loss and any aux (e.g. log_pi for SAC)."""
+        """
+        Compute the actor loss on a batch of observations.
+
+        Args:
+            actor_params: Actor parameters the loss is differentiated with respect to.
+            actor_apply_fn (Callable): ``apply`` function of the actor network.
+            actor_run_stats: Running statistics of the actor.
+            critic_st (TrainState): Train state of the critic (after its update).
+            critic_apply_fn (Callable): ``apply`` function of the critic network.
+            obs_b (jax.Array): Batch of observations, shape ``(batch, obs_dim)``.
+            rng (jax.Array): PRNG key.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+            extra_state: Algorithm-specific extra state.
+
+        Returns:
+            Tuple[jax.Array, dict]: The scalar loss and an auxiliary dictionary (e.g. the log-probabilities for SAC).
+            If it contains the key ``"run_stats"``, these become the new running statistics of the actor.
+
+        """
         raise NotImplementedError
 
     @classmethod
     def _update_extra(cls, extra_state, actor_aux, rng, exp):
-        """Update algorithm-specific state (e.g. alpha). Returns
-        (new_extra_state, aux_metrics_dict)."""
+        """
+        Update the algorithm-specific extra state (e.g. the temperature of SAC).
+
+        Called only in gradient steps in which the actor is updated.
+
+        Args:
+            extra_state: Algorithm-specific extra state.
+            actor_aux (dict): Auxiliary output of :meth:`_actor_loss`.
+            rng (jax.Array): PRNG key.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            Tuple[Any, dict]: The new extra state and a dictionary of auxiliary metrics.
+
+        """
         return extra_state, {}
 
     @classmethod
     def _should_update_actor(cls, step_count, exp):
-        """For TD3 policy delay; default = always update."""
+        """
+        Decide whether the actor is updated in the current gradient step.
+
+        Used for the policy delay of TD3; by default the actor is always updated.
+
+        Args:
+            step_count (jax.Array): Index of the gradient step within the current iteration.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            jax.Array: Scalar boolean.
+
+        """
         return jnp.array(True)
 
     @classmethod
     def _extra_metrics(cls, actor_state, obs, rng, extra_state, exp):
-        """Compute extra metrics for logging (e.g. mean_alpha, mean_entropy)."""
+        """
+        Compute additional metrics for logging (e.g. the temperature and the entropy for SAC).
+
+        Args:
+            actor_state (TrainState): Train state of the actor.
+            obs (jax.Array): Current observations, shape ``(num_envs, obs_dim)``.
+            rng (jax.Array): PRNG key.
+            extra_state: Algorithm-specific extra state.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            dict: Additional metrics; empty by default.
+
+        """
         return {}
 
     @classmethod
     def _build_summary_metric(cls, base_kwargs, extra):
-        """Combine base metric kwargs and extra into the algo's summary struct."""
+        """
+        Combine the base metrics and the extra metrics into the summary struct of the algorithm.
+
+        Args:
+            base_kwargs (dict): Base metrics: ``mean_episode_return``, ``mean_episode_length``, ``max_timestep``,
+                ``mean_critic_loss``, ``mean_actor_loss`` and ``buffer_size``.
+            extra (dict): Output of :meth:`_extra_metrics`.
+
+        Returns:
+            The summary metrics struct (a subclass of :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics`).
+
+        """
         raise NotImplementedError
 
     # ---------- Optimisers (override if you need separate optimisers) ----
     @classmethod
     def _build_optimisers(cls, exp):
+        """
+        Build the optimizers of actor and critic: gradient clipping by global norm followed by Adam.
+
+        Reads ``lr_actor`` and ``lr_critic`` and the optional ``max_grad_norm`` (default 0.5),
+        ``max_actor_grad_norm`` and ``max_critic_grad_norm`` (both default to ``max_grad_norm``).
+
+        Args:
+            exp (DictConfig): The ``experiment`` node of the configuration.
+
+        Returns:
+            Tuple[optax.GradientTransformation, optax.GradientTransformation]: ``(actor_tx, critic_tx)``.
+
+        """
         max_grad = float(getattr(exp, 'max_grad_norm', 0.5))
         actor_tx = optax.chain(
             optax.clip_by_global_norm(float(getattr(exp, 'max_actor_grad_norm', max_grad))),
@@ -431,6 +662,20 @@ class OffPolicyBase(JaxRLAlgorithmBase):
     # ---------- Conf helpers (subclasses can override) -------------------
     @classmethod
     def _build_critic_net(cls, exp, obs_ind=None):
+        """
+        Build the critic ensemble from the configuration.
+
+        Reads ``hidden_layers`` and ``activation`` and the optional keys ``use_obs_norm``, ``use_batch_norm``,
+        ``pre_activation_bn``, ``num_atoms``, ``min_v``, ``max_v`` and ``num_critics``.
+
+        Args:
+            exp (DictConfig): The ``experiment`` node of the configuration.
+            obs_ind (jax.Array): Indices of the observation entries the critic sees; ``None`` means all.
+
+        Returns:
+            OffPolicyCriticNet: The critic network definition.
+
+        """
         import ast
         from omegaconf import ListConfig
         hidden = (exp.hidden_layers if isinstance(exp.hidden_layers, (list, ListConfig))
@@ -455,6 +700,37 @@ class OffPolicyBase(JaxRLAlgorithmBase):
                   agent_state=None,
                   traj=None,
                   mh: MetricsHandler = None):
+        """
+        Run the shared off-policy training loop.
+
+        ``num_updates`` iterations are performed. Each one steps all ``num_envs`` environments once with the
+        exploration policy, adds the transitions to the replay buffer (the ``absorbing`` flag is stored as the done
+        flag, so values are bootstrapped through time limits) and, if the buffer holds at least ``learning_starts``
+        transitions, runs ``gradient_steps`` gradient steps. A gradient step updates the critics on the mean squared
+        error to the Q-target, optionally renormalizes the critic weights (``use_weight_norm``), updates the actor and
+        the extra state if :meth:`_should_update_actor` allows it, and soft-updates the target critic with rate
+        ``tau``. If ``agent_state`` carries an environment state from a previous call, training continues from it.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (OffPolicyAgentConf): Static agent configuration.
+            agent_state (OffPolicyAgentState): Agent state to start or resume from. If ``None``, a new one is
+                initialized.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Unused; no validation is run during off-policy training.
+
+        Returns:
+            dict: Dictionary with the keys
+
+            - ``"agent_state"``: the agent state after training, including replay buffer, last environment state
+              and last observation.
+            - ``"training_metrics"``: the summary metrics of the algorithm with a leading axis of length
+              ``max(1, num_updates // log_every)``; each entry aggregates ``log_every`` (default 100) iterations.
+              The episode return and length are the means over all environments of their last completed episode.
+            - ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`): always empty.
+
+        """
 
         exp = agent_conf.config.experiment
         actor_net = agent_conf.actor_net
@@ -774,6 +1050,20 @@ class OffPolicyBase(JaxRLAlgorithmBase):
     # ---------- env wrap (subclasses can override) -----------------------
     @staticmethod
     def _wrap_env(env, config):
+        """
+        Wrap the environment for training.
+
+        Applies a :class:`~loco_mujoco.core.wrappers.mjx.LogWrapper` and a
+        :class:`~loco_mujoco.core.wrappers.mjx.VecEnv`. Rewards are not normalized.
+
+        Args:
+            env: The (unwrapped) environment.
+            config (DictConfig): The ``experiment`` node of the configuration (unused).
+
+        Returns:
+            The wrapped, vectorized environment.
+
+        """
         env = LogWrapper(env)
         env = VecEnv(env)
         # Reward normalization no longer lives on the env wrapper; off-policy

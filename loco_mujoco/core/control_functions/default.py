@@ -1,3 +1,5 @@
+"""Default control function, which passes the actions on to the actuators after scaling them to the control range."""
+
 from typing import Any, Union, Tuple, Dict
 from types import ModuleType
 
@@ -54,6 +56,7 @@ class DefaultControl(ControlFunction):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jax.Array], Any]: The action and carry.

@@ -1,12 +1,13 @@
-"""SuperMimic: whole-body tracking with one differentiable world model.
+"""
+SuperMimic: whole-body tracking with one differentiable world model.
 
-Follows "SuperMimic: Scaling Humanoid Whole-Body Control with One Differentiable World
-Model" (arXiv:2610.28480), Algorithm A.1:
+Follows Liao et al., "SuperMimic: Scaling Humanoid Whole-Body Control with One Differentiable World
+Model" (2026, arXiv:2610.28480), Algorithm A.1:
 
-  1. collect one vectorised env step with the deterministic policy plus Gaussian action noise,
-  2. fit a world model on k-step windows of the replay buffer (autoregressive loss, Eq. 1),
-  3. improve the policy by backpropagating through H-step imagined rollouts of the frozen
-     world model (Eq. 2), with a TD(lambda) critic bootstrapping the tail (Eq. 3).
+1. collect one vectorised env step with the deterministic policy plus Gaussian action noise,
+2. fit a world model on k-step windows of the replay buffer (autoregressive loss, Eq. 1),
+3. improve the policy by backpropagating through H-step imagined rollouts of the frozen
+   world model (Eq. 2), with a TD(lambda) critic bootstrapping the tail (Eq. 3).
 
 The paper's world model predicts the simulator state and computes observations and rewards
 *analytically* from it through a differentiable forward kinematics of the G1. Here the same
@@ -38,6 +39,9 @@ flattened into a context vector ``xi`` that the dynamics and the critic receive.
 Backends: the environment steps can run on MJX or on MjWarp (``use_mjwarp=True``). The gradients of the
 imagined rollouts run through the kinematics, which the warp kernels cannot differentiate, so with MjWarp
 only the real steps use warp and imagination gets a JAX copy of the model.
+
+Example: ``examples/training_examples/jax_rl_mimic_supermimic``.
+
 """
 
 import ast
@@ -80,20 +84,45 @@ from loco_mujoco.utils import ValidationSummary
 # ---------------------------------------------------------------------------
 
 class WorldModelSpec:
-    """Feature map, integration step and error metric of the world model on (qpos, qvel).
+    """
+    Feature map, integration step and error metric of the world model on ``(qpos, qvel)``.
 
-    qpos = [root_pos (3), root_quat (4), joint_pos (nj)],  qvel = [root_lin_vel_w (3),
-    root_ang_vel_b (3), joint_vel (nj)]  (MuJoCo free-joint layout).
+    The state uses the MuJoCo free-joint layout::
 
-    Features (heading-invariant):  [root_z, rot6d(heading^-1 * root_quat), lin_vel in heading
-    frame, ang_vel_b, joint_pos, joint_vel] / in_scale.
+        qpos = [root_pos (3), root_quat (4), joint_pos (nj)]
+        qvel = [root_lin_vel_w (3), root_ang_vel_b (3), joint_vel (nj)]
 
-    Network output delta = [dv_h (3), dw_b (3), dqd (nj), dp_h (3), dth_b (3), dq (nj)] * out_scale:
+    Features (heading-invariant), divided by ``in_scale``::
+
+        [root_z, rot6d(heading^-1 * root_quat), lin_vel in heading frame, ang_vel_b, joint_pos, joint_vel]
+
+    The network output, multiplied by ``out_scale``, is
+    ``delta = [dv_h (3), dw_b (3), dqd (nj), dp_h (3), dth_b (3), dq (nj)]`` and is integrated as (for
+    ``drift = 1``; ``R_h`` rotates from the heading frame to the world frame)::
+
         v' = v + R_h dv_h,   w' = w + dw_b,   qd' = qd + dqd
         p' = p + dt v' + R_h dp_h,   q' = q * exp(dt w' + dth_b),   qj' = qj + dt qd' + dq
+
+    With ``drift < 1`` the positions are advanced with ``(1 - drift) * old + drift * new`` velocities.
+
     """
 
     def __init__(self, nj, dt, in_scale, out_scale, err_scale, drift=1.0):
+        """
+        Initialize the specification.
+
+        Args:
+            nj (int): Number of hinge/slide joints (``nq - 7``).
+            dt (float): Time step of one environment step in seconds.
+            in_scale (Sequence[float]): Six scales, one per feature group ``[root_z, rot6d, lin_vel, ang_vel,
+                joint_pos, joint_vel]``; the features are divided by them.
+            out_scale (Sequence[float]): Six scales, one per output group ``[dv_h, dw_b, dqd, dp_h, dth_b, dq]``; the
+                network output is multiplied by them.
+            err_scale (Sequence[float]): Six scales, one per error group ``[root pos, root rotation vector, root
+                linear velocity, root angular velocity, joint pos, joint vel]``; the errors are divided by them.
+            drift (float): Weight of the new velocity in the position update; the old velocity gets ``1 - drift``.
+
+        """
         self.nj = int(nj)
         self.dt = float(dt)
         self.drift = float(drift)  # weight of the new velocity in the position update
@@ -105,18 +134,32 @@ class WorldModelSpec:
 
     @property
     def feat_dim(self):
+        """int: Dimension of the feature vector, ``13 + 2 * nj``."""
         return 13 + 2 * self.nj
 
     @property
     def delta_dim(self):
+        """int: Dimension of the network output, ``12 + 2 * nj``."""
         return 12 + 2 * self.nj
 
     @staticmethod
     def _split(qpos, qvel):
+        """Split ``qpos`` and ``qvel`` into their root and joint parts (root quaternion normalized)."""
         return qpos[..., 0:3], _quat_normalize(qpos[..., 3:7]), qpos[..., 7:], \
             qvel[..., 0:3], qvel[..., 3:6], qvel[..., 6:]
 
     def features(self, qpos, qvel):
+        """
+        Compute the heading-invariant, scaled input features of the world model.
+
+        Args:
+            qpos (jax.Array): Generalized positions, shape ``(..., 7 + nj)``.
+            qvel (jax.Array): Generalized velocities, shape ``(..., 6 + nj)``.
+
+        Returns:
+            jax.Array: Features of shape ``(..., feat_dim)``.
+
+        """
         p, q, qj, v, w, qd = self._split(qpos, qvel)
         hq = _heading_quat(q)
         q_local = _quat_mul(_quat_conj(hq), q)
@@ -125,6 +168,18 @@ class WorldModelSpec:
         return feat / self.in_scale
 
     def integrate(self, qpos, qvel, delta):
+        """
+        Advance a state by one step with the output of the world model.
+
+        Args:
+            qpos (jax.Array): Generalized positions, shape ``(..., 7 + nj)``.
+            qvel (jax.Array): Generalized velocities, shape ``(..., 6 + nj)``.
+            delta (jax.Array): Network output (not yet multiplied by ``out_scale``), shape ``(..., delta_dim)``.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: The next ``qpos`` (with a normalized root quaternion) and the next ``qvel``.
+
+        """
         nj = self.nj
         d = delta * self.out_scale
         dv_h, dw_b, dqd = d[..., 0:3], d[..., 3:6], d[..., 6:6 + nj]
@@ -142,7 +197,19 @@ class WorldModelSpec:
                 jnp.concatenate([v_new, w_new, qd_new], axis=-1))
 
     def targets(self, qpos, qvel, qpos_next, qvel_next):
-        """The network output that makes ``integrate`` go from one state to the next."""
+        """
+        Compute the network output that makes :meth:`integrate` go from one state to the next.
+
+        Args:
+            qpos (jax.Array): Generalized positions, shape ``(..., 7 + nj)``.
+            qvel (jax.Array): Generalized velocities, shape ``(..., 6 + nj)``.
+            qpos_next (jax.Array): Generalized positions of the next state.
+            qvel_next (jax.Array): Generalized velocities of the next state.
+
+        Returns:
+            jax.Array: Target output (already divided by ``out_scale``), shape ``(..., delta_dim)``.
+
+        """
         p, q, qj, v, w, qd = self._split(qpos, qvel)
         p1, q1, qj1, v1, w1, qd1 = self._split(qpos_next, qvel_next)
         hq = _heading_quat(q)
@@ -154,7 +221,20 @@ class WorldModelSpec:
         return delta / self.out_scale
 
     def error(self, qpos_pred, qvel_pred, qpos_true, qvel_true):
-        """Normalised error vector [dp, rotvec, dv, dw, dqj, dqd] / err_scale."""
+        """
+        Compute the normalized error vector between a predicted and a true state.
+
+        Args:
+            qpos_pred (jax.Array): Predicted generalized positions, shape ``(..., 7 + nj)``.
+            qvel_pred (jax.Array): Predicted generalized velocities, shape ``(..., 6 + nj)``.
+            qpos_true (jax.Array): True generalized positions.
+            qvel_true (jax.Array): True generalized velocities.
+
+        Returns:
+            jax.Array: ``[dp, rotvec, dv, dw, dqj, dqd] / err_scale``, shape ``(..., 12 + 2 * nj)``, where ``rotvec``
+            is the rotation vector between the two root orientations.
+
+        """
         p1, q1, qj1, v1, w1, qd1 = self._split(qpos_pred, qvel_pred)
         p2, q2, qj2, v2, w2, qd2 = self._split(qpos_true, qvel_true)
         rot = _rotvec_from_quat(_quat_mul(_quat_conj(q2), q1))
@@ -163,7 +243,21 @@ class WorldModelSpec:
 
 
 def check_floating_base(model):
-    """Raise unless qpos/qvel are [free root joint | hinge/slide joints]."""
+    """
+    Check that the model has the joint layout SuperMimic supports.
+
+    ``qpos`` and ``qvel`` must be laid out as a free root joint followed by hinge/slide joints only.
+
+    Args:
+        model (mujoco.MjModel): The MuJoCo model.
+
+    Returns:
+        int: Number of hinge/slide joints.
+
+    Raises:
+        ValueError: If the first joint is not a free joint or if there are other joint types than hinge and slide.
+
+    """
     if model.njnt == 0 or model.jnt_type[0] != mujoco.mjtJoint.mjJNT_FREE or model.jnt_qposadr[0] != 0:
         raise ValueError("SuperMimic needs a free root joint as the first joint of the model.")
     others = model.jnt_type[1:]
@@ -180,11 +274,34 @@ def check_floating_base(model):
 # ---------------------------------------------------------------------------
 
 def uses_domain_randomization(env):
+    """
+    Check whether the environment randomizes its domain.
+
+    Args:
+        env: The (unwrapped) environment.
+
+    Returns:
+        bool: False if the domain randomizer of the environment is ``NoDomainRandomization``, True otherwise.
+
+    """
     return not isinstance(env._domain_randomizer, NoDomainRandomization)
 
 
 def context_from_carry(carry, enabled, index=None):
-    """Flatten the per-episode randomizer and control-function states into one vector, or its entries ``index``."""
+    """
+    Flatten the per-episode randomizer and control-function states into one context vector.
+
+    Only floating-point leaves of the two states are used.
+
+    Args:
+        carry: Additional carry of a single (unbatched) environment state.
+        enabled (bool): If False, an empty context is returned.
+        index (Sequence[int]): Entries of the flattened vector to return; ``None`` returns all.
+
+    Returns:
+        jax.Array: The context ``xi`` as a 1D ``float32`` array (of length zero if not enabled).
+
+    """
     if not enabled:
         return jnp.zeros((0,))
     leaves = jax.tree.leaves((carry.domain_randomizer_state, carry.control_func_state))
@@ -195,7 +312,20 @@ def context_from_carry(carry, enabled, index=None):
 
 
 def context_index(env, n_samples=32):
-    """Entries of the context that differ between episodes: the others tell the networks nothing."""
+    """
+    Find the entries of the context that differ between episodes.
+
+    The environment is reset ``n_samples`` times and the entries of the context whose standard deviation
+    exceeds ``1e-6`` are kept; the others tell the networks nothing.
+
+    Args:
+        env: The (unwrapped) environment.
+        n_samples (int): Number of resets used to detect the varying entries.
+
+    Returns:
+        List[int]: Indices into the full context vector (empty without domain randomization).
+
+    """
     if not uses_domain_randomization(env):
         return []
     @jax.jit  # compiled: op by op, every primitive of the reset is its own compilation
@@ -212,6 +342,7 @@ def context_index(env, n_samples=32):
 # ---------------------------------------------------------------------------
 
 class _MLP(nn.Module):
+    """MLP with optional layer normalization, zero-initialized last layer and PyTorch-like initialization."""
     hidden_layer_dims: tuple
     out_dim: int
     activation: str = "silu"
@@ -248,7 +379,19 @@ class _MLP(nn.Module):
 
 
 class SuperMimicWorldModelNet(nn.Module):
-    """Dynamics MLP (zero-initialised output) and termination head."""
+    """
+    World-model network: a dynamics MLP with zero-initialized output and a termination head.
+
+    Attributes:
+        delta_dim (int): Output dimension of the dynamics MLP (see :class:`WorldModelSpec`).
+        hidden_layer_dims (tuple): Hidden layers of the dynamics MLP.
+        term_hidden_layer_dims (tuple): Hidden layers of the termination head.
+        activation (str): Name of the activation function in ``flax.linen``.
+        compute_dtype (str): Data type of the matrix multiplications; parameters and outputs stay ``float32``.
+        layer_norm (bool): Whether the hidden layers of the dynamics MLP use layer normalization.
+        torch_init (bool): Whether the dynamics MLP uses the initialization of ``torch.nn.Linear``.
+
+    """
     delta_dim: int
     hidden_layer_dims: tuple = (2048, 2048, 2048)
     term_hidden_layer_dims: tuple = (64, 64)
@@ -258,24 +401,76 @@ class SuperMimicWorldModelNet(nn.Module):
     torch_init: bool = False
 
     def setup(self):
+        """Create the dynamics MLP and the termination head."""
         self.dynamics_net = _MLP(self.hidden_layer_dims, self.delta_dim, self.activation, zero_last=True,
                                  compute_dtype=self.compute_dtype, layer_norm=self.layer_norm,
                                  torch_init=self.torch_init)
         self.termination_net = _MLP(self.term_hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype)
 
     def __call__(self, feat, action, xi, term_obs):
+        """
+        Apply both heads (used to initialize the parameters).
+
+        Args:
+            feat (jax.Array): State features, shape ``(..., feat_dim)``.
+            action (jax.Array): Actions, shape ``(..., action_dim)``.
+            xi (jax.Array): Normalized domain-randomization context, shape ``(..., xi_dim)``.
+            term_obs (jax.Array): Input of the termination head, shape ``(..., term_obs_dim)``.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: The outputs of :meth:`dynamics` and :meth:`termination`.
+
+        """
         return self.dynamics(feat, action, xi), self.termination(term_obs)
 
     def dynamics(self, feat, action, xi, norm=None):
+        """
+        Predict the state increment for a state-action pair.
+
+        Args:
+            feat (jax.Array): State features, shape ``(..., feat_dim)``.
+            action (jax.Array): Actions, shape ``(..., action_dim)``.
+            xi (jax.Array): Normalized domain-randomization context, shape ``(..., xi_dim)``.
+            norm (Callable): Optional normalizer applied to the concatenated input.
+
+        Returns:
+            jax.Array: Network output ``delta`` of shape ``(..., delta_dim)``, to be passed to
+            :meth:`WorldModelSpec.integrate`.
+
+        """
         x = jnp.concatenate([feat, action, xi], axis=-1)
         return self.dynamics_net(x if norm is None else norm(x))
 
     def termination(self, term_obs):
+        """
+        Predict the termination logit of a state.
+
+        Args:
+            term_obs (jax.Array): Termination observation of the state, shape ``(..., term_obs_dim)``.
+
+        Returns:
+            jax.Array: Logits of the probability that the state is absorbing, shape ``(...,)``.
+
+        """
         return self.termination_net(term_obs)[..., 0]
 
 
 class SuperMimicPolicyNet(nn.Module):
-    """a = dec(tanh(enc(goal)), history): the encoder sees the reference only, the decoder the recent observations."""
+    """
+    Policy with a goal encoder and a history decoder: ``a = dec(tanh(enc(goal)), history)``.
+
+    The encoder sees the reference only, the decoder the latent and the recent observations.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        enc_hidden_dims (tuple): Hidden layers of the encoder.
+        dec_hidden_dims (tuple): Hidden layers of the decoder.
+        latent_dim (int): Dimension of the encoder output.
+        activation (str): Name of the activation function in ``flax.linen``.
+        compute_dtype (str): Data type of the matrix multiplications; parameters and outputs stay ``float32``.
+        torch_init (bool): Whether the layers use the initialization of ``torch.nn.Linear``.
+
+    """
     action_dim: int
     enc_hidden_dims: tuple = (2048, 1024, 512, 256)
     dec_hidden_dims: tuple = (2048, 1024, 512, 256)
@@ -286,6 +481,17 @@ class SuperMimicPolicyNet(nn.Module):
 
     @nn.compact
     def __call__(self, goal, history):
+        """
+        Compute the deterministic action.
+
+        Args:
+            goal (jax.Array): Goal entries of the observation, shape ``(..., goal_dim)``.
+            history (jax.Array): Flattened observation history, shape ``(..., history_len * history_dim)``.
+
+        Returns:
+            jax.Array: Actions of shape ``(..., action_dim)``.
+
+        """
         z = _MLP(self.enc_hidden_dims, self.latent_dim, self.activation, compute_dtype=self.compute_dtype,
                  torch_init=self.torch_init, name="enc")(goal)
         dec = _MLP(self.dec_hidden_dims, self.action_dim, self.activation, compute_dtype=self.compute_dtype,
@@ -347,7 +553,21 @@ def _slim_layer(activation, dtype, layer_norm):
 
 
 def slim_mlp_apply(layers, x, activation, dtype):
-    """``_MLP`` on a batch ``x`` (B, D) from its parameters, with ``_slim_layer`` for the hidden layers."""
+    """
+    Apply an ``_MLP`` to a batch from its parameters, with a memory-saving backward pass.
+
+    The hidden layers use ``_slim_layer``, whose hand-written backward pass keeps one array per layer.
+
+    Args:
+        layers (dict): Parameters of the ``_MLP`` (entries ``Dense_i`` and optionally ``LayerNorm_i``).
+        x (jax.Array): Inputs of shape ``(B, D)``.
+        activation (str): Activation function of the MLP.
+        dtype (str): Data type of the matrix multiplications.
+
+    Returns:
+        jax.Array: Outputs of shape ``(B, out_dim)`` in ``float32``.
+
+    """
     n = sum(k.startswith("Dense_") for k in layers)
     for i in range(n - 1):
         norm = layers.get(f"LayerNorm_{i}")
@@ -362,16 +582,47 @@ WM_ERR_FLOOR = ((3e-3, 5e-3, 2e-2, 5e-2), (3e-3, 5e-2))
 
 @struct.dataclass
 class RunningNorm:
-    """Running mean and variance of the columns of x, frozen after ``max_count`` rows."""
+    """
+    Running mean and variance of the columns of an array, frozen after ``max_count`` rows.
+
+    Calling the object normalizes an array with the current statistics.
+
+    Attributes:
+        mean (jax.Array): Running mean, shape ``(dim,)``.
+        var (jax.Array): Running variance, shape ``(dim,)``.
+        count (jax.Array): Number of rows seen so far, scalar.
+
+    """
     mean: jnp.ndarray
     var: jnp.ndarray
     count: jnp.ndarray
 
     @classmethod
     def create(cls, dim):
+        """
+        Create statistics with zero mean, unit variance and zero count.
+
+        Args:
+            dim (int): Number of columns.
+
+        Returns:
+            RunningNorm: The initial statistics.
+
+        """
         return cls(mean=jnp.zeros(dim), var=jnp.ones(dim), count=jnp.zeros(()))
 
     def update(self, x, max_count=2e8):
+        """
+        Update the statistics with new data.
+
+        Args:
+            x (jax.Array): Data of shape ``(..., dim)``; all leading axes are treated as rows.
+            max_count (float): Once ``count`` has reached this value, the statistics are no longer updated.
+
+        Returns:
+            RunningNorm: The updated statistics.
+
+        """
         # centred on the running mean: both moments come from one pass over x
         x = x.reshape(-1, x.shape[-1]) - self.mean
         n = x.shape[0]
@@ -385,15 +636,47 @@ class RunningNorm:
                            count=jnp.where(live, total, self.count))
 
     def std(self, eps=1e-4):
+        """
+        Return the running standard deviation.
+
+        Args:
+            eps (float): Lower bound of the standard deviation.
+
+        Returns:
+            jax.Array: ``sqrt(var + eps**2)``, shape ``(dim,)``.
+
+        """
         return jnp.sqrt(self.var + eps ** 2)
 
     def __call__(self, x, index=None, eps=1e-2):
+        """
+        Normalize an array with the running statistics.
+
+        Args:
+            x (jax.Array): Data of shape ``(..., dim)``, or ``(..., len(index))`` if ``index`` is given.
+            index (jax.Array): Columns of the statistics that ``x`` holds; ``None`` means all.
+            eps (float): Lower bound of the standard deviation.
+
+        Returns:
+            jax.Array: ``(x - mean) / sqrt(var + eps**2)``.
+
+        """
         mean, var = (self.mean, self.var) if index is None else (self.mean[index], self.var[index])
         return (x - mean) / jnp.sqrt(var + eps ** 2)
 
 
 class SuperMimicValueNet(nn.Module):
-    """V(obs[obs_ind], xi)."""
+    """
+    State-value function ``V(obs[obs_ind], xi)``.
+
+    Attributes:
+        hidden_layer_dims (tuple): Hidden layers of the MLP.
+        activation (str): Name of the activation function in ``flax.linen``.
+        obs_ind (jax.Array): Indices of the observation entries the critic sees; ``None`` means all.
+        compute_dtype (str): Data type of the matrix multiplications; parameters and outputs stay ``float32``.
+        torch_init (bool): Whether the layers use the initialization of ``torch.nn.Linear``.
+
+    """
     hidden_layer_dims: tuple = (256, 128)
     activation: str = "silu"
     obs_ind: jnp.ndarray = None
@@ -402,6 +685,17 @@ class SuperMimicValueNet(nn.Module):
 
     @nn.compact
     def __call__(self, obs, xi):
+        """
+        Compute the value estimate.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(..., obs_dim)``.
+            xi (jax.Array): Normalized domain-randomization context, shape ``(..., xi_dim)``.
+
+        Returns:
+            jax.Array: Values of shape ``(...,)``.
+
+        """
         if self.obs_ind is not None:
             obs = obs[..., self.obs_ind]
         net = _MLP(self.hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype,
@@ -414,23 +708,56 @@ class SuperMimicValueNet(nn.Module):
 # ---------------------------------------------------------------------------
 
 def state_is_valid(qpos, qvel, max_abs_qvel):
-    """False for diverged simulator states (non-finite, or velocities beyond any physical motion).
-    MJX occasionally blows up an env before its episode ends; such states must not reach the world
-    model or seed imagined rollouts."""
+    """
+    Check that simulator states have not diverged.
+
+    MJX occasionally blows up an environment before its episode ends; such states must not reach the world model
+    or seed imagined rollouts.
+
+    Args:
+        qpos (jax.Array): Generalized positions, shape ``(..., nq)``.
+        qvel (jax.Array): Generalized velocities, shape ``(..., nv)``.
+        max_abs_qvel (float): Largest absolute velocity that still counts as a physical motion.
+
+    Returns:
+        jax.Array: Boolean array of shape ``(...,)``; False for states with non-finite entries or with a velocity
+        of at least ``max_abs_qvel``.
+
+    """
     return (jnp.all(jnp.isfinite(qpos), axis=-1) & jnp.all(jnp.isfinite(qvel), axis=-1)
             & (jnp.max(jnp.abs(jnp.nan_to_num(qvel, nan=jnp.inf)), axis=-1) < max_abs_qvel))
 
 
 def _zero_where_invalid(valid, x):
+    """Zero the entries of ``x`` whose leading axes are flagged invalid."""
     return jnp.where(valid.reshape(valid.shape + (1,) * (x.ndim - valid.ndim)), x, jnp.zeros_like(x))
 
 
 @struct.dataclass
 class WindowBuffer:
-    """Time-major [T, E] ring of transitions for world-model fitting. All envs step together, so
-    one write pointer serves every env. ``next_qpos`` / ``next_qvel`` hold the true successor
-    state also when the episode ended there (before the auto-reset). Invalid transitions (see
-    ``state_is_valid``) are stored zeroed with ``valid=False``."""
+    """
+    Time-major ``[T, E]`` ring buffer of transitions for world-model fitting.
+
+    All environments step together, so one write pointer serves every environment. ``next_qpos`` and
+    ``next_qvel`` hold the true successor state also when the episode ended there (before the auto-reset).
+    Invalid transitions (see :func:`state_is_valid`) are stored zeroed with ``valid=False``.
+
+    Attributes:
+        qpos (jax.Array): Generalized positions, shape ``(T, E, nq)``.
+        qvel (jax.Array): Generalized velocities, shape ``(T, E, nv)``.
+        next_qpos (jax.Array): Generalized positions of the successor states, shape ``(T, E, nq)``.
+        next_qvel (jax.Array): Generalized velocities of the successor states, shape ``(T, E, nv)``.
+        action (jax.Array): Actions, shape ``(T, E, action_dim)``.
+        xi (jax.Array): Domain-randomization contexts (not normalized), shape ``(T, E, xi_dim)``.
+        next_term_obs (jax.Array): Termination observations of the successor states, shape
+            ``(T, E, term_obs_dim)``.
+        absorbing (jax.Array): Absorbing flags of the successor states as floats, shape ``(T, E)``.
+        done (jax.Array): Boolean flags of transitions that ended an episode, shape ``(T, E)``.
+        valid (jax.Array): Boolean validity flags, shape ``(T, E)``.
+        ptr (jax.Array): Row that is written next, scalar ``int32``.
+        count (jax.Array): Number of rows written so far, at most ``T``; scalar ``int32``.
+
+    """
     qpos: jnp.ndarray
     qvel: jnp.ndarray
     next_qpos: jnp.ndarray
@@ -446,6 +773,22 @@ class WindowBuffer:
 
     @classmethod
     def create(cls, length, n_envs, nq, nv, action_dim, xi_dim, term_obs_dim):
+        """
+        Create an empty buffer.
+
+        Args:
+            length (int): Number of time steps ``T`` the buffer holds.
+            n_envs (int): Number of environments ``E``.
+            nq (int): Dimension of ``qpos``.
+            nv (int): Dimension of ``qvel``.
+            action_dim (int): Dimension of the actions.
+            xi_dim (int): Dimension of the domain-randomization context.
+            term_obs_dim (int): Dimension of the termination observation.
+
+        Returns:
+            WindowBuffer: The empty buffer.
+
+        """
         f = lambda *shape: jnp.zeros((length, n_envs) + shape)  # noqa: E731
         return cls(qpos=f(nq), qvel=f(nv), next_qpos=f(nq), next_qvel=f(nv), action=f(action_dim),
                    xi=f(xi_dim), next_term_obs=f(term_obs_dim), absorbing=f(),
@@ -453,15 +796,40 @@ class WindowBuffer:
                    ptr=jnp.array(0, dtype=jnp.int32), count=jnp.array(0, dtype=jnp.int32))
 
     def add(self, valid, **rows):
+        """
+        Write one time step for all environments and advance the write pointer.
+
+        Args:
+            valid (jax.Array): Boolean validity flags, shape ``(E,)``; the rows of invalid environments are zeroed.
+            **rows: The fields to write (``qpos``, ``qvel``, ``next_qpos``, ``next_qvel``, ``action``, ``xi``,
+                ``next_term_obs``, ``absorbing``, ``done``), each with a leading axis of length ``E``.
+
+        Returns:
+            WindowBuffer: The updated buffer.
+
+        """
         new = {k: getattr(self, k).at[self.ptr].set(_zero_where_invalid(valid, v)) for k, v in rows.items()}
         length = self.qpos.shape[0]
         return self.replace(**new, valid=self.valid.at[self.ptr].set(valid), ptr=(self.ptr + 1) % length,
                             count=jnp.minimum(self.count + 1, length))
 
     def sample_windows(self, rng, n, k):
-        """n windows of k consecutive transitions. Returns (k, n, ...) arrays and an (n,) mask that
-        is False for windows with an episode boundary before their last transition or with an
-        invalid transition; their entries are zeroed."""
+        """
+        Sample windows of consecutive transitions of one environment each.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            n (int): Number of windows.
+            k (int): Number of consecutive transitions per window.
+
+        Returns:
+            Tuple[dict, jax.Array]: A dictionary with the entries ``qpos``, ``qvel``, ``next_qpos``, ``next_qvel``,
+            ``action``, ``next_term_obs`` and ``absorbing`` of shape ``(k, n, ...)`` and ``xi`` of shape
+            ``(n, xi_dim)`` (the context of the first transition), and a boolean mask of shape ``(n,)``. The mask is
+            False for windows with an episode boundary before their last transition or with an invalid transition;
+            their entries are zeroed.
+
+        """
         length, n_envs = self.qpos.shape[:2]
         rng_t, rng_e = jax.random.split(rng)
         # age 0 is the newest row; a window starting at age a covers ages a .. a-k+1
@@ -480,7 +848,19 @@ class WindowBuffer:
 
 @struct.dataclass
 class StartState:
-    """What an imagined rollout needs from a real state (``data`` is rebuilt from qpos/qvel)."""
+    """
+    What an imagined rollout needs from a real state (``data`` is rebuilt from ``qpos`` and ``qvel``).
+
+    Attributes:
+        qpos (jax.Array): Generalized positions.
+        qvel (jax.Array): Generalized velocities.
+        observation (jax.Array): Observation of the state.
+        info: Info of the environment state.
+        carry: Additional carry of the environment state.
+        history (jax.Array): Observation history of the policy, shape ``(history_len, history_dim)`` per state;
+            ``None`` for policies without history.
+
+    """
     qpos: jnp.ndarray
     qvel: jnp.ndarray
     observation: jnp.ndarray
@@ -491,8 +871,18 @@ class StartState:
 
 @struct.dataclass
 class StartBuffer:
-    """[S, E] ring of the most recent full env states, the start states of imagination. Only valid
-    states (see ``state_is_valid``) are sampled."""
+    """
+    ``[S, E]`` ring buffer of the most recent full environment states, the start states of imagination.
+
+    Only valid states (see :func:`state_is_valid`) are sampled.
+
+    Attributes:
+        states (StartState): Stored states; every leaf has the leading axes ``(S, E)``.
+        valid (jax.Array): Boolean validity flags, shape ``(S, E)``.
+        ptr (jax.Array): Row that is written next, scalar ``int32``.
+        count (jax.Array): Number of rows the pointer has advanced over, at most ``S``; scalar ``int32``.
+
+    """
     states: StartState
     valid: jnp.ndarray
     ptr: jnp.ndarray
@@ -500,14 +890,42 @@ class StartBuffer:
 
     @classmethod
     def create(cls, length, env_state, history=None):
+        """
+        Create an empty buffer shaped after an environment state.
+
+        Args:
+            length (int): Number of rows ``S``.
+            env_state (MjxState): Batched environment state of ``E`` environments, used as template.
+            history (jax.Array): Observation history used as template, shape ``(E, history_len, history_dim)``, or
+                ``None``.
+
+        Returns:
+            StartBuffer: The empty buffer (no valid entries).
+
+        """
         start = _start_state(env_state).replace(history=history)
         states = jax.tree.map(lambda x: jnp.zeros((length,) + x.shape, x.dtype), start)
         valid = jnp.zeros((length, start.qpos.shape[0]), dtype=bool)
         return cls(states=states, valid=valid, ptr=jnp.array(0, dtype=jnp.int32), count=jnp.array(0, dtype=jnp.int32))
 
     def add(self, env_state, valid, advance=True, history=None):
-        """Writes the current row. With ``advance`` False the next add overwrites it, so a ring of S rows
-        advanced every n steps spans S * n steps."""
+        """
+        Write the current row.
+
+        With ``advance`` False the next call overwrites the row, so a ring of ``S`` rows advanced every ``n`` steps
+        spans ``S * n`` steps.
+
+        Args:
+            env_state (MjxState): Batched environment state of ``E`` environments.
+            valid (jax.Array): Boolean flags of the states that may start an imagined rollout, shape ``(E,)``.
+            advance (Union[bool, jax.Array]): Whether to advance the write pointer.
+            history (jax.Array): Observation history of the policy, shape ``(E, history_len, history_dim)``, or
+                ``None``.
+
+        Returns:
+            StartBuffer: The updated buffer.
+
+        """
         start = _start_state(env_state).replace(history=history)
         states = jax.tree.map(lambda b, x: b.at[self.ptr].set(x), self.states, start)
         length = self.states.qpos.shape[0]
@@ -516,6 +934,17 @@ class StartBuffer:
                             ptr=(self.ptr + step) % length, count=jnp.minimum(self.count + step, length))
 
     def sample(self, rng, n):
+        """
+        Sample start states uniformly from the valid entries.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            n (int): Number of states.
+
+        Returns:
+            StartState: Batch of start states; every leaf has a leading axis of length ``n``.
+
+        """
         # uniform over the valid entries; categorical would draw n noise values per buffer entry
         rank = jnp.cumsum(self.valid.reshape(-1))
         idx = jnp.searchsorted(rank, jax.random.randint(rng, (n,), 0, jnp.maximum(rank[-1], 1)), side="right")
@@ -525,6 +954,7 @@ class StartBuffer:
 
 
 def _start_state(env_state):
+    """Extract the :class:`StartState` (without history) from an environment state."""
     return StartState(qpos=env_state.data.qpos, qvel=env_state.data.qvel,
                       observation=env_state.observation, info=env_state.info,
                       carry=env_state.additional_carry)
@@ -536,6 +966,31 @@ def _start_state(env_state):
 
 @struct.dataclass
 class SuperMimicSummaryMetrics(SummaryMetrics):
+    """
+    Training metrics logged by SuperMimic.
+
+    Extends :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics`. Every environment step records the metrics
+    of the most recent update; the training function returns their mean over each logging interval of
+    ``log_every`` environment steps (``max_timestep`` and ``num_updates`` are the last values of the interval).
+    ``mean_episode_return`` and ``mean_episode_length`` are averages over the environments of their last
+    finished episode.
+
+    Attributes:
+        mean_wm_loss (float): World-model loss (state loss plus weighted termination loss).
+        mean_wm_nse_1step (float): Normalized squared state error per dimension after the first step of the
+            training windows.
+        mean_wm_nse_kstep (float): The same error after the last step of the training windows.
+        mean_term_bce (float): Binary cross entropy of the termination head (zero without the head).
+        mean_term_acc (float): Classification accuracy of the termination head (zero without the head).
+        mean_imag_return (float): Mean undiscounted, survival-weighted sum of rewards of the imagined rollouts.
+        mean_imag_survival (float): Mean survival weight at the last step of the imagined rollouts.
+        mean_imag_alive (float): Mean share of imagined rollouts that were not cut off before their last step.
+        mean_critic_loss (float): Critic loss of the last minibatch of the update.
+        mean_actor_grad_norm (float): Global norm of the policy gradient before clipping.
+        mean_action_norm (float): Mean Euclidean norm of the imagined actions.
+        num_updates (int): Total number of updates performed so far.
+
+    """
     mean_wm_loss: float = 0.0
     mean_wm_nse_1step: float = 0.0
     mean_wm_nse_kstep: float = 0.0
@@ -568,6 +1023,7 @@ class _Packed:
                 self.groups.setdefault(jnp.dtype(l.dtype), []).append(i)
 
     def pack(self, tree):
+        """Pack the leaves of ``tree`` into one flat array per dtype; typed PRNG keys are passed through."""
         leaves = jax.tree.leaves(tree)
         flat = tuple(jnp.concatenate([leaves[i].reshape(-1) for i in idx]) for idx in self.groups.values())
         return flat, tuple(leaves[i] for i in self.rest)
@@ -588,12 +1044,26 @@ class _Packed:
 
 
 def _tuple(x):
+    """Convert a list-like configuration value or its string representation to a tuple."""
     return tuple(x if isinstance(x, (list, tuple, ListConfig)) else ast.literal_eval(x))
 
 
 def scale_by_muon(momentum=0.95, ns_steps=5, eps=1e-7):
-    """Muon (Jordan et al. 2024) on 2D parameters, scaled to Adam's update RMS (Liu et al. 2025), so the
-    Adam learning rate carries over. Nesterov momentum, Newton-Schulz in bfloat16."""
+    """
+    Muon optimizer step as an Optax gradient transformation.
+
+    Muon (Jordan et al. 2024) on 2D parameters, scaled to Adam's update RMS (Liu et al. 2025), so the Adam
+    learning rate carries over. Uses Nesterov momentum and runs the Newton-Schulz iteration in ``bfloat16``.
+
+    Args:
+        momentum (float): Momentum coefficient.
+        ns_steps (int): Number of Newton-Schulz iterations used to orthogonalize the update.
+        eps (float): Added to the norm the update is divided by.
+
+    Returns:
+        optax.GradientTransformation: The transformation; all parameters it is applied to must be matrices.
+
+    """
     a, b, c = 3.4445, -4.775, 2.0315
 
     def orthogonalize(g):
@@ -619,8 +1089,18 @@ def scale_by_muon(momentum=0.95, ns_steps=5, eps=1e-7):
 
 
 def muon_labels(params, root=None):
-    """"muon" for the hidden kernels of each MLP (under ``root`` if given), "adam" for the first and last
-    layers and all vectors."""
+    """
+    Label the parameters for ``optax.multi_transform`` with Muon on the hidden kernels.
+
+    Args:
+        params (dict): Parameter dictionary of a network.
+        root (str): If given, only MLPs below a module of this name get Muon.
+
+    Returns:
+        dict: Dictionary of the same structure with the label ``"muon"`` for the hidden kernels of each MLP and
+        ``"adam"`` for the first and last layers and all vectors.
+
+    """
     flat = traverse_util.flatten_dict(params)
     dense = {}
     for path in flat:
@@ -706,11 +1186,21 @@ def _build_nets(env, config):
 
 
 def apply_if_finite_select(inner, max_consecutive_errors):
-    """``optax.apply_if_finite`` with a select instead of ``lax.cond``.
+    """
+    ``optax.apply_if_finite`` with a select instead of ``lax.cond``.
 
     On the GPU, XLA runs a ``lax.cond`` from the host: the host waits for the predicate, so every optimizer step
     drains the GPU's queue of launched kernels. Here the inner update always runs and the rejected result is
     discarded, which gives the same updates and the same state (``optax.ApplyIfFiniteState``).
+
+    Args:
+        inner (optax.GradientTransformation): The wrapped transformation.
+        max_consecutive_errors (int): Number of consecutive non-finite updates after which they are applied
+            anyway.
+
+    Returns:
+        optax.GradientTransformationExtraArgs: The wrapped transformation.
+
     """
     inner = optax.with_extra_args_support(inner)
     increment = lambda x: x + (x < jnp.iinfo(jnp.int32).max).astype(jnp.int32)  # noqa: E731
@@ -735,6 +1225,16 @@ def apply_if_finite_select(inner, max_consecutive_errors):
 
 
 class SpikeGuardState(NamedTuple):
+    """
+    State of :func:`skip_gradient_spikes`.
+
+    Attributes:
+        inner_state: State of the wrapped transformation.
+        mean_norm (jax.Array): Running mean of the global gradient norm.
+        count (jax.Array): Number of updates seen.
+        skipped (jax.Array): Number of updates skipped.
+
+    """
     inner_state: Any
     mean_norm: jnp.ndarray
     count: jnp.ndarray
@@ -742,11 +1242,22 @@ class SpikeGuardState(NamedTuple):
 
 
 def skip_gradient_spikes(inner, factor, warmup=200, decay=0.99):
-    """Skips updates whose gradient norm exceeds `factor` times its running mean.
+    """
+    Skip updates whose gradient norm exceeds ``factor`` times its running mean.
 
-    Backpropagating through a long rollout occasionally explodes. Clipping bounds the size of such a
-    step but not its direction, and a run of them can destroy a good policy. The running mean takes
-    skipped gradients in at their limit, so a real rise of the norm is followed rather than blocked.
+    Backpropagating through a long rollout occasionally explodes. Clipping bounds the size of such a step but not
+    its direction, and a run of them can destroy a good policy. The running mean takes skipped gradients in at
+    their limit, so a real rise of the norm is followed rather than blocked.
+
+    Args:
+        inner (optax.GradientTransformation): The wrapped transformation.
+        factor (float): Updates with a gradient norm above ``factor`` times the running mean are skipped.
+        warmup (int): Number of initial updates during which nothing is skipped.
+        decay (float): Decay of the running mean of the gradient norm.
+
+    Returns:
+        optax.GradientTransformation: The wrapped transformation with a :class:`SpikeGuardState`.
+
     """
 
     def init_fn(params):
@@ -769,6 +1280,7 @@ def skip_gradient_spikes(inner, factor, warmup=200, decay=0.99):
 
 
 def _obs_ind(env, group, what):
+    """Return the observation indices of a group (``None`` for no group); raise if the group is empty."""
     if group is None:
         return None
     ind = jnp.asarray(env.obs_container.get_obs_ind_by_group(group), dtype=jnp.int32)
@@ -780,6 +1292,26 @@ def _obs_ind(env, group, what):
 
 @dataclass(frozen=True)
 class SuperMimicAgentConf(AgentConfBase):
+    """
+    Static configuration of a SuperMimic agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        actor_net (nn.Module): The policy network definition, a
+            :class:`~loco_mujoco.algorithms.experimental.td3_jax.TD3ActorNet` or, with ``history_len > 0``, a
+            :class:`SuperMimicPolicyNet`.
+        critic_net (SuperMimicValueNet): The critic network definition.
+        wm_net (SuperMimicWorldModelNet): The world-model network definition.
+        actor_tx (optax.GradientTransformation): Optimizer of the policy.
+        critic_tx (optax.GradientTransformation): Optimizer of the critic.
+        wm_tx (optax.GradientTransformation): Optimizer of the world model.
+        term_obs_ind (jax.Array): Observation entries the termination head reads; ``None`` means all.
+        goal_ind (jax.Array): With ``history_len > 0``, the observation entries of the policy's encoder;
+            ``None`` otherwise.
+        history_ind (jax.Array): With ``history_len > 0``, the observation entries stacked into the policy's
+            history; ``None`` otherwise.
+
+    """
     config: DictConfig
     actor_net: TD3ActorNet
     critic_net: SuperMimicValueNet
@@ -792,6 +1324,15 @@ class SuperMimicAgentConf(AgentConfBase):
     history_ind: Any = None
 
     def serialize(self):
+        """
+        Serialize the agent configuration, the network definitions and the observation indices.
+
+        The optimizers are rebuilt from the configuration when loading.
+
+        Returns:
+            dict: Dictionary from which :meth:`from_dict` rebuilds the configuration.
+
+        """
         return {"config": OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True),
                 "goal_ind": None if self.goal_ind is None else np.asarray(self.goal_ind),
                 "history_ind": None if self.history_ind is None else np.asarray(self.history_ind),
@@ -802,6 +1343,18 @@ class SuperMimicAgentConf(AgentConfBase):
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        No environment is needed: the observation indices are stored with the networks and in the dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            SuperMimicAgentConf: The restored configuration with newly built optimizers.
+
+        """
         config = OmegaConf.create(d["config"])
         actor_net = d["actor_net"]
         critic_net = flax.serialization.from_state_dict(SuperMimicValueNet, d["critic_net"])
@@ -817,10 +1370,12 @@ class SuperMimicAgentConf(AgentConfBase):
 
 
 class _NoGroupEnv:
+    """Stand-in for the environment when the networks are rebuilt without observation groups."""
     obs_container = None
 
 
 def _strip_groups(config):
+    """Return a copy of the configuration without actor and critic observation groups."""
     config = OmegaConf.create(OmegaConf.to_container(config, resolve=True))
     with open_dict(config.experiment):
         for k in ("actor_obs_group", "critic_obs_group"):
@@ -830,6 +1385,43 @@ def _strip_groups(config):
 
 @struct.dataclass
 class SuperMimicAgentState(AgentStateBase):
+    """
+    Dynamic state of a SuperMimic agent.
+
+    The first block of attributes is the learned state, which is saved with the agent. The run state (buffers,
+    environment state, episode statistics) is created by the first call of the training function and is not
+    serialized.
+
+    Attributes:
+        actor_state (TrainState): Parameters and optimizer state of the policy.
+        critic_state (TrainState): Parameters and optimizer state of the critic.
+        wm_state (TrainState): Parameters and optimizer state of the world model.
+        xi_mean (jax.Array): Mean of the domain-randomization context, shape ``(xi_dim,)``.
+        xi_std (jax.Array): Standard deviation of the domain-randomization context, shape ``(xi_dim,)``.
+        xi_initialized (jax.Array): Whether ``xi_mean`` and ``xi_std`` have been estimated.
+        num_updates (jax.Array): Number of updates performed so far.
+        iteration (jax.Array): Environment steps taken over all calls of the training function. It drives the
+            pacing of the updates and the logged timestep, so a run can be continued in chunks (the learning-rate
+            schedules live in the optimizer states).
+        window_buffer (WindowBuffer): Transitions for world-model fitting (run state).
+        start_buffer (StartBuffer): Start states of the imagined rollouts (run state).
+        env_state (MjxState): Current batched environment state (run state).
+        episode_stats (EpisodeStats): Running episode statistics (run state).
+        bin_resets (BinResetState): State of the reset distribution, with ``bin_resets`` enabled (run state).
+        actor_ema: Polyak average of the policy parameters, the policy to deploy; ``None`` without
+            ``policy_ema``.
+        lr_decay_start (jax.Array): Update at which the boost of the policy learning rate starts to decay; -1
+            before.
+        actor_norm (RunningNorm): Running statistics of the observations, used to normalize the policy input;
+            ``None`` without ``obs_norm``.
+        critic_norm (RunningNorm): Running statistics of the imagined critic observations; ``None`` without
+            ``obs_norm``.
+        obs_history (jax.Array): Observation history of the policy, shape ``(n_envs, history_len, history_dim)``
+            (run state).
+        wm_norm (dict): :class:`RunningNorm` of the ``"input"``, ``"output"`` and ``"error"`` of the world model;
+            ``None`` without ``wm_running_norm``.
+
+    """
     actor_state: TrainState
     critic_state: TrainState
     wm_state: TrainState
@@ -856,9 +1448,20 @@ class SuperMimicAgentState(AgentStateBase):
 
     @property
     def deployed_params(self):
+        """Policy parameters to deploy: the Polyak average if there is one, else the current ones."""
         return self.actor_state.params if self.actor_ema is None else self.actor_ema
 
     def serialize(self):
+        """
+        Serialize the learned state.
+
+        The run state (``window_buffer``, ``start_buffer``, ``env_state``, ``episode_stats``, ``bin_resets`` and
+        ``obs_history``) is not serialized.
+
+        Returns:
+            dict: Dictionary from which :meth:`from_dict` rebuilds the state.
+
+        """
         return {"actor_state": flax.serialization.to_state_dict(self.actor_state),
                 "actor_ema": None if self.actor_ema is None else flax.serialization.to_state_dict(self.actor_ema),
                 "lr_decay_start": None if self.lr_decay_start is None else np.asarray(self.lr_decay_start),
@@ -874,6 +1477,17 @@ class SuperMimicAgentState(AgentStateBase):
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+            agent_conf (SuperMimicAgentConf): Agent configuration providing the networks and the optimizers.
+
+        Returns:
+            SuperMimicAgentState: The restored state, including the optimizer states; the run state is ``None``.
+
+        """
         template = SuperMimicJax._init_state_from_conf(agent_conf, jax.random.PRNGKey(0))
         restore = lambda st, key: flax.serialization.from_state_dict(st, d[key])  # noqa: E731
         conf = agent_conf
@@ -895,18 +1509,25 @@ class SuperMimicAgentState(AgentStateBase):
 
 class BinResets:
     """
+    Reset distribution over the time bins of the dataset.
+
     Chooses episode starts by the time bin of the dataset they fall in: uniformly, towards bins with low returns,
     and, with share ``fail_share``, one bin before recent failures. The share fades with the failures themselves.
+    The statistics are kept in a :class:`BinResetState`.
+
     """
 
     def __init__(self, split_points, n_samples, bin_frames, max_return, fail_share):
         """
+        Initialize the bins.
+
         Args:
             split_points (jnp.ndarray): Start of each clip, then the end of the last one. Padded with -1.
             n_samples (int): Static upper bound of the number of frames.
             bin_frames (int): Frames per bin.
             max_return (float): Scale of the discounted returns.
             fail_share (float): Share of the resets sent before failures.
+
         """
         n_clips = split_points.shape[0] - 1
         self.n_bins = n_samples // bin_frames + n_clips
@@ -921,13 +1542,46 @@ class BinResets:
         self.prev_bin = jnp.where(bins > self.first_bin[self.bin_clip], bins - 1, bins)
 
     def init_state(self):
+        """
+        Create the initial statistics: zero returns and failure rates and a uniform focus.
+
+        Returns:
+            BinResetState: The initial state.
+
+        """
         w = self.valid / jnp.sum(self.valid)
         return BinResetState(ret=jnp.zeros(self.n_bins), avg_focus=w, fail=jnp.zeros(self.n_bins))
 
     def bin_of(self, traj_no, step):
+        """
+        Return the bin of a frame.
+
+        Args:
+            traj_no (jax.Array): Index of the clip.
+            step (jax.Array): Frame within the clip.
+
+        Returns:
+            jax.Array: Index of the bin.
+
+        """
         return self.first_bin[traj_no] + step // self.bin_frames
 
     def probs(self, state):
+        """
+        Compute the reset probabilities of the bins.
+
+        The base distribution mixes a uniform distribution over the valid bins (weight 0.5), a softmax focus on bins
+        with low returns (0.4) and the running average of that focus (0.1). It is then mixed, with a share of at most
+        ``fail_share``, with the distribution of recent failures moved one bin towards the start of the clip.
+
+        Args:
+            state (BinResetState): Current statistics.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: The reset probabilities and the return-based focus, each of shape
+            ``(n_bins,)``.
+
+        """
         n = jnp.sum(self.valid)
         logits = jnp.where(self.valid, -25.0 * state.ret / self.max_return, -jnp.inf)
         focus = jax.nn.softmax(logits)
@@ -938,7 +1592,19 @@ class BinResets:
         return (1 - share) * p + share * fail / jnp.maximum(total, 1e-6), focus
 
     def sample(self, state, rng, n):
-        """Returns the clips, frames and bins of n episode starts."""
+        """
+        Sample episode starts.
+
+        Args:
+            state (BinResetState): Current statistics.
+            rng (jax.Array): PRNG key.
+            n (int): Number of episode starts.
+
+        Returns:
+            Tuple[jax.Array, jax.Array, jax.Array]: The clips, the frames within the clips and the bins of the
+            ``n`` episode starts.
+
+        """
         p, _ = self.probs(state)
         rng_bin, rng_frame = jax.random.split(rng)
         cdf = jnp.cumsum(p)
@@ -951,7 +1617,22 @@ class BinResets:
         return clip, start + jax.random.randint(rng_frame, (n,), 0, 1 << 30) % span, bins
 
     def update(self, state, done, term, start_bin, end_bin, disc_ret):
-        """Updates the bins with the episodes that ended, given their start and end bins and discounted returns."""
+        """
+        Update the statistics with the episodes that ended.
+
+        Args:
+            state (BinResetState): Current statistics.
+            done (jax.Array): Flags of the environments whose episode ended, shape ``(n_envs,)``.
+            term (jax.Array): Flags of the environments whose episode ended in an absorbing state, shape
+                ``(n_envs,)``.
+            start_bin (jax.Array): Bin in which each episode started, shape ``(n_envs,)``.
+            end_bin (jax.Array): Bin in which each episode ended, shape ``(n_envs,)``.
+            disc_ret (jax.Array): Discounted return of each episode, shape ``(n_envs,)``.
+
+        Returns:
+            BinResetState: The updated statistics.
+
+        """
         w = done.astype(jnp.float32)
 
         def ema(stat, bins, x, old):
@@ -969,6 +1650,16 @@ class BinResets:
 
 @struct.dataclass
 class BinResetState:
+    """
+    Statistics of :class:`BinResets`.
+
+    Attributes:
+        ret (jax.Array): Running average of the discounted return of the episodes starting in each bin, shape
+            ``(n_bins,)``.
+        avg_focus (jax.Array): Running average of the return-based focus, shape ``(n_bins,)``.
+        fail (jax.Array): Running termination rate of the episodes ending in each bin, shape ``(n_bins,)``.
+
+    """
     ret: jnp.ndarray  # discounted return of the episodes starting in each bin
     avg_focus: jnp.ndarray  # running average of the return-based focus
     fail: jnp.ndarray  # termination rate of the episodes ending in each bin
@@ -976,6 +1667,18 @@ class BinResetState:
 
 @struct.dataclass
 class EpisodeStats:
+    """
+    Running episode statistics of the training environments; every field has the shape ``(n_envs,)``.
+
+    Attributes:
+        ret (jax.Array): Undiscounted return of the running episode.
+        length (jax.Array): Length of the running episode.
+        last_ret (jax.Array): Undiscounted return of the last finished episode.
+        last_length (jax.Array): Length of the last finished episode.
+        disc_ret (jax.Array): Discounted return of the running episode.
+        start_bin (jax.Array): Reset bin in which the running episode started (see :class:`BinResets`).
+
+    """
     ret: jnp.ndarray
     length: jnp.ndarray
     last_ret: jnp.ndarray
@@ -989,12 +1692,77 @@ class EpisodeStats:
 # ---------------------------------------------------------------------------
 
 class SuperMimicJax(JaxRLAlgorithmBase):
+    """
+    SuperMimic (Liao et al., 2026): model-based motion tracking with a differentiable world model.
+
+    Every iteration takes one step in ``num_envs`` parallel environments with the deterministic policy plus
+    Gaussian action noise. At the configured update-to-data ratio it then fits the world model on windows of the
+    collected transitions, improves the policy by backpropagating through imagined rollouts of the world model
+    and fits the critic to the lambda-returns of these rollouts. See the module docstring for how imagined steps
+    reuse the environment's observation, reward and termination functions.
+
+    The class is stateless; see :class:`~loco_mujoco.algorithms.common.base_algorithm.JaxRLAlgorithmBase` for the
+    general workflow. Usage::
+
+        agent_conf = SuperMimicJax.init_agent_conf(env, config)
+        agent_state = SuperMimicJax.init_agent_state(env, agent_conf, rng)
+        train_fn = jax.jit(SuperMimicJax.build_train_fn(env, agent_conf))
+        out = train_fn(rng, agent_state, traj)
+        SuperMimicJax.save_agent(result_dir, agent_conf, out["agent_state"])
+
+    The environment must have a free root joint followed by hinge/slide joints only. A complete training and
+    evaluation script is in ``examples/training_examples/jax_rl_mimic_supermimic``.
+
+    """
     _agent_conf = SuperMimicAgentConf
     _agent_state = SuperMimicAgentState
 
     # ---------- conf / state --------------------------------------------
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived dimensions, the networks and the optimizers.
+
+        The hyperparameters are read from ``config.experiment``; see ``conf.yaml`` in
+        ``examples/training_examples/jax_rl_mimic_supermimic`` for a complete, commented set. The main ones are:
+
+        - ``num_envs``, ``total_timesteps``: number of parallel environments and total number of environment steps.
+        - ``updates_per_env_step``, ``warmup_steps``: update-to-data ratio and minimum number of environment steps
+          collected before the first update.
+        - ``hidden_layers``, ``critic_hidden_layers``, ``activation``: policy and critic networks.
+        - ``wm_hidden_layers``, ``wm_term_hidden_layers``, ``wm_activation``, ``wm_in_scale``, ``wm_out_scale``,
+          ``wm_err_scale``: world-model network and the scales of :class:`WorldModelSpec`.
+        - ``wm_window``, ``wm_batch_size``, ``wm_batches_per_update``, ``wm_term_loss_weight``, ``buffer_len``:
+          world-model fitting.
+        - ``imag_horizon``, ``imag_batch_size``, ``start_buffer_len``, ``gamma``, ``gae_lambda``: imagined rollouts
+          and lambda-returns.
+        - ``critic_epochs``, ``critic_minibatches``: critic fitting per update.
+        - ``lr_actor``, ``lr_critic``, ``lr_wm``, ``lr_decay_fraction``, ``lr_final_ratio`` and the
+          ``*_max_grad_norm`` keys: optimizers (cosine learning-rate decay and gradient clipping).
+        - ``action_noise_std``: standard deviation of the exploration noise.
+        - ``actor_obs_group``, ``critic_obs_group``, ``termination_obs_group`` (optional): observation groups of the
+          policy, the critic and the termination head; by default each gets the full observation.
+        - ``history_len``, ``goal_obs_group``, ``history_obs_group`` (optional): with ``history_len > 0`` the policy
+          is a :class:`SuperMimicPolicyNet` that encodes the goal group and decodes from a history of the history
+          group.
+
+        The keys ``obs_dim``, ``action_dim``, ``n_joints``, ``nq``, ``nv``, ``xi_index``, ``xi_dim``,
+        ``term_obs_dim``, ``dt`` and ``num_iterations`` are written to ``config.experiment`` (the configuration is
+        modified in place). The environment is reset a few times to find the varying entries of the
+        domain-randomization context.
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            SuperMimicAgentConf: The agent configuration.
+
+        Raises:
+            ValueError: If the model does not have a free root joint followed by hinge/slide joints only, or if an
+                observation group selects no observations.
+
+        """
         nj = check_floating_base(env._model)
         exp = config.experiment
         term_group = getattr(exp, "termination_obs_group", None)
@@ -1024,10 +1792,34 @@ class SuperMimicJax(JaxRLAlgorithmBase):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf, rng):
+        """
+        Initialize the agent state (network parameters and optimizer states).
+
+        Args:
+            env: The environment (unused; all dimensions come from the configuration).
+            agent_conf (SuperMimicAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            SuperMimicAgentState: The initial agent state. Its run state is ``None`` and gets created by the first
+            call of the training function (or by the function of :meth:`build_init_fn`).
+
+        """
         return cls._init_state_from_conf(agent_conf, rng)
 
     @classmethod
     def _init_state_from_conf(cls, agent_conf, rng):
+        """
+        Initialize the agent state from the agent configuration alone.
+
+        Args:
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            SuperMimicAgentState: The initial agent state without run state.
+
+        """
         exp = agent_conf.config.experiment
         obs_dim, action_dim, xi_dim = int(exp.obs_dim), int(exp.action_dim), int(exp.xi_dim)
         feat_dim = 13 + 2 * int(exp.n_joints)
@@ -1065,13 +1857,56 @@ class SuperMimicJax(JaxRLAlgorithmBase):
     # ---------- training ------------------------------------------------
     @classmethod
     def build_init_fn(cls, env, agent_conf):
-        """``init(rng, agent_state, traj)`` fills the run state, so that calling the train function in chunks
-        compiles it once instead of a second time for the filled state."""
+        """
+        Build the function that creates the run state of an agent.
+
+        Calling the returned function before training in chunks lets the training function compile once, instead
+        of a second time for the filled state.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+
+        Returns:
+            Callable: A function ``init(rng, agent_state, traj)`` that returns the agent state with the environments
+            reset and the buffers created.
+
+        """
         return lambda rng_key, agent_state, traj: cls._train_fn(rng_key, env, agent_conf, agent_state, traj=traj,
                                                                 init_only=True)
 
     @classmethod
     def _train_fn(cls, rng, env, agent_conf, agent_state=None, traj=None, mh=None, init_only=False):
+        """
+        Run SuperMimic for one training call.
+
+        A call runs ``iterations_per_call`` environment steps (default: the whole run of ``num_iterations`` steps),
+        rounded down to a multiple of ``log_every`` and at least ``log_every``, continuing from
+        ``agent_state.iteration``. If the agent state has no run state yet, the environments are reset and the buffers
+        are created first. No validation rollouts are run.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The environment; wrappers are removed.
+            agent_conf (SuperMimicAgentConf): Static agent configuration.
+            agent_state (SuperMimicAgentState): Agent state to start or continue from. If ``None``, a new one is
+                initialized.
+            traj: Trajectory data passed on to the environment functions. Required with ``bin_resets``.
+            mh (MetricsHandler): Unused.
+            init_only (bool): If True, only the run state is created and the agent state is returned.
+
+        Returns:
+            dict: Dictionary with the keys
+
+            - ``"agent_state"`` (:class:`SuperMimicAgentState`): the agent state after the call, including the run
+              state.
+            - ``"training_metrics"`` (:class:`SuperMimicSummaryMetrics`): training metrics with one entry per
+              logging interval of ``log_every`` environment steps.
+            - ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`): always empty.
+
+            With ``init_only`` the agent state is returned instead of the dictionary.
+
+        """
         exp = agent_conf.config.experiment
         if isinstance(env, BaseWrapper):
             env = env.unwrapped()
@@ -1711,8 +2546,18 @@ class SuperMimicJax(JaxRLAlgorithmBase):
 
     @classmethod
     def policy_fn(cls, agent_conf):
-        """``act(params, norm, obs, history) -> action`` for batched observations; history is None without
-        history_len."""
+        """
+        Build the function that evaluates the deterministic policy.
+
+        Args:
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+
+        Returns:
+            Callable: A function ``act(params, norm, obs, history=None) -> action`` for batched observations.
+            ``norm`` is the :class:`RunningNorm` of the observations or ``None``. ``history`` has the shape
+            ``(n_envs, history_len, history_dim)`` and is only used by policies with ``history_len > 0``.
+
+        """
         goal_ind, history_ind, net = agent_conf.goal_ind, agent_conf.history_ind, agent_conf.actor_net
 
         def act(params, norm, obs, history=None):
@@ -1729,6 +2574,29 @@ class SuperMimicJax(JaxRLAlgorithmBase):
     @classmethod
     def play_policy(cls, env, agent_conf, agent_state, n_envs: int, n_steps=None, render=True,
                     record=False, rng=None, deterministic=True, use_mujoco=False, traj=None):
+        """
+        Roll out a trained policy in a Python loop and render it.
+
+        The deployed parameters are used (the Polyak average if the agent has one). By default the policy runs in
+        ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU MuJoCo environment instead.
+        Policies with an observation history (``history_len > 0``) are not supported. The environment is stopped at
+        the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+            agent_state (SuperMimicAgentState): Agent state holding the trained policy.
+            n_envs (int): Number of parallel environments; use 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Unused; the environment is rendered at every step.
+            record (bool): Whether to record a video.
+            rng (jax.Array): PRNG key for environment resets and action noise. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If False, Gaussian noise with standard deviation ``action_noise_std`` is added to
+                the actions, as during training.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
         from loco_mujoco.core.wrappers import LogWrapper, VecEnv
 
         exp = agent_conf.config.experiment

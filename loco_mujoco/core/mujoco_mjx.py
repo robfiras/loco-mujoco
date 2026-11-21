@@ -1,3 +1,12 @@
+"""
+GPU simulation base class.
+
+:class:`Mjx` extends :class:`~loco_mujoco.core.mujoco_base.Mujoco` with functional, jittable ``mjx_reset`` and
+``mjx_step`` methods that run on MJX or MuJoCo Warp and can be vectorized with ``jax.vmap``. The complete state
+of an environment is an :class:`MjxState`.
+
+"""
+
 from typing import Any, Callable, Dict, Optional, Tuple
 from types import ModuleType
 import atexit
@@ -20,6 +29,13 @@ class MjxAdditionalCarry(AdditionalCarry):
     """
     Additional carry for the Mjx environment.
 
+    Extends :class:`~loco_mujoco.core.mujoco_base.AdditionalCarry` by the quantities of the last step of an
+    episode, which would otherwise be lost when the environment resets itself.
+
+    Attributes:
+        final_observation (jax.Array): Observation of the last step before the most recent reset.
+        final_info (Dict[str, Any]): Info dictionary of the last step before the most recent reset.
+
     """
     final_observation: jax.Array
     final_info: Dict[str, Any]
@@ -30,13 +46,13 @@ class MjxState:
     """
     State of the Mjx environment.
 
-    Args:
+    Attributes:
         data (Data): Mjx data structure.
         observation (jax.Array): Observation of the environment.
         reward (float): Reward of the environment.
         absorbing (bool): Whether the state is absorbing.
         done (bool): Whether the episode is done.
-        additional_carry (Any): Additional carry information.
+        additional_carry (MjxAdditionalCarry): Additional carry information.
         info (Dict[str, Any]): Information dictionary.
 
     """
@@ -54,7 +70,6 @@ class Mjx(Mujoco):
     Base class for Mujoco environments using JAX.
 
     Args:
-        n_envs (int): Number of environments to run in parallel.
         use_mjwarp (bool): If True, MjWarp will be used as the simulation backend instead of Mjx.
         nconmax (int): maximum number of contacts to allocate for warp across all worlds.
             Since the number of worlds is **not** pre-defined in JAX, we use the
@@ -391,6 +406,7 @@ class Mjx(Mujoco):
         Updates the info dictionary.
 
         Args:
+            info (Dict): The info dictionary to update.
             obs (jnp.ndarray): Observation of the environment.
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.

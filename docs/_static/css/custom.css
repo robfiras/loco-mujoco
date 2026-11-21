@@ -1,0 +1,287 @@
+/* LocoMuJoCo documentation theme overrides (PyData Sphinx Theme). */
+
+html {
+  --pst-font-size-base: 16px;
+  --lmj-orange: #f7931e;
+  --lmj-orange-light: #fbb03b;
+  --lmj-navy: #2e3e57;
+}
+
+html[data-theme="light"] {
+  --pst-color-primary: #c2620a;
+  --pst-color-secondary: #2e3e57;
+  --pst-color-accent: #f7931e;
+  --pst-color-inline-code: #a34e00;
+  --pst-color-inline-code-links: #c2620a;
+  --lmj-hero-bg: linear-gradient(135deg, #fff7ec 0%, #ffffff 55%, #eef2f8 100%);
+  --lmj-card-border: #e3e7ee;
+  --lmj-muted: #56627a;
+}
+
+html[data-theme="dark"] {
+  --pst-color-primary: #fbb03b;
+  --pst-color-secondary: #9fb4d6;
+  --pst-color-accent: #f7931e;
+  --pst-color-inline-code: #fbc46b;
+  --pst-color-inline-code-links: #fbb03b;
+  --lmj-hero-bg: linear-gradient(135deg, #2a2118 0%, #14181e 55%, #1a2230 100%);
+  --lmj-card-border: #343c4a;
+  --lmj-muted: #aab4c6;
+}
+
+/* ---------------------------------------------------------------- navbar */
+
+.navbar-brand img {
+  height: 2.6rem;
+  max-height: 2.6rem;
+}
+
+.bd-header .navbar-nav li a.nav-link {
+  font-weight: 500;
+}
+
+.lmj-version-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--pst-color-border);
+  color: var(--pst-color-text-muted);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- content */
+
+.bd-article h1 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.bd-article h2 {
+  margin-top: 2.4rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--pst-color-border);
+}
+
+.bd-article table {
+  font-size: 0.93rem;
+}
+
+.bd-article img {
+  border-radius: 6px;
+}
+
+div.highlight pre {
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.lmj-lead {
+  font-size: 1.15rem;
+  color: var(--lmj-muted);
+  max-width: 46rem;
+}
+
+/* Media with a caption underneath. */
+figure.lmj-figure {
+  margin: 1.5rem auto;
+  text-align: center;
+}
+
+figure.lmj-figure figcaption,
+.lmj-caption {
+  font-size: 0.88rem;
+  color: var(--lmj-muted);
+  text-align: center;
+  margin-top: 0.4rem;
+}
+
+/* Numbered steps of the getting-started track. */
+.lmj-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1.6rem 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.lmj-steps li {
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--lmj-card-border);
+  color: var(--lmj-muted);
+}
+
+.lmj-steps li.current {
+  background: var(--lmj-orange);
+  border-color: var(--lmj-orange);
+  color: #1c1c1c;
+  font-weight: 600;
+}
+
+.lmj-steps li a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.sd-card {
+  border: 1px solid var(--lmj-card-border) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.sd-card.sd-card-hover:hover,
+.sd-card:has(a.sd-stretched-link):hover {
+  transform: translateY(-2px);
+  border-color: var(--lmj-orange) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08) !important;
+}
+
+.sd-card .sd-card-title {
+  font-weight: 650;
+}
+
+.sd-card .sd-card-footer {
+  font-size: 0.85rem;
+  color: var(--lmj-muted);
+  background: transparent;
+  border-top: 1px solid var(--lmj-card-border);
+}
+
+.sd-card-img-top {
+  border-radius: 10px 10px 0 0 !important;
+  background: #ffffff;
+}
+
+.lmj-env-card .sd-card-img-top {
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+.sd-btn-primary,
+.sd-btn-primary:visited {
+  background-color: var(--lmj-orange) !important;
+  border-color: var(--lmj-orange) !important;
+  color: #1c1c1c !important;
+  font-weight: 600;
+}
+
+.sd-btn-primary:hover {
+  background-color: var(--lmj-orange-light) !important;
+  border-color: var(--lmj-orange-light) !important;
+}
+
+.sd-btn-outline-secondary {
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- landing page */
+
+.lmj-hero {
+  background: var(--lmj-hero-bg);
+  border: 1px solid var(--lmj-card-border);
+  border-radius: 16px;
+  padding: 2.6rem 2.2rem 2.2rem 2.2rem;
+  margin: 0.5rem 0 2.2rem 0;
+  text-align: center;
+}
+
+.lmj-hero img.lmj-hero-logo {
+  width: min(430px, 80%);
+  margin-bottom: 0.6rem;
+  border-radius: 0;
+}
+
+.lmj-hero p.lmj-tagline {
+  font-size: 1.3rem;
+  font-weight: 500;
+  max-width: 44rem;
+  margin: 0.4rem auto 0.6rem auto;
+  line-height: 1.4;
+}
+
+.lmj-hero p.lmj-sub {
+  color: var(--lmj-muted);
+  max-width: 42rem;
+  margin: 0 auto 1.4rem auto;
+}
+
+.lmj-hero .lmj-hero-buttons a {
+  margin: 0.25rem 0.3rem;
+}
+
+/* Looping videos that replace GIFs: sharp at any width and smaller than a GIF of the same quality. */
+.lmj-media {
+  margin: 1.2rem auto 2rem auto;
+}
+
+.lmj-media-narrow {
+  max-width: 85%;
+}
+
+.lmj-media video.lmj-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: var(--pst-color-surface);
+}
+
+@media (max-width: 720px) {
+  .lmj-media-narrow {
+    max-width: 100%;
+  }
+}
+
+/* The landing page uses the full width: no left sidebar. */
+.bd-page-width:has(.lmj-hero) .bd-sidebar-primary {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- API reference */
+
+dl.py.class > dt,
+dl.py.function > dt,
+dl.py.method > dt,
+dl.py.attribute > dt,
+dl.py.property > dt {
+  border-left: 3px solid var(--lmj-orange);
+  background: var(--pst-color-surface);
+  padding: 0.35rem 0.6rem;
+  border-radius: 0 6px 6px 0;
+}
+
+dl.py.method,
+dl.py.attribute,
+dl.py.property {
+  margin-top: 1.2rem;
+}
+
+table.autosummary td {
+  padding: 0.3rem 0.6rem;
+}
+
+table.autosummary td:first-child {
+  white-space: nowrap;
+}
+
+/* The landing page shows the logo instead of a text title. */
+.bd-article section:has(> .lmj-hero) > h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* Transparent artwork keeps its transparency in dark mode. */
+html[data-theme="dark"] .bd-content img.lmj-hero-logo {
+  background-color: transparent !important;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.35));
+}

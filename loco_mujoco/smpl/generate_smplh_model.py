@@ -1,3 +1,9 @@
+"""
+Script that creates the neutral SMPL-H model file used by the retargeting pipeline.
+
+Run with ``python generate_smplh_model.py --smpl-conf-file <path to LOCOMUJOCO_VARIABLES.yaml>``.
+"""
+
 import os.path as osp
 import pickle
 import argparse
@@ -7,6 +13,18 @@ import numpy as np
 
 
 def generate_smplh_model(path_to_conf):
+    """
+    Merge the SMPL-H body model and the MANO hand models into a single model file.
+
+    The neutral SMPL-H body model (``smplh/neutral/model.npz``) and the hand components, coefficients and means of the
+    left and right MANO models (``mano_v1_2/models/MANO_LEFT.pkl`` and ``MANO_RIGHT.pkl``) are read from the SMPL
+    model directory and written to ``SMPLH_NEUTRAL.pkl`` in the same directory.
+
+    Args:
+        path_to_conf (str): Path to the YAML file with the LocoMuJoCo variables. The SMPL model directory is read
+            from its entry ``LOCOMUJOCO_SMPL_MODEL_PATH``.
+
+    """
 
     # read paths from yaml file
     try:

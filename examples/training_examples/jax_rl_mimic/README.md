@@ -1,12 +1,11 @@
 ## DeepMimic Imitation Learning Example
 
-This example demonstrates training a PPO agent on the Unitree H1 robot using a DeepMimic‑style reward
-to imitate a dataset of human walking trajectories in various directions.
+This example demonstrates training a PPO agent on the Unitree G1 robot using a DeepMimic‑style reward
+to imitate a walking clip from the LAFAN1 dataset (`walk1_subject5`). Other clips and robots can be selected in `conf.yaml`.
 
 The example leverages the `GoalTrajMimic` goal vector, which encodes target positions, orientations, and velocities
 of both site and joint states from the expert dataset. The reward function defined in the configuration, `MimicReward`,
-implements DeepMimic‑style reward. By the end of training, the agent can walk in multiple directions and rotate 
-around its z‑axis.
+implements DeepMimic‑style reward. By the end of training, the agent tracks the reference motion.
 
 ---
 
@@ -20,8 +19,8 @@ python experiment.py
 
 This command will:
 
-- Train the PPO agent on the Unitree H1 robot for 300 million steps (approximately 36 minutes on an RTX 3080 Ti). To get even smoother policies train it for longer!
-- Save the trained agent (as `GAILJax_saved.pkl` in the `outputs` folder).
+- Train the PPO agent on the Unitree G1 robot for 300 million steps (the Unitree H1 version of this example took approximately 36 minutes on an RTX 3080 Ti). To get even smoother policies train it for longer!
+- Save the trained agent (as `PPOJax_saved.pkl` in the `outputs` folder).
 - Perform a final rendering of the trained policy.
 - Save a video of the rendering to the `LocoMuJoCo_recordings/` directory.
 - Upload the video to Weights & Biases (WandB) for further analysis (check the command line logs for details).
@@ -51,4 +50,3 @@ python eval.py --path path/to/agent_file --use_mujoco
 ```
 
 > ⚠️ **Note:** Evaluating with MuJoCo may not yield results as robust as with Mjx due to simulator differences. For reliable policy transfer between the two, consider applying domain randomization techniques.
-nks to the dataset, or more details about the environment or architecture!

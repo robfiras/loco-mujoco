@@ -1,3 +1,7 @@
+"""
+Dataset configurations for :class:`~loco_mujoco.task_factories.imitation_factory.ImitationFactory`.
+"""
+
 from typing import Union, ClassVar, List
 from dataclasses import dataclass
 
@@ -10,9 +14,9 @@ class DefaultDatasetConf:
     Configuration for loading default datasets provided by LocoMuJoCo.
 
     Attributes:
+        task (Union[str, list]): The task or list of tasks to load, e.g. ``"walk"``.
         dataset_type (str): The type of the dataset to load. Only "mocap" (motion capture data) is available.
-        task (str): The task to load.
-        debug (bool): Whether to load the dataset in debug mode.
+        debug (bool): Debug flag. Currently not used when loading the dataset.
 
     """
 
@@ -30,10 +34,13 @@ class AMASSDatasetConf:
     """
     Configuration for loading AMASS datasets.
 
+    At least one of the two attributes has to be set; if both are set, the datasets of both are loaded.
+
     Attributes:
         rel_dataset_path (Union[str, list]): A relative path or a list of relative paths to
-            load from the AMASS dataset.
-        dataset_group (str): A name of a predefined group of datasets to load from AMASS.
+            load from the AMASS dataset, relative to the AMASS directory and without file extension.
+        dataset_group (str): A name of a predefined group of datasets to load from AMASS. Available:
+            ``"AMASS_LOCOMOTION_DATASETS"``.
 
     """
     rel_dataset_path: Union[str, list] = None
@@ -49,13 +56,16 @@ class LAFAN1DatasetConf:
     """
     Configuration for loading LAFAN1 datasets.
 
+    At least one of the two attributes has to be set; if ``dataset_group`` is set, ``dataset_name`` is ignored.
+
     Attributes:
         dataset_name (Union[str, list]): A name of a dataset or a list of dataset names to load from LAFAN1.
-        dataset_group (str): A name of a predefined group of datasets to load from LAFAN1.
+        dataset_group (str): A name of a predefined group of datasets to load from LAFAN1. Available:
+            ``"LAFAN1_LOCOMOTION_DATASETS"``, ``"LAFAN1_DANCE_DATASETS"`` and ``"LAFAN1_ALL_DATASETS"``.
 
-    ..note:: This datatset is loaded from the LocoMuJoCo's HuggingFace repository:
-        https://huggingface.co/datasets/robfiras/loco-mujoco-datasets. It provides datasets for
-        all humanoid environments.
+    .. note:: This dataset is loaded from LocoMuJoCo's HuggingFace repository:
+        https://huggingface.co/datasets/robfiras/loco-mujoco-datasets. For environments that have no dataset
+        there, it is retargeted from another environment.
 
     """
 

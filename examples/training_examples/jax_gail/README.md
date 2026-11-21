@@ -49,4 +49,3 @@ python eval.py --path path/to/agent_file --use_mujoco
 ```
 
 > ⚠️ **Note:** Evaluating with MuJoCo may not yield results as robust as with Mjx due to simulator differences. For reliable policy transfer between the two, consider applying domain randomization techniques.
-nks to the dataset, or more details about the environment or architecture!

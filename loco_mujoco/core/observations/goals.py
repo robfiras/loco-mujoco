@@ -1,3 +1,11 @@
+"""
+Goal observations.
+
+A goal is a stateful observation that tells the policy what to do: a desired root velocity, the next frame of a
+reference trajectory, or future frames of it. Goals can also visualize themselves in the user scene.
+
+"""
+
 from copy import deepcopy
 from typing import Union, Any, Tuple, Dict, List
 from types import ModuleType
@@ -36,6 +44,9 @@ class Goal(StatefulObservation):
         info_props (Dict): Information properties required for initialization.
         visualize_goal (bool): Whether to visualize the goal.
         n_visual_geoms (int): Number of visual geometries for visualization.
+        **kwargs: Further arguments of :class:`~loco_mujoco.core.observations.base.Observation` (``group`` and
+            ``allow_randomization``). The observation is named after the class.
+
     """
 
     def __init__(self, info_props: Dict, visualize_goal: bool = False, n_visual_geoms: int = 0, **kwargs):
@@ -79,6 +90,7 @@ class Goal(StatefulObservation):
             data (Union[MjData, Data]): The Mujoco data.
             carry (Any): Carry object.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Any], Any]: Updated data and carry.
@@ -95,6 +107,18 @@ class Goal(StatefulObservation):
                 traj=None) -> bool:
         """
         Check if the goal is completed.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            bool: False by default.
+
         """
         return False
 
@@ -107,6 +131,18 @@ class Goal(StatefulObservation):
                     traj=None) -> bool:
         """
         Check if the goal is done (jax-compatible version).
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            bool: False by default.
+
         """
         return False
 
@@ -216,6 +252,7 @@ class NoGoal(Goal):
             data (Union[MjData, Any]): The Mujoco data.
             carry (Any): Carry object.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: Empty observation and unchanged carry.
@@ -329,6 +366,7 @@ class GoalRandomRootVelocity(Goal, RootVelocityArrowVisualizer):
             model (Union[MjModel, Any]): The Mujoco model.
             data (Union[MjData, Any]): The Mujoco data.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             GoalRandomRootVelocityState: Initialized state.
@@ -350,6 +388,7 @@ class GoalRandomRootVelocity(Goal, RootVelocityArrowVisualizer):
             data (Union[MjData, Any]): The Mujoco data.
             carry (Any): Carry object.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Any], Any]: Updated data and carry.
@@ -388,6 +427,7 @@ class GoalRandomRootVelocity(Goal, RootVelocityArrowVisualizer):
             data (Union[MjData, Data]): The Mujoco data.
             carry (Any): Carry object.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: Goal observation and updated carry.
@@ -499,6 +539,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
             model (Union[MjModel, Any]): The Mujoco model.
             data (Union[MjData, Any]): The Mujoco data.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             GoalTrajRootVelocityState: Initialized state with zero velocity.
@@ -520,6 +561,7 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
             data (Union[MjData, Any]): The Mujoco data.
             carry (Any): Carry object.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: Goal observation and updated carry.
@@ -572,6 +614,18 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
 
         Terminates the episode if the number of steps till the end of the trajectory is
         less than the number of steps to average over.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry holding the trajectory state.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): Trajectory to use instead of the one stored in the environment.
+
+        Returns:
+            bool: True if the remaining part of the trajectory is too short.
+
         """
         traj_data = (traj if traj is not None else env._traj).data
         steps_till_end = self._steps_till_end(traj_data, carry.traj_state)
@@ -586,6 +640,21 @@ class GoalTrajRootVelocity(Goal, RootVelocityArrowVisualizer):
                     traj=None) -> bool:
         """
         Check if the goal is done (JAX-compatible).
+
+        Terminates the episode if the number of steps till the end of the trajectory is
+        less than the number of steps to average over.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            bool: True if the remaining part of the trajectory is too short.
+
         """
         traj_data = (traj if traj is not None else env._traj).data
         steps_till_end = self._steps_till_end(traj_data, carry.traj_state)
@@ -674,7 +743,12 @@ class GoalTrajMimic(Goal):
     Args:
         info_props (Dict): Information properties required for initialization.
         rel_body_names (List[str]): List of relevant body names. Defaults to None.
-        **kwargs: Additional keyword arguments.
+        sites_for_mimic (List[str]): Sites to use instead of the environment's default sites for mimic. An empty
+            list disables all site quantities in the goal. Defaults to None, which uses the environment's sites.
+        main_site_name (str): Name of the site, within the sites for mimic, that is the reference for the relative
+            site quantities. Defaults to None, which uses the first site.
+        **kwargs: Additional keyword arguments of :class:`Goal`.
+
     """
 
     def __init__(self, info_props: Dict,
@@ -711,6 +785,7 @@ class GoalTrajMimic(Goal):
         self._dim = None
 
     def _resolve_sites_for_mimic(self):
+        """Return the sites passed to the constructor or, if none were passed, the environment's sites for mimic."""
         return (self._sites_for_mimic_override
                 if self._sites_for_mimic_override is not None
                 else self._info_props["sites_for_mimic"])
@@ -795,6 +870,7 @@ class GoalTrajMimic(Goal):
             data (Union[MjData, Data]): The Mujoco data.
             carry (Any): Carry object.
             backend (ModuleType): The backend (numpy or jax).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jnp.ndarray], Any]: Goal observation and updated carry.
@@ -867,6 +943,21 @@ class GoalTrajMimic(Goal):
                     traj=None) -> Any:
         """
         Set the visualizations for the goal.
+
+        Writes one green box per mimic site, with the pose of the site in the current reference frame, into the user
+        scene of the carry.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            Any: The carry with the updated user scene.
+
         """
         if backend == np:
             R = np_R
@@ -924,13 +1015,14 @@ class GoalTrajMimicv2(GoalTrajMimic):
     """
     Equivalent to GoalTrajMimic but with the ability to visualize the goal with the robot's geoms/body.
 
-    ..note:: This class might slows down the simulation. Use it for visualization purposes only.
+    .. note:: This class might slow down the simulation. Use it for visualization purposes only.
 
     Args:
         info_props (Dict): Information properties required for initialization.
         rel_body_names (List[str]): List of relevant body names. Defaults to None.
         target_geom_rgba (Tuple[float, float, float, float]): RGBA values for the target geom.
-        Defaults to (0.471, 0.38, 0.812, 0.5).
+            Defaults to (0.471, 0.38, 0.812, 0.5).
+        **kwargs: Additional keyword arguments of :class:`Goal`.
 
     """
 
@@ -1021,6 +1113,21 @@ class GoalTrajMimicv2(GoalTrajMimic):
                     traj=None) -> Any:
         """
         Set the visualizations for the goal.
+
+        Computes the forward kinematics of the current reference frame and writes copies of the robot's geoms at the
+        resulting poses into the user scene of the carry.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            Any: The carry with the updated user scene.
+
         """
         if backend == np:
             R = np_R
@@ -1089,7 +1196,16 @@ class GoalTrajMimicv2(GoalTrajMimic):
 # ---------------------------------------------------------------------------
 
 class _FreeRootGoal(Goal):
-    """Goal of a robot whose first joint is the free root joint, read from the trajectory's qpos and qvel."""
+    """
+    Goal of a robot whose first joint is the free root joint, read from the trajectory's qpos and qvel.
+
+    Subclasses implement ``_obs_dim`` and ``get_obs_and_update_state``. These goals have no visualization and are
+    excluded from observation randomization by default.
+
+    Args:
+        **kwargs: Additional keyword arguments of :class:`Goal`.
+
+    """
 
     def __init__(self, **kwargs):
         kwargs.pop("obs_name", None)
@@ -1099,9 +1215,11 @@ class _FreeRootGoal(Goal):
         self._dim = None
 
     def _obs_dim(self, model):
+        """Return the dimension of the goal for the given model. Implemented by the subclasses."""
         raise NotImplementedError
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Check that the first joint is a free joint and set the dimension, the limits and the observation indices."""
         assert model.jnt_type[0] == mujoco.mjtJoint.mjJNT_FREE, f"{type(self).__name__} needs a free root joint."
         self._dim = self._obs_dim(model)
         self.min = [-np.inf] * self._dim
@@ -1111,31 +1229,45 @@ class _FreeRootGoal(Goal):
         self._initialized_from_mj = True
 
     def init_from_traj(self, traj_handler: Any):
+        """
+        Check that a trajectory was loaded.
+
+        Args:
+            traj_handler (Any): The trajectory handler of the environment.
+
+        """
         assert traj_handler is not None, f"{type(self).__name__} requires a trajectory, but none was loaded."
         self._initialized_from_traj = True
 
     @property
     def requires_trajectory(self) -> bool:
+        """Whether the goal requires a trajectory; always True."""
         return True
 
     @property
     def has_visual(self) -> bool:
+        """Whether the goal supports visualization; always False."""
         return False
 
     @property
     def dim(self) -> int:
+        """Dimension of the goal."""
         return self._dim
 
 
 class TrajFutureFrames(_FreeRootGoal):
     """
-    The next ``n_future`` reference frames, from the reference only: per frame the root position and orientation
-    in the heading frame of the current reference frame, the root velocities in the root frame, and the joint
-    positions and scaled joint velocities. Frames past the end of the clip repeat its last frame.
+    The next ``n_future`` reference frames, from the reference only.
+
+    Per frame the goal holds the root position (3) and orientation (6, the first two columns of the rotation
+    matrix) in the heading frame of the current reference frame, the linear (3) and angular (3) root velocities
+    in the root frame, and the joint positions and scaled joint velocities. Frames past the end of the clip
+    repeat its last frame. The dimension is ``n_future * (15 + 2 * (nv - 6))``.
 
     Args:
         n_future (int): Number of future frames.
         joint_vel_scale (float): Scale of the joint velocities.
+        **kwargs: Additional keyword arguments of :class:`Goal`.
 
     """
 
@@ -1145,10 +1277,27 @@ class TrajFutureFrames(_FreeRootGoal):
         self._joint_vel_scale = float(joint_vel_scale)
 
     def _obs_dim(self, model):
+        """Return ``n_future * (15 + 2 * (nv - 6))``."""
         return self._n_future * (15 + 2 * (model.nv - 6))
 
     def get_obs_and_update_state(self, env: Any, model: Any, data: Any, carry: Any, backend: ModuleType,
                                  traj: Any = None):
+        """
+        Compute the future reference frames.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry holding the trajectory state.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory): The trajectory of the environment.
+
+        Returns:
+            Tuple[Union[np.ndarray, jnp.ndarray], Any]: The goal, flattened frame by frame with shape ``(dim,)``, and
+            the unchanged carry.
+
+        """
         ts, td = carry.traj_state, traj.data
         start = td.split_points[ts.traj_no]
         last = td.split_points[ts.traj_no + 1] - start - 1
@@ -1168,13 +1317,35 @@ class TrajFutureFrames(_FreeRootGoal):
 
 
 class RootOriRelTraj(_FreeRootGoal):
-    """Orientation of the current reference root in the frame of the robot's root (6D rotation)."""
+    """
+    Orientation of the current reference root in the frame of the robot's root (6D rotation).
+
+    Args:
+        **kwargs: Additional keyword arguments of :class:`Goal`.
+
+    """
 
     def _obs_dim(self, model):
+        """Return 6, the size of the 6D rotation representation."""
         return 6
 
     def get_obs_and_update_state(self, env: Any, model: Any, data: Any, carry: Any, backend: ModuleType,
                                  traj: Any = None):
+        """
+        Compute the relative orientation between the robot and the current reference frame.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry holding the trajectory state.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory): The trajectory of the environment.
+
+        Returns:
+            Tuple[Union[np.ndarray, jnp.ndarray], Any]: The 6D rotation, shape ``(6,)``, and the unchanged carry.
+
+        """
         ref = traj.data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
         R, R_ref = _quat_to_mat(data.qpos[3:7], backend), _quat_to_mat(ref.qpos[3:7], backend)
         return _rot6d(R.T @ R_ref, backend), carry
@@ -1182,11 +1353,15 @@ class RootOriRelTraj(_FreeRootGoal):
 
 class TrackingError(_FreeRootGoal):
     """
-    Robot-to-reference errors for a critic: joint positions, body positions with the reference moved to the robot's
-    xy and heading, in the robot's heading frame, and the root position in the same frame.
+    Robot-to-reference errors for a critic.
+
+    The goal holds the joint position errors, the errors of the body positions with the reference moved to the
+    robot's xy and heading, in the robot's heading frame, and the root position error in the same frame. All
+    errors are reference minus robot. The dimension is ``nv - 6 + 3 * n_bodies + 3``.
 
     Args:
         body_names (list): Tracked bodies. Defaults to the env's ``tracked_body_names``.
+        **kwargs: Additional keyword arguments of :class:`Goal`.
 
     """
 
@@ -1196,15 +1371,32 @@ class TrackingError(_FreeRootGoal):
         self._body_ids = None
 
     def _obs_dim(self, model):
+        """Return ``nv - 6 + 3 * n_bodies + 3``."""
         return model.nv - 6 + 3 * len(self._body_ids) + 3
 
     def _init_from_mj(self, env, model, data, current_obs_size):
+        """Look up the ids of the tracked bodies, then initialize as in the base class."""
         names = self._body_names or env._get_all_info_properties()["tracked_body_names"]
         self._body_ids = np.array([mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, n) for n in names])
         super()._init_from_mj(env, model, data, current_obs_size)
 
     def get_obs_and_update_state(self, env: Any, model: Any, data: Any, carry: Any, backend: ModuleType,
                                  traj: Any = None):
+        """
+        Compute the tracking errors with respect to the current reference frame.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The Mujoco model.
+            data (Union[MjData, Data]): The Mujoco data.
+            carry (Any): Additional carry holding the trajectory state.
+            backend (ModuleType): The backend, either ``numpy`` or ``jax.numpy``.
+            traj (Trajectory): The trajectory of the environment.
+
+        Returns:
+            Tuple[Union[np.ndarray, jnp.ndarray], Any]: The errors, shape ``(dim,)``, and the unchanged carry.
+
+        """
         ref = traj.data.get(carry.traj_state.traj_no, carry.traj_state.subtraj_step_no, backend)
         p, p_ref = data.qpos[:3], ref.qpos[:3]
         R, R_ref = _quat_to_mat(data.qpos[3:7], backend), _quat_to_mat(ref.qpos[3:7], backend)

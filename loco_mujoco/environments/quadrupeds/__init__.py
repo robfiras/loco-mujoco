@@ -1,3 +1,10 @@
+"""
+Quadruped robot environments.
+
+Importing this package registers the Unitree A1, Unitree Go2, Boston Dynamics Spot and ANYmal C environments, each
+in a CPU (MuJoCo) and an Mjx version, so that they can be created by name through the task factories.
+"""
+
 from .base_robot_quadruped import BaseRobotQuadruped
 from .unitreeA1 import UnitreeA1
 from .unitreeA1_mjx import MjxUnitreeA1
