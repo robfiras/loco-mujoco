@@ -93,6 +93,22 @@ Every version below is a git tag and a
 - `LAFAN1DatasetConf(dataset_group=...)` could not load any clip, because the names in
   `LAFAN1_LOCOMOTION_DATASETS`, `LAFAN1_DANCE_DATASETS` and `LAFAN1_ALL_DATASETS` carried a `.csv` suffix. The
   suffix was removed from the lists, and `load_lafan1_trajectory` ignores it if it is passed.
+- `MetricsHandler` applied the body and site selection to the last axis of the body and site quantities
+  (`BodyPosition`, `BodyOrientation`, `BodyVelocity`, `SitePosition`, `SiteOrientation`, `SiteVelocity`,
+  `RelSitePosition`, `RelSiteOrientation`, `RelSiteVelocity`), i.e. to the components of a position, rotation
+  vector or velocity instead of the bodies or sites. Ids beyond the last component were clamped to it, so with
+  the `rel_site_names` of the training examples on the Unitree H1 and G1, `RelSitePosition` and
+  `RelSiteOrientation` compared only the third component, counted once per selected site, and `rel_body_names`
+  and `rel_site_names` did not restrict `BodyPosition`, `BodyOrientation`, `BodyVelocity`, `SitePosition` and
+  `SiteOrientation` to the named elements. The measures are now evaluated on all components of the selected
+  bodies and sites. **The values of these nine quantities change**; values logged with earlier versions are not
+  comparable with new ones. The joint quantities, the return and the episode length are unchanged.
+- `validation.rel_joint_names` raised an `IndexError` in `MetricsHandler`, because the joint names were used as
+  joint ids. Selecting joints without a free joint, with `rel_joint_names` or by listing the free joint in
+  `joints_to_ignore`, failed in `JointPosition` with "cannot reshape array".
+- `MetricsHandler` looked up the root body of a site with the site id instead of the id of the body the site
+  is attached to (`SiteVelocity`, `RelSiteVelocity`). Both lookups give the same root body for the sites of the
+  training examples on the Unitree H1 and G1, so this alone does not change their values.
 
 ## [1.2.0] - 2026-11-18
 
