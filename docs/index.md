@@ -178,7 +178,7 @@ policies trained in LocoMuJoCo to hardware. See the [sim-to-real guide](sim2real
 
 ## Citing LocoMuJoCo
 
-If you use LocoMuJoCo in your research, please cite it. The BibTeX entry is on the
+If you use LocoMuJoCo in your research, please cite it. The BibTeX entries are on the
 [citation page](development/citation.md).
 
 ```{toctree}

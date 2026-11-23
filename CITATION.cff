@@ -1,7 +1,8 @@
 cff-version: 1.2.0
 message: >-
   If you use LocoMuJoCo in your research, please cite the paper given under
-  "preferred-citation".
+  "preferred-citation", which describes the current version, and the original
+  paper on version 0.1.0, given under "references".
 type: software
 title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Whole-Body Control"
 abstract: >-
@@ -47,17 +48,38 @@ authors:
       German Research Center for Artificial Intelligence (DFKI); Centre for
       Cognitive Science, Hessian.AI; Technische Universität Darmstadt
 preferred-citation:
-  type: conference-paper
-  title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Locomotion"
+  type: article
+  title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Whole-Body Control"
   authors:
     - family-names: Al-Hafez
       given-names: Firas
-    - family-names: Zhao
-      given-names: Guoping
-    - family-names: Peters
-      given-names: Jan
     - family-names: Tateo
       given-names: Davide
-  collection-title: "6th Robot Learning Workshop, NeurIPS"
-  year: 2023
-  url: "https://arxiv.org/abs/2311.02496"
+    - family-names: Kaidanov
+      given-names: Oleg
+    - family-names: Bhatt
+      given-names: Aditya
+    - family-names: Zelik
+      given-names: Artur
+    - family-names: Luo
+      given-names: Zhengyi
+    - family-names: Peters
+      given-names: Jan
+  journal: "arXiv preprint arXiv:2611.26293"
+  year: 2026
+  url: "https://arxiv.org/abs/2611.26293"
+references:
+  - type: conference-paper
+    title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Locomotion"
+    authors:
+      - family-names: Al-Hafez
+        given-names: Firas
+      - family-names: Zhao
+        given-names: Guoping
+      - family-names: Peters
+        given-names: Jan
+      - family-names: Tateo
+        given-names: Davide
+    collection-title: "6th Robot Learning Workshop, NeurIPS"
+    year: 2023
+    url: "https://arxiv.org/abs/2311.02496"

@@ -144,7 +144,21 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to rep
 environment and open a pull request, and [CHANGELOG.md](CHANGELOG.md) for the release history.
 
 ## Citation
+
+If you use LocoMuJoCo in your research, please cite the paper on the current version:
+
+```bibtex
+@article{alhafez2026locomujoco,
+title={LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Whole-Body Control},
+author={Firas Al-Hafez and Davide Tateo and Oleg Kaidanov and Aditya Bhatt and Artur Zelik and Zhengyi Luo and Jan Peters},
+journal={arXiv preprint arXiv:2611.26293},
+year={2026}
+}
 ```
+
+and the original paper, which describes version 0.1.0 ([arXiv:2311.02496](https://arxiv.org/abs/2311.02496)):
+
+```bibtex
 @inproceedings{alhafez2023b,
 title={LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Locomotion},
 author={Firas Al-Hafez and Guoping Zhao and Jan Peters and Davide Tateo},

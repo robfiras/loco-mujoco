@@ -2,7 +2,19 @@
 
 ## The library
 
-If you use LocoMuJoCo in your research, please cite:
+If you use LocoMuJoCo in your research, please cite the paper on the current version:
+
+```bibtex
+@article{alhafez2026locomujoco,
+title={LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Whole-Body Control},
+author={Firas Al-Hafez and Davide Tateo and Oleg Kaidanov and Aditya Bhatt and Artur Zelik and Zhengyi Luo and Jan Peters},
+journal={arXiv preprint arXiv:2611.26293},
+year={2026}
+}
+```
+
+and the original paper, available at [arXiv:2311.02496](https://arxiv.org/abs/2311.02496). It describes
+version 0.1.0; the [changelog](changelog.md) lists what has changed since.
 
 ```bibtex
 @inproceedings{alhafez2023b,
@@ -13,13 +25,10 @@ year={2023}
 }
 ```
 
-The paper is available at [arXiv:2311.02496](https://arxiv.org/abs/2311.02496). It describes version 0.1.0;
-the [changelog](changelog.md) lists what has changed since.
-
 The repository also contains a
-[`CITATION.cff`](https://github.com/robfiras/loco-mujoco/blob/master/CITATION.cff) file with the same
-reference and the metadata of the software (version, release date, authors). GitHub shows it under
-"Cite this repository", and reference managers such as Zotero can read it.
+[`CITATION.cff`](https://github.com/robfiras/loco-mujoco/blob/master/CITATION.cff) file with both references
+and the metadata of the software (version, release date, authors). GitHub shows the current paper under
+"Cite this repository", and reference managers such as Zotero can read the file.
 
 To make results reproducible, state the version you used, for example "LocoMuJoCo 1.2.0":
 

@@ -25,6 +25,8 @@ Every version below is a git tag and a
 
 ### Changed
 
+- The README, the documentation and `CITATION.cff` cite the paper on the current version in addition to
+  the original 2023 paper.
 - The documentation moved from reStructuredText and the Read the Docs theme to MyST Markdown and the
   PyData theme. The old page addresses redirect to the new ones.
 - Docstrings of the public API were completed; coverage is enforced with `interrogate` (threshold in
