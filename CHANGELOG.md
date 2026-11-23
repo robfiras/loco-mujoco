@@ -9,6 +9,8 @@ Every version below is a git tag and a
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-23
+
 ### Added
 
 - New documentation site: a getting-started track, a user guide with one page per environment
@@ -22,6 +24,8 @@ Every version below is a git tag and a
 - Continuous integration builds the wheel and the source distribution, installs the wheel into a clean
   environment on Python 3.10, 3.11, 3.12 and 3.13, and runs a smoke test with it; this job also runs weekly.
   The package lists the supported Python versions in its classifiers.
+- The simulation backends page reports throughput and peak GPU memory against mjlab and MuJoCo Playground,
+  with both frameworks running the same task on the same model.
 
 ### Changed
 
@@ -321,7 +325,8 @@ Initial release, described in the
 - Interface for custom rewards.
 - Examples and baselines.
 
-[Unreleased]: https://github.com/robfiras/loco-mujoco/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/robfiras/loco-mujoco/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/robfiras/loco-mujoco/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/robfiras/loco-mujoco/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/robfiras/loco-mujoco/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/robfiras/loco-mujoco/compare/v0.4.1...v1.0.1

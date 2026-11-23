@@ -12,8 +12,8 @@ abstract: >-
   models with retargeted motion capture data, a human-to-robot and
   robot-to-robot retargeting pipeline, JAX implementations of learning
   algorithms, and trajectory-similarity metrics.
-version: 1.2.0
-date-released: "2026-11-18"
+version: 1.2.1
+date-released: "2026-11-23"
 license: MIT
 repository-code: "https://github.com/robfiras/loco-mujoco"
 url: "https://loco-mujoco.readthedocs.io"
