@@ -173,9 +173,9 @@ class MetricsHandler:
 
         model = env.get_model()
         if rel_joint_names is not None:
-            self.rel_qpos_ids = [jnp.array(mj_jntid2qposid(name, model)) for name in rel_joint_names
+            self.rel_qpos_ids = [jnp.array(mj_jntname2qposid(name, model)) for name in rel_joint_names
                                  if name not in joints_to_ignore]
-            self.rel_qvel_ids = [jnp.array(mj_jntid2qvelid(name, model)) for name in rel_joint_names
+            self.rel_qvel_ids = [jnp.array(mj_jntname2qvelid(name, model)) for name in rel_joint_names
                                  if name not in joints_to_ignore]
         else:
             self.rel_qpos_ids = [jnp.array(mj_jntid2qposid(i, model)) for i in range(model.njnt)
@@ -369,10 +369,11 @@ class MetricsHandler:
         quat, quat_traj = quat.reshape(-1, 4), quat_traj.reshape(-1, 4)
         quat, quat_traj = quat_scalarfirst2scalarlast(quat), quat_scalarfirst2scalarlast(quat_traj)
         rot_vec, rot_vec_traj = R.from_quat(quat).as_rotvec(), R.from_quat(quat_traj).as_rotvec()
+        # three entries per free joint; none if no free joint is among the relevant joints
         qpos = jnp.concatenate([qpos[..., self._not_quat_in_qpos],
-                                rot_vec.reshape((*qpos.shape[:-1], 3))], axis=-1)
+                                rot_vec.reshape((*qpos.shape[:-1], -1))], axis=-1)
         traj_qpos = jnp.concatenate([traj_qpos[..., self._not_quat_in_qpos],
-                                     rot_vec_traj.reshape((*traj_qpos.shape[:-1], 3))], axis=-1)
+                                     rot_vec_traj.reshape((*traj_qpos.shape[:-1], -1))], axis=-1)
 
         return qpos, traj_qpos
 
@@ -415,7 +416,7 @@ class MetricsHandler:
         # get from trajectory
         traj_body_pos = self._traj_data.xpos[self.get_traj_indices(env_states)]
 
-        return body_pos[..., self.rel_body_ids], traj_body_pos[..., self.rel_body_ids]
+        return body_pos[..., self.rel_body_ids, :], traj_body_pos[..., self.rel_body_ids, :]
 
     def get_body_orientations(self, env_states):
         """
@@ -439,7 +440,7 @@ class MetricsHandler:
         xquat_traj = quat_scalarfirst2scalarlast(self._traj_data.xquat[self.get_traj_indices(env_states)])
         traj_body_rotvec = R.from_quat(xquat_traj).as_rotvec()
 
-        return body_rotvec[..., self.rel_body_ids], traj_body_rotvec[..., self.rel_body_ids]
+        return body_rotvec[..., self.rel_body_ids, :], traj_body_rotvec[..., self.rel_body_ids, :]
 
     def get_body_velocities(self, env_states):
         """
@@ -461,7 +462,7 @@ class MetricsHandler:
         # get from trajectory
         traj_body_vel = self._traj_data.cvel[self.get_traj_indices(env_states)]
 
-        return body_vel[..., self.rel_body_ids], traj_body_vel[..., self.rel_body_ids]
+        return body_vel[..., self.rel_body_ids, :], traj_body_vel[..., self.rel_body_ids, :]
 
     def get_site_positions(self, env_states):
         """
@@ -481,7 +482,7 @@ class MetricsHandler:
         # get from trajectory
         traj_site_pos = self._traj_data.site_xpos[self.get_traj_indices(env_states)]
 
-        return site_pos[..., self.rel_site_ids], traj_site_pos[..., self.rel_site_ids]
+        return site_pos[..., self.rel_site_ids, :], traj_site_pos[..., self.rel_site_ids, :]
 
     def get_site_orientations(self, env_states):
         """
@@ -506,7 +507,7 @@ class MetricsHandler:
         site_xmat = site_xmat.reshape(site_xmat.shape[0], site_xmat.shape[1], 3, 3)
         traj_site_rotvec = R.from_matrix(site_xmat[self.get_traj_indices(env_states)]).as_rotvec()
 
-        return site_rotvec[..., self.rel_site_ids], traj_site_rotvec[..., self.rel_site_ids]
+        return site_rotvec[..., self.rel_site_ids, :], traj_site_rotvec[..., self.rel_site_ids, :]
 
     def get_site_velocities(self, env_states):
         """
@@ -524,17 +525,20 @@ class MetricsHandler:
 
         """
 
+        # the body each relevant site is attached to, and the root body of that body
+        site_body_ids = self._site_bodyid[self.rel_site_ids]
+        site_root_ids = self._body_rootid[site_body_ids]
+
+        # the result holds the relevant sites only, in the order of rel_site_ids
         site_xvel = self._vec_calc_site_velocities(self.rel_site_ids, env_states.data,
-                                                   self._site_bodyid[self.rel_site_ids],
-                                                   self._body_rootid[self.rel_site_ids], jnp, False)
+                                                   site_body_ids, site_root_ids, jnp, False)
 
         traj_indices = self.get_traj_indices(env_states)
         traj_data = jax.tree.map(lambda x: x[traj_indices], self._traj_data)
         traj_site_xvel = self._vec_calc_site_velocities(self.rel_site_ids, traj_data,
-                                                        self._site_bodyid[self.rel_site_ids],
-                                                        self._body_rootid[self.rel_site_ids], jnp, False)
+                                                        site_body_ids, site_root_ids, jnp, False)
 
-        return site_xvel[..., self.rel_site_ids], traj_site_xvel[..., self.rel_site_ids]
+        return site_xvel, traj_site_xvel
 
     def get_relative_site_quantities(self, env_states):
         """
@@ -554,19 +558,20 @@ class MetricsHandler:
 
         """
 
+        # calculate_relative_site_quatities looks up the root bodies itself, so it gets the root ids of all bodies;
+        # its results hold the relevant sites without the main site, in the order of rel_site_ids
+        site_body_ids = self._site_bodyid[self.rel_site_ids]
+
         rel_site_pos, rel_site_rotvec, rel_site_vel = self._vec_calc_rel_site_quantities(
-            env_states.data, self.rel_site_ids, self._site_bodyid[self.rel_site_ids],
-            self._body_rootid[self.rel_site_ids], jnp)
+            env_states.data, self.rel_site_ids, site_body_ids, self._body_rootid, jnp)
 
         traj_states = env_states.additional_carry.traj_state
         traj_data = self._traj_data.get(traj_states.traj_no, traj_states.subtraj_step_no)
         traj_rel_site_pos, traj_rel_site_rotvec, traj_rel_site_vel = self._vec_calc_rel_site_quantities(
-            traj_data, self.rel_site_ids, self._site_bodyid[self.rel_site_ids],
-            self._body_rootid[self.rel_site_ids], jnp)
+            traj_data, self.rel_site_ids, site_body_ids, self._body_rootid, jnp)
 
-        return (rel_site_pos[..., self.rel_site_ids], rel_site_rotvec[..., self.rel_site_ids],
-                rel_site_vel[..., self.rel_site_ids], traj_rel_site_pos[..., self.rel_site_ids],
-                traj_rel_site_rotvec[..., self.rel_site_ids], traj_rel_site_vel[..., self.rel_site_ids])
+        return (rel_site_pos, rel_site_rotvec, rel_site_vel,
+                traj_rel_site_pos, traj_rel_site_rotvec, traj_rel_site_vel)
 
     def get_traj_indices(self, env_states):
         """
