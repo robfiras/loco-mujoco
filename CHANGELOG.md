@@ -9,6 +9,21 @@ Every version below is a git tag and a
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `calculate_relative_velocity_in_local_frame(vel_a, vel_b, rot_mat_a, backend)` takes the
+  orientation of frame A instead of the two rotation matrices `rot_mat_w_a` and `rot_mat_a_b`.
+
+### Fixed
+
+- The site positions and velocities that `calculate_relative_site_quatities` returns relative to the main
+  site are now expressed in the frame of the main site. Before, the positions were left in the world frame,
+  and the velocities were rotated with the wrong matrix, so both changed with the heading of the robot. This
+  affects `MimicReward`, `GoalTrajMimic`, `RelativeSiteQuantaties` and the `RelSitePosition` and
+  `RelSiteVelocity` metrics, and policies trained on these observations before this fix need to be retrained.
+  The relative linear velocity now has the same sign as the angular one: the velocity of the site minus the
+  velocity of the main site.
+
 ## [1.2.1] - 2026-11-23
 
 ### Added

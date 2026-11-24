@@ -196,48 +196,36 @@ def calculate_global_rotation_matrices(main_rot, relative_rots, backend):
     return global_rots
 
 
-def calculate_relative_velocity_in_local_frame(vel_a, vel_b, rot_mat_w_a, rot_mat_a_b, backend):
+def calculate_relative_velocity_in_local_frame(vel_a, vel_b, rot_mat_a, backend):
     """
-    Calculate the relative velocity vel_a-vel_b expressed in the local frame of vel_a.
+    Calculate the velocities of B relative to A, expressed in the local frame of A.
+
+    Both velocities are 6D motion vectors in the world frame, angular part first. The angular and the linear
+    part of ``vel_b - vel_a`` are each rotated from the world frame into the frame of A, so the result does
+    not change when the whole system is rotated or moved in the world.
 
     Args:
-        vel_a (array): 6D velocity vector of body A in world frame. Shape (6,) or (batch_size, 6)
-        vel_b (array): 6D velocity vector of body B in world frame. Shape (6,) or (batch_size, 6)
-        rot_mat_w_a (array): Rotation matrix to transform from world frame to the frame of vel_a.
-            Shape (3, 3) or (batch_size, 3, 3)
-        rot_mat_a_b (array): Rotation matrix to transform from the frame of vel_a to the frame of vel_b.
-            Shape (3, 3) or (batch_size, 3, 3)
+        vel_a (array): 6D velocity vector of A in world frame. Shape (6,)
+        vel_b (array): 6D velocity vectors of B in world frame. Shape (6,) or (batch_size, 6)
+        rot_mat_a (array): Orientation of the frame of A in the world frame, which maps local coordinates
+            of A to world coordinates (as ``site_xmat`` in MuJoCo). Shape (3, 3) or (9,)
         backend: Backend to use (either np or jnp).
 
     Returns:
-        array: Relative 6D velocity vector of vel_a in the local frame of vel_b. Shape (batch_size, 6)
+        array: Relative 6D velocity vectors ``vel_b - vel_a`` in the local frame of A. Shape (batch_size, 6)
+
     """
-    # Ensure the inputs are at least 2D arrays for batch processing
     vel_a = backend.atleast_1d(vel_a)  # Shape: (6,)
-    vel_b = backend.atleast_2d(vel_b)  # Shape: (1, 6) or (batch_size, 6)
-    rot_mat_w_a = backend.atleast_2d(rot_mat_w_a)  # Shape: (3, 3)
-    rot_mat_a_b = atleast_3d(rot_mat_a_b, backend)  # Shape: (1, 3, 3) or (batch_size, 3, 3)
+    vel_b = backend.atleast_2d(vel_b)  # Shape: (batch_size, 6)
+    rot_mat_a = rot_mat_a.reshape(3, 3)
 
-    # Extract linear and angular components (corrected based on your input structure)
-    ang_a = vel_a[:3]  # Angular components of A (Shape: (3,))
-    lin_a = vel_a[3:]  # Linear components of A (Shape: (3,))
+    rel_vel = vel_b - vel_a  # Shape: (batch_size, 6)
 
-    ang_b = vel_b[:, :3]  # Angular components of B (Shape: (batch_size, 3))
-    lin_b = vel_b[:, 3:]  # Linear components of B (Shape: (batch_size, 3))
+    # rotate from the world frame into the frame of A: R^T @ v for every row
+    relative_ang_vel = backend.einsum('ji,bj->bi', rot_mat_a, rel_vel[:, :3])  # Shape: (batch_size, 3)
+    relative_lin_vel = backend.einsum('ji,bj->bi', rot_mat_a, rel_vel[:, 3:])  # Shape: (batch_size, 3)
 
-    # Transform the relativ linear velocity of vel_a-vel_b to the local frame of vel_a
-    relative_lin_vel = backend.einsum('jk,ik->ij', rot_mat_w_a, lin_a - lin_b)  # Shape: (batch_size, 3)
-
-    # Transform the angular velocity of vel_b to the local frame of vel_a (einsum is taking the transpose of rot_mat_a_b)
-    ang_b_transformed_to_a = backend.einsum('ikj,ik->ij', rot_mat_a_b, ang_b)  # Shape: (batch_size, 3)
-
-    # Calculate the relative velocities in the local frame of vel_b
-    relative_ang_vel = ang_b_transformed_to_a - ang_a  # Shape: (batch_size, 3)
-
-    # Combine into a 6D vector
-    relative_velocity = backend.hstack([relative_ang_vel, relative_lin_vel])  # Shape: (batch_size, 6)
-
-    return relative_velocity
+    return backend.hstack([relative_ang_vel, relative_lin_vel])  # Shape: (batch_size, 6)
 
 
 def calc_rel_body_velocities(cvel, xmat_main_body, backend):
@@ -416,6 +404,9 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
     """
     Calculate the positions, rotations and velocities of a set of sites relative to a main site.
 
+    All three quantities are expressed in the local frame of the main site, so they do not change when the
+    whole system is rotated or moved in the world.
+
     Args:
         data: Mujoco/Mjx Data structure.
         rel_site_ids (array): Ids of the sites, including the main site. Shape (n_sites,)
@@ -427,8 +418,9 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
             Defaults to 0 (first site in the list).
 
     Returns:
-        tuple: Relative positions, shape (n_sites - 1, 3), relative rotations as rotation vectors, shape
-        (n_sites - 1, 3), and relative 6D velocities, shape (n_sites - 1, 6), of all sites but the main site.
+        tuple: Positions relative to the main site, shape (n_sites - 1, 3), rotations relative to the main site
+        as rotation vectors, shape (n_sites - 1, 3), and 6D velocities (angular, then linear) relative to the main
+        site, shape (n_sites - 1, 6), of all sites but the main site.
 
     """
 
@@ -458,9 +450,9 @@ def calculate_relative_site_quatities(data, rel_site_ids, rel_body_ids, body_roo
     main_site_xpos_traj = site_xpos_traj[main_site_id]
     site_xpos_traj = backend.delete(site_xpos_traj, main_site_id, axis=0)
     site_rpos = calc_rel_positions(site_xpos_traj, main_site_xpos_traj, backend)
+    site_rpos = backend.einsum('ji,bj->bi', main_site_xmat_traj, site_rpos)  # world frame -> main site frame
     site_rangles = R.from_matrix(rel_rot_mat).as_rotvec() if backend == np else rotvec_from_matrix_jax(rel_rot_mat)
-    site_rvel = calculate_relative_velocity_in_local_frame(main_site_xvel, site_xvel, main_site_xmat_traj,
-                                                           rel_rot_mat, backend)
+    site_rvel = calculate_relative_velocity_in_local_frame(main_site_xvel, site_xvel, main_site_xmat_traj, backend)
 
     return site_rpos, site_rangles, site_rvel
 
