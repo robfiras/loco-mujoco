@@ -114,8 +114,109 @@ def test_relative_velocity_in_local_frame_zero(backend):
     # identical velocities with identity rotations -> zero relative velocity
     vel = backend.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
     eye = backend.array(np.eye(3))
-    rel = m.calculate_relative_velocity_in_local_frame(vel, vel, eye, eye, backend)
+    rel = m.calculate_relative_velocity_in_local_frame(vel, vel, eye, backend)
     np.testing.assert_allclose(np.asarray(rel), 0.0, atol=_ATOL)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_relative_velocity_in_local_frame_rotated(backend):
+    # the difference vel_b - vel_a is rotated from the world into the frame of A
+    rot_a = sRot.from_euler("xyz", [0.3, -0.5, 1.2]).as_matrix()
+    vel_a = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    vel_b = np.array([[1.0, -0.5, 0.2, -0.3, 0.7, 0.1],
+                      [0.0, 0.4, -1.1, 0.9, 0.0, -0.2]])
+    expected = np.concatenate([(vel_b[:, :3] - vel_a[:3]) @ rot_a,
+                               (vel_b[:, 3:] - vel_a[3:]) @ rot_a], axis=1)
+    rel = m.calculate_relative_velocity_in_local_frame(backend.array(vel_a), backend.array(vel_b),
+                                                       backend.array(rot_a), backend)
+    np.testing.assert_allclose(np.asarray(rel), expected, atol=_ATOL)
+
+
+_REL_SITE_XML = """
+<mujoco>
+  <worldbody>
+    <body name="root" pos="0 0 1">
+      <freejoint/>
+      <geom type="box" size="0.1 0.2 0.3" mass="1"/>
+      <site name="main" pos="0.05 0.02 0.1" euler="0.2 0.1 -0.3"/>
+      <body name="arm" pos="0.1 0.3 0">
+        <joint name="hinge" type="hinge" axis="0 1 0"/>
+        <geom type="capsule" fromto="0 0 0 0.3 0 0" size="0.03" mass="0.5"/>
+        <site name="hand" pos="0.3 0 0" euler="0.4 0 0.2"/>
+        <body name="tip" pos="0.3 0 0">
+          <joint name="ball" type="ball"/>
+          <geom type="sphere" size="0.04" mass="0.2"/>
+          <site name="finger" pos="0.05 0.01 0"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _rel_site_quantities(model, data, qpos, qvel, backend):
+    import mujoco
+    from types import SimpleNamespace
+    data.qpos[:] = qpos
+    data.qvel[:] = qvel
+    mujoco.mj_forward(model, data)
+    site_ids = np.arange(model.nsite)
+    body_ids = model.site_bodyid[site_ids]
+    fields = ("site_xpos", "site_xmat", "cvel", "subtree_com")
+    d = SimpleNamespace(**{f: backend.array(getattr(data, f)) for f in fields})
+    out = m.calculate_relative_site_quatities(d, backend.array(site_ids), backend.array(body_ids),
+                                              backend.array(model.body_rootid), backend)
+    return [np.asarray(x) for x in out], data.site_xpos.copy(), data.site_xmat.copy().reshape(-1, 3, 3)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_relative_site_quantities_do_not_depend_on_world_pose(backend):
+    # Rotating and moving the whole system in the world must not change any quantity that is relative to
+    # the main site. Before the fix the positions and velocities changed with the heading of the root.
+    import mujoco
+    model = mujoco.MjModel.from_xml_string(_REL_SITE_XML)
+    data = mujoco.MjData(model)
+    rng = np.random.default_rng(0)
+    qpos = np.zeros(model.nq)
+    qpos[:3] = [0.3, -0.2, 1.0]
+    qpos[3:7] = np.roll(sRot.from_euler("xyz", [0.1, -0.2, 0.4]).as_quat(), 1)
+    qpos[7] = 0.6
+    qpos[8:12] = np.roll(sRot.from_euler("xyz", [0.3, 0.2, -0.5]).as_quat(), 1)
+    qvel = rng.normal(size=model.nv)
+    base, _, _ = _rel_site_quantities(model, data, qpos, qvel, backend)
+
+    for world_rot in [sRot.from_euler("z", np.pi / 2), sRot.from_euler("xyz", [0.7, -0.4, 2.0])]:
+        qpos_w, qvel_w = qpos.copy(), qvel.copy()
+        qpos_w[:3] = world_rot.apply(qpos[:3]) + np.array([1.5, -2.0, 0.3])
+        qpos_w[3:7] = np.roll((world_rot * sRot.from_quat(np.roll(qpos[3:7], -1))).as_quat(), 1)
+        qvel_w[:3] = world_rot.apply(qvel[:3])  # linear velocity of a free joint is in the world frame
+        moved, _, _ = _rel_site_quantities(model, data, qpos_w, qvel_w, backend)
+        for name, b, mv in zip(["site_rpos", "site_rangles", "site_rvel"], base, moved):
+            np.testing.assert_allclose(mv, b, atol=_ATOL, err_msg=name)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_relative_site_quantities_match_mujoco(backend):
+    # positions and velocities of the other sites relative to the main site, in the frame of the main site,
+    # with the site velocities taken from MuJoCo's mj_objectVelocity
+    import mujoco
+    model = mujoco.MjModel.from_xml_string(_REL_SITE_XML)
+    data = mujoco.MjData(model)
+    qpos = np.zeros(model.nq)
+    qpos[:7] = [0.2, 0.1, 1.0] + list(np.roll(sRot.from_euler("xyz", [0.2, -0.1, 1.0]).as_quat(), 1))
+    qpos[7] = 1.0
+    qpos[8:12] = np.roll(sRot.from_euler("y", 0.5).as_quat(), 1)
+    qvel = np.random.default_rng(1).normal(size=model.nv)
+    (rpos, _, rvel), site_xpos, site_xmat = _rel_site_quantities(model, data, qpos, qvel, backend)
+
+    site_vel = np.zeros((model.nsite, 6))
+    for i in range(model.nsite):
+        mujoco.mj_objectVelocity(model, data, mujoco.mjtObj.mjOBJ_SITE, i, site_vel[i], 0)
+    main_rot = site_xmat[0]
+    np.testing.assert_allclose(rpos, (site_xpos[1:] - site_xpos[0]) @ main_rot, atol=_ATOL)
+    np.testing.assert_allclose(rvel[:, :3], (site_vel[1:, :3] - site_vel[0, :3]) @ main_rot, atol=_ATOL)
+    np.testing.assert_allclose(rvel[:, 3:], (site_vel[1:, 3:] - site_vel[0, 3:]) @ main_rot, atol=_ATOL)
 
 
 # --------------------------- quaternion helpers ---------------------------

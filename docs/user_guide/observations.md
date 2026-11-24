@@ -82,7 +82,9 @@ Notes on individual types:
   joint, with the linear velocity first. The second one is `cvel` of a body, with the angular velocity first.
 - **`RelativeSiteQuantaties`** (the spelling is that of the class) uses the mimic sites of the robot if
   `site_names` is not given. The first site of the list is the main site, and the entry has
-  $12 \cdot (n_\text{sites} - 1)$ values. This is the usual observation for AMP and GAIL discriminators.
+  $12 \cdot (n_\text{sites} - 1)$ values. The positions, rotations and velocities are expressed in the frame
+  of the main site, so they do not change when the robot turns or moves in the world. This is the usual
+  observation for AMP and GAIL discriminators.
 - **`Force`** is only computed on the CPU backend. On MJX the entry is zero.
 - **`ModelInfo`** makes parameters of the model visible, for example to give a critic the masses that the
   domain randomizer sampled: `ObservationType.ModelInfo("masses", model_attributes="body_mass")`.

@@ -132,14 +132,14 @@ def test_MimicReward(standing_trajectory, falling_trajectory, backend, mock_rand
         assert len(transitions.rewards) == 99
         reward_sum = transitions.rewards.sum()
         reward_42 = transitions.rewards[42]
-        assert isclose(reward_sum, 35.697357177734375, abs_tol=_ATOL)
-        assert isclose(reward_42, 0.5023975968360901, abs_tol=_ATOL)
+        assert isclose(reward_sum, 40.25270080566406, abs_tol=_ATOL)
+        assert isclose(reward_42, 0.6433833241462708, abs_tol=_ATOL)
     else:
         assert len(transitions.rewards) == 99
         reward_sum = float(jnp.sum(transitions.rewards))
         reward_42 = float(transitions.rewards[42])
-        assert isclose(reward_sum, 35.697357177734375, abs_tol=_ATOL)
-        assert isclose(reward_42, 0.5023977160453796, abs_tol=_ATOL)
+        assert isclose(reward_sum, 40.252708435058594, abs_tol=_ATOL)
+        assert isclose(reward_42, 0.6433835029602051, abs_tol=_ATOL)
 
 
 @pytest.mark.parametrize("backend", ["numpy", "jax"])
