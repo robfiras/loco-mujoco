@@ -44,22 +44,32 @@ relative to the root (`site_rpos`, in meters), as mean ± standard deviation ove
 
 | Embodiment | Return | Episode length | Euclidean | DTW | Fréchet |
 |---|---:|---:|---:|---:|---:|
-| UnitreeH1 | 1535 ± 81 | 925 ± 27 | 0.023 ± 0.010 | 1.13 ± 0.54 | 0.058 ± 0.030 |
-| UnitreeH1v2 | 1086 ± 128 | 890 ± 41 | 0.060 ± 0.023 | 3.15 ± 1.31 | 0.137 ± 0.050 |
-| UnitreeG1 | 1378 ± 77 | 926 ± 27 | 0.017 ± 0.006 | 0.85 ± 0.25 | 0.046 ± 0.016 |
-| Atlas | 725 ± 89 | 923 ± 28 | 0.090 ± 0.038 | 7.52 ± 3.00 | 0.173 ± 0.061 |
-| Talos | 1222 ± 91 | 913 ± 32 | 0.049 ± 0.022 | 4.26 ± 1.86 | 0.104 ± 0.040 |
-| Apollo | 1068 ± 96 | 961 ± 13 | 0.086 ± 0.040 | 6.94 ± 3.04 | 0.131 ± 0.065 |
-| BoosterT1 | 1184 ± 83 | 913 ± 31 | 0.058 ± 0.020 | 4.75 ± 1.64 | 0.118 ± 0.044 |
-| FourierGR1T2 | 1647 ± 102 | 926 ± 27 | 0.024 ± 0.011 | 1.19 ± 0.52 | 0.057 ± 0.027 |
-| ToddlerBot | 1587 ± 139 | 925 ± 26 | 0.016 ± 0.007 | 1.28 ± 0.60 | 0.033 ± 0.020 |
-| SkeletonTorque | 1096 ± 66 | 921 ± 28 | 0.037 ± 0.016 | 2.15 ± 0.62 | 0.096 ± 0.035 |
-| SkeletonMuscle | 838 ± 403 | 671 ± 276 | 0.102 ± 0.067 | 6.92 ± 4.31 | 0.285 ± 0.221 |
+| UnitreeH1 | 1535 ± 81 | 925 ± 27 | 0.033 ± 0.007 | 2.84 ± 0.57 | 0.064 ± 0.013 |
+| UnitreeH1v2 | 1086 ± 128 | 890 ± 41 | 0.084 ± 0.025 | 7.38 ± 2.16 | 0.162 ± 0.071 |
+| UnitreeG1 | 1378 ± 77 | 926 ± 27 | 0.027 ± 0.004 | 2.37 ± 0.31 | 0.053 ± 0.007 |
+| Atlas | 725 ± 89 | 923 ± 28 | 0.092 ± 0.021 | 8.06 ± 1.95 | 0.159 ± 0.035 |
+| Talos | 1222 ± 91 | 913 ± 32 | 0.057 ± 0.017 | 4.98 ± 1.64 | 0.104 ± 0.034 |
+| Apollo | 1068 ± 96 | 961 ± 13 | 0.078 ± 0.025 | 6.75 ± 2.22 | 0.111 ± 0.043 |
+| BoosterT1 | 1184 ± 83 | 913 ± 31 | 0.061 ± 0.014 | 5.59 ± 1.47 | 0.111 ± 0.031 |
+| FourierGR1T2 | 1647 ± 102 | 926 ± 27 | 0.033 ± 0.009 | 2.84 ± 0.74 | 0.061 ± 0.017 |
+| ToddlerBot | 1587 ± 139 | 925 ± 26 | 0.016 ± 0.006 | 1.38 ± 0.51 | 0.029 ± 0.012 |
+| SkeletonTorque | 1096 ± 66 | 921 ± 28 | 0.047 ± 0.017 | 4.26 ± 1.59 | 0.127 ± 0.082 |
+| SkeletonMuscle | 838 ± 403 | 671 ± 276 | 0.104 ± 0.060 | 9.65 ± 5.76 | 0.242 ± 0.153 |
+
+```{note}
+The tracking errors on the site quantities, in this table and in the figure of Experiment 3, were computed
+after training with the corrected {class}`~loco_mujoco.utils.metrics.MetricsHandler`: every final policy was
+rolled out again, five validation rollouts each, and the results were averaged. Versions of LocoMuJoCo up to
+1.2.0 evaluated the site quantities on the wrong axis (see the [changelog](../development/changelog.md)), so
+values of `site_rpos`, `site_rrotvec` and `site_rvel` logged with those versions are not comparable with the
+ones here. The return, the episode length and the errors on the joint positions are not affected. A few
+policies whose checkpoints were no longer available were trained again with the same configuration and seed.
+```
 
 What the results show:
 
-- The Unitree G1 and H1, the Fourier GR1T2 and ToddlerBot track most closely. Atlas, Apollo and the
-  muscle-driven SkeletonMuscle have the largest errors.
+- The Unitree G1 and H1, the Fourier GR1T2 and ToddlerBot track most closely. Atlas, the Unitree H1-2, Apollo
+  and the muscle-driven SkeletonMuscle have the largest errors.
 - SkeletonMuscle is the hardest embodiment. It is the only one whose episodes regularly end early, and its
   results vary most between clips and seeds.
 - The three measures rank the embodiments in nearly the same order, on the joint positions as on the site
@@ -105,7 +115,7 @@ algorithm over 12 clips × 5 seeds (log scale).
 ```
 
 PPO reaches about twice the return of GAIL and a lower tracking error under every measure and on every
-quantity. Training a discriminator on high-dimensional whole-body motion without a per-step tracking signal is
+quantity: the median error of PPO is about 1.8 to 2.2 times lower. Training a discriminator on high-dimensional whole-body motion without a per-step tracking signal is
 hard. LocoMuJoCo includes GAIL mainly as a baseline and as a starting point for methods such as AMP, which
 combine a learned style reward with a task reward.
 

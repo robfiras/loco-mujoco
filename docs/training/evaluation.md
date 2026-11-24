@@ -98,6 +98,13 @@ Each measure is computed separately for every element (joint, body or site) and 
 on the time series of that element, and then averaged. The result is one scalar per measure and quantity.
 Quantities with different units are not comparable with each other; compare the same quantity across runs.
 
+```{note}
+Versions up to 1.2.0 applied the selection of bodies and sites to the wrong axis of the body and site
+quantities, so their values are not comparable with those of later versions. The joint quantities, the return
+and the episode length are the same in all versions. The [benchmark results](benchmark.md) use the corrected
+implementation.
+```
+
 ### Configuration
 
 The validation loop is configured in the `validation` block of `experiment`:

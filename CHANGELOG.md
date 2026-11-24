@@ -102,7 +102,9 @@ Every version below is a git tag and a
   and `rel_site_names` did not restrict `BodyPosition`, `BodyOrientation`, `BodyVelocity`, `SitePosition` and
   `SiteOrientation` to the named elements. The measures are now evaluated on all components of the selected
   bodies and sites. **The values of these nine quantities change**; values logged with earlier versions are not
-  comparable with new ones. The joint quantities, the return and the episode length are unchanged.
+  comparable with new ones. The joint quantities, the return and the episode length are unchanged. The site
+  errors on the benchmark page of the documentation (table of Experiment 1, figure of Experiment 3) were
+  computed again with the corrected implementation.
 - `validation.rel_joint_names` raised an `IndexError` in `MetricsHandler`, because the joint names were used as
   joint ids. Selecting joints without a free joint, with `rel_joint_names` or by listing the free joint in
   `joints_to_ignore`, failed in `JointPosition` with "cannot reshape array".
