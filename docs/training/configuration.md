@@ -223,6 +223,8 @@ hydra:
 To distribute the runs of a sweep over a cluster, replace the `basic` launcher in `defaults` by one of
 [Hydra's launcher plugins](https://hydra.cc/docs/plugins/submitit_launcher/).
 
+The JAX DeepMimic training script `jax_rl_mimic/experiment.py` logs `Metric for Sweep` as the sum of the Euclidean errors for relative site position, orientation, and velocity. The script logs this sum when all three errors are available.
+
 ## Output directories
 
 A run writes to three places, all relative to the directory the script is started from:

@@ -9,6 +9,10 @@ Every version below is a git tag and a
 
 ## [Unreleased]
 
+### Fixed
+
+- `jax_rl_mimic/experiment.py` logs the sum of relative site position, orientation, and velocity errors as its sweep metric when all three are available.
+
 ## [1.2.1] - 2026-11-23
 
 ### Added
