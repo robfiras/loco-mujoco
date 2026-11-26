@@ -69,7 +69,7 @@ def main():
 
     DEFAULTS = {"horizon": 1000, "gamma": 0.99, "n_envs": 1}
     DEFAULTS_TRAJ = {"horizon": 1000, "gamma": 0.99, "n_envs": 1,
-                     "th_params": {"random_start": False, "fixed_start_conf": (0, 0)}}
+                     "th_params": {"name": "FixedStartTrajectoryHandler", "start_conf": (0, 0)}}
 
     def make_standing_trajectory():
         N_steps = 1000

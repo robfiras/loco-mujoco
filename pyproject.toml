@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "wget", "pyyaml"]
+requires = ["setuptools>=77", "wheel", "wget", "pyyaml"]
 
 [project]
 name = "loco-mujoco"
@@ -10,7 +10,9 @@ dependencies = [
     "mujoco-mjx>=3.5.0",
     "mujoco-warp>=3.5.0",
     "hydra-core",
-    "jax",
+    # JAX 0.10.0 and 0.10.2 fail to compile the SuperMimic training function on GPU (they work on CPU);
+    # raise the upper bound only after a newer release has been tested on GPU
+    "jax<=0.10.1,!=0.10.0",
     "flax",
     "orbax",
     "distrax",
@@ -22,24 +24,33 @@ dependencies = [
     "gitpython",
     "datasets",
     "huggingface_hub",
-    "loco-mujoco-models @ git+https://github.com/robfiras/loco-mujoco-models.git"]
+    "requests",
+    "httpx",
+    "rich",
+    "filelock"]
 
 requires-python = ">=3.10"
 authors = [{name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
 maintainers = [{ name="Firas Al-Hafez", email="fi.alhafez@gmail.com"}]
 description = 'Imitation learning benchmark focusing on complex locomotion tasks using MuJoCo.'
 readme = "README.md"
-license = { file= "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["Imitation Learning", "Reinforcement Learning", "Locomotion"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux",
 ]
 dynamic = ["version"]
 
 [tool.setuptools.packages.find]
 where = ["."]
+# only the library: without this, docs/ and scripts/ are installed as top-level packages
+include = ["loco_mujoco*"]
 
 [tool.coverage.run]
 source = ["loco_mujoco"]
@@ -90,12 +101,22 @@ exclude_also = [
 show_missing = true
 skip_covered = false
 
+# Docstring coverage of the public API, checked in CI with `interrogate loco_mujoco`.
+[tool.interrogate]
+ignore-private = true
+ignore-magic = true
+ignore-nested-functions = true
+ignore-init-method = true
+fail-under = 95
+exclude = ["loco_mujoco/datasets/create_minidatasets.py"]
+verbose = 0
+
 [project.optional-dependencies]
 # To install SMPL, you need to accept the license as described here https://github.com/vchoutas/smplx
 smpl = [
     "torch",
     "tqdm",
-    "smplx @ git+https://github.com/ZhengyiLuo/smplx",
+    "smplx",
     "joblib",
 ]
 # Browser-based rendering with viser, used by env.render_viser() and env.mjx_render_viser().
@@ -114,6 +135,16 @@ blender = [
     "usd-core>=24.5",
     "Pillow",
 ]
+# Documentation build. Install with: pip install -e ".[docs]"; keep in sync with docs/requirements.txt.
+docs = [
+    "sphinx>=7.3,<9",
+    "pydata-sphinx-theme>=0.16",
+    "myst-parser>=4.0",
+    "sphinx-design>=0.6",
+    "sphinx-copybutton>=0.5",
+    "sphinx-reredirects>=0.1.5",
+    "interrogate>=1.7",
+]
 # Test/dev tooling. Install with: pip install -e ".[test]"
 test = [
     "pytest",
@@ -126,9 +157,7 @@ Repository = "https://github.com/robfiras/loco-mujoco"
 Issues = "https://github.com/robfiras/loco-mujoco/issues"
 
 [project.scripts]
-loco-mujoco-download = "loco_mujoco.utils:download_all_datasets"
-loco-mujoco-download-real = "loco_mujoco.utils:download_real_datasets"
-loco-mujoco-download-perfect = "loco_mujoco.utils:download_perfect_datasets"
+loco-mujoco-download-models = "loco_mujoco.utils:download_models_cli"
 loco-mujoco-myomodel-init = "loco_mujoco.utils:fetch_myoskeleton"
 loco-mujoco-myomodel-clear = "loco_mujoco.utils:clear_myoskeleton"
 loco-mujoco-set-smpl-model-path = "loco_mujoco.utils:set_smpl_model_path"

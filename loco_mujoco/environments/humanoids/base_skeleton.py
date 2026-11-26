@@ -1,3 +1,7 @@
+"""
+Base class of the humanoid skeleton environments.
+"""
+
 from typing import Union, List, Tuple
 import numpy as np
 import mujoco
@@ -12,7 +16,24 @@ from loco_mujoco.smpl.retargeting import extend_motion
 
 class BaseSkeleton(LocoEnv):
     """
-    Mujoco environment of a base skeleton model.
+    Base class for the environments of the humanoid skeleton model.
+
+    The skeleton is a model of the human body with a floating base (pelvis), three lumbar joints, seven
+    joints per arm and seven joints per leg. The subclasses
+    :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonTorque` and
+    :class:`~loco_mujoco.environments.humanoids.skeletons.SkeletonMuscle` select the actuation (torque
+    actuators or muscles) and define the action space, while this class defines the observation space and
+    the modifications of the model that both share:
+
+    - Box feet (``use_box_feet``): each foot is replaced by a box for simplified contacts, and the subtalar
+      and toe joints are removed.
+    - Disabled arms (``disable_arms``): all arm joints and their actuators are removed.
+    - Body scaling (``scaling``): the kinematics and dynamics of the model are scaled to simulate humans of
+      different sizes. Trajectories loaded into a scaled environment are scaled accordingly.
+
+    By default, the observation consists of the pose of the floating base without its x-y position (height
+    and orientation quaternion), all joint positions, the linear and angular velocity of the floating base,
+    and all joint velocities.
 
     .. note:: This class is not the base for the MyoSkeleton environment.
 
@@ -35,16 +56,31 @@ class BaseSkeleton(LocoEnv):
 
         Args:
             use_muscles (bool): If True, muscle actuators will be used, else torque actuators will be used.
-            use_box_feet (bool): If True, boxes are used as feet (for simplification).
+                This is set by the subclasses.
+            use_box_feet (bool): If True, boxes are used as feet (for simplification). The original foot
+                geometries are made non-colliding, and the subtalar and toe joints are removed together with
+                their observations and, for the torque-actuated model, their actuators. Required for the Mjx
+                variants with reduced contacts.
             disable_arms (bool): If True, all arm joints are removed and the respective
-                actuators are removed from the action specification.
-            scaling (float): Scaling factor for the kinematics and dynamics of the humanoid model.
-            alpha_box_feet (float): Alpha parameter of the boxes, which might be added as feet.
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            observation_spec (List[ObservationType]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments.
+                observations and actuators are removed from the observation and action specification. The
+                arms are then fixed in a new default orientation.
+            scaling (float): Scaling factor for the kinematics and dynamics of the humanoid model. Lengths are
+                scaled linearly, masses with the third and inertias with the fifth power of the factor, and
+                actuator gears and peak muscle forces with the second power.
+            alpha_box_feet (float): Alpha (opacity) value of the color of the boxes, which might be added as
+                feet.
+            spec (Union[str, MjSpec]): Model to simulate, either a path to a MuJoCo XML file or an ``MjSpec``
+                object. If None, the default model of this environment is used.
+            observation_spec (List[ObservationType]): Observations that make up the observation vector, given
+                as observation objects or as dictionaries with a ``type`` key naming the observation type and
+                its parameters as the remaining keys. If None, the default observation space is used.
+            actuation_spec (List[str]): Names of the actuators in the model that are controlled by the action.
+                If None, the default action space is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. The
+                extra key ``mjx_reduced_contacts`` (bool, default True) only affects the Mjx variants: if True,
+                the contacts are reduced by ``_modify_spec_for_mjx``; if False, the collision geometries of the
+                model are kept.
+
         """
 
         if spec is None:
@@ -86,7 +122,9 @@ class BaseSkeleton(LocoEnv):
             if self._disable_arms:
                 spec = self._reorient_arms(spec)
 
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             assert use_box_feet
             spec = self._modify_spec_for_mjx(spec)
 
@@ -94,12 +132,12 @@ class BaseSkeleton(LocoEnv):
 
     def _get_spec_modifications(self) -> Tuple[List[str], List[str], List[str]]:
         """
-        Function that specifies which joints, motors, and equality constraints
-        should be removed from the Mujoco specification.
+        Specifies which joints, motors, and equality constraints should be removed from the Mujoco specification.
 
         Returns:
-            A tuple of lists consisting of names of joints to remove, names of motors to remove,
-            and names of equality constraints to remove.
+            Tuple[List[str], List[str], List[str]]: Names of the joints to remove, names of the motors to
+            remove, and names of the equality constraints to remove.
+
         """
 
         joints_to_remove = []
@@ -133,7 +171,8 @@ class BaseSkeleton(LocoEnv):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of observation types.
+            List[ObservationType]: List of observations.
+
         """
 
         observation_spec = [  # ------------- JOINT POS -------------
@@ -223,10 +262,11 @@ class BaseSkeleton(LocoEnv):
 
         Args:
             spec (MjSpec): Mujoco specification.
-            alpha_box_feet (float): Alpha parameter of the boxes.
+            alpha_box_feet (float): Alpha (opacity) value of the color of the boxes.
 
         Returns:
-            Modified Mujoco spec.
+            MjSpec: Modified Mujoco specification.
+
         """
 
         # find foot and attach box
@@ -251,13 +291,17 @@ class BaseSkeleton(LocoEnv):
     @staticmethod
     def _reorient_arms(spec: MjSpec) -> MjSpec:
         """
-        Reorients the arm of a humanoid model given its Mujoco specification.
+        Reorients the arms of a humanoid model given its Mujoco specification.
+
+        This sets a fixed orientation of the upper arms and forearms and is applied when the arm joints are
+        removed.
 
         Args:
             spec (MjSpec): Mujoco specification.
 
         Returns:
-            Modified Mujoco specification.
+            MjSpec: Modified Mujoco specification.
+
         """
 
         h = [body for body in spec.bodies if body.name == "humerus_l"][0]
@@ -274,14 +318,20 @@ class BaseSkeleton(LocoEnv):
     def scale_body(self, mjspec: MjSpec,
                    use_muscles: bool) -> MjSpec:
         """
-        This function scales the kinematics and dynamics of the humanoid model given a Mujoco XML handle.
+        Scales the kinematics and dynamics of the humanoid model by the factor ``self.scaling``.
+
+        Meshes (except the head) and body positions are scaled linearly, body masses with the third power and
+        body inertias with the fifth power of the scaling factor. The gears of the torque actuators and the
+        peak isometric forces of the muscles are scaled with the second power. If muscles are used, the
+        positions of the sites are scaled as well. The specification is modified in place.
 
         Args:
-            mjspec (MjSpec): Handle to Mujoco specification.
+            mjspec (MjSpec): Mujoco specification.
             use_muscles (bool): If True, muscle actuators will be scaled, else torque actuators will be scaled.
 
         Returns:
-            Modified Mujoco XML handle.
+            MjSpec: Modified Mujoco specification.
+
         """
 
         body_scaling = self.scaling
@@ -302,8 +352,8 @@ class BaseSkeleton(LocoEnv):
             body.pos *= body_scaling
             body.mass *= body_scaling ** 3
             body.fullinertia *= body_scaling ** 5
-            assert np.array_equal(body.fullinertia[3:], np.zeros(3)), "Some of the diagonal elements of the" \
-                                                                      "inertia matrix are not zero! Scaling is" \
+            assert np.array_equal(body.fullinertia[3:], np.zeros(3)), "Some of the off-diagonal elements of the " \
+                                                                      "inertia matrix are not zero! Scaling is " \
                                                                       "not done correctly. Double-Check!"
 
         # scale actuators
@@ -313,7 +363,10 @@ class BaseSkeleton(LocoEnv):
 
             for actuator in mjspec.actuators:
                 if "mot" not in actuator.name:
-                    actuator.force *= body_scaling ** 2
+                    # peak isometric force of a muscle: third muscle parameter (the `force`
+                    # attribute in the XML), stored in both the gain and the bias parameters
+                    actuator.gainprm[2] *= body_scaling ** 2
+                    actuator.biasprm[2] *= body_scaling ** 2
                 else:
                     actuator.gear *= body_scaling ** 2
         else:
@@ -324,8 +377,19 @@ class BaseSkeleton(LocoEnv):
 
     def process_trajectory(self, traj: Trajectory) -> Trajectory:
         """
-        Processes a trajectory. If scaling != 1.0, scales qpos/qvel and re-extends
-        before delegating to the parent.
+        Processes a trajectory and loads it into the environment.
+
+        If ``scaling != 1.0``, the trajectory is first processed by the parent class, then the position and
+        the linear velocity of the free joint are multiplied by the scaling factor, the remaining trajectory
+        quantities are recomputed, and the scaled trajectory is processed again by the parent class.
+        Otherwise, the trajectory is directly processed by the parent class.
+
+        Args:
+            traj (Trajectory): The trajectory to process.
+
+        Returns:
+            Trajectory: The processed trajectory.
+
         """
         if self.scaling != 1.0:
             # first pass: filter+extend+interpolate to get correct joint indices
@@ -356,27 +420,38 @@ class BaseSkeleton(LocoEnv):
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
         Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters, proportional to the
+            scaling factor.
+
         """
         return (0.8*self.scaling, 1.1*self.scaling)
 
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body.
+        Returns the name of the upper body in the Mujoco xml.
+
+        Returns:
+            str: Name of the upper body.
+
         """
         return "torso"
 
     def _modify_spec_for_mjx(self, spec: MjSpec) -> MjSpec:
         """
-        Mjx is bad in handling many complex contacts. To speed-up simulation significantly we apply
-        some changes to the Mujoco specification:
-            1. Disable all contacts except the ones between feet and the floor.
+        Reduces the contacts of the model to speed up the simulation with Mjx.
+
+        Mjx is slow in handling many complex contacts. Therefore, all contacts are disabled except the ones
+        between the box feet and the floor.
 
         Args:
-            spec (MjSpec): Handle to Mujoco specification.
+            spec (MjSpec): Mujoco specification.
 
         Returns:
-            Mujoco specification.
+            MjSpec: Modified Mujoco specification.
+
         """
 
         # --- disable all contacts in geom ---
@@ -395,6 +470,9 @@ class BaseSkeleton(LocoEnv):
         """
         Returns the list of sites for mimic.
 
+        Returns:
+            List[str]: List of site names.
+
         """
         return ["upper_body_mimic", "head_mimic", "pelvis_mimic",
                 "left_shoulder_mimic", "left_elbow_mimic", "left_hand_mimic",
@@ -405,6 +483,10 @@ class BaseSkeleton(LocoEnv):
     @info_property
     def root_body_name(self) -> str:
         """
-        Returns the name of the root body.
+        Returns the name of the root body in the Mujoco xml.
+
+        Returns:
+            str: Name of the root body.
+
         """
         return "pelvis"

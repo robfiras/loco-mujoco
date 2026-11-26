@@ -97,13 +97,11 @@ def test_mjx_warp_backend_smoke():
     """
     Smoke test that the MjWarp backend can be initialized and stepped.
 
-    If the warp implementation is not available on this platform, the test is skipped.
+    Skipped only when MuJoCo Warp is not installed; a failing initialisation is a failure.
     """
-    try:
-        # enable MJX and request the MjWarp backend
-        env = DummyHumamoidEnv(enable_mjx=True, use_mjwarp=True, horizon=10, gamma=0.99, n_envs=1)
-    except Exception as e:
-        pytest.skip(f"MjWarp backend not available or failed to initialize: {e}")
+    pytest.importorskip("mujoco_warp")
+    # enable MJX and request the MjWarp backend
+    env = DummyHumamoidEnv(enable_mjx=True, use_mjwarp=True, horizon=10, gamma=0.99, n_envs=1)
 
     key = jax.random.PRNGKey(0)
     # reset once
@@ -113,3 +111,74 @@ def test_mjx_warp_backend_smoke():
     key, subkey = jax.random.split(key)
     action = env.sample_action_space(subkey)
     _ = env.mjx_step(state, action)
+
+
+def test_mjx_warp_reset_in_step():
+    """
+    An episode that ends under MjWarp has to restart from the same state as a fresh reset, and creating
+    the environment must not warn about the backend.
+    """
+    pytest.importorskip("mujoco_warp")
+    import dataclasses
+    import warnings
+
+    horizon = 5
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        env = DummyHumamoidEnv(enable_mjx=True, use_mjwarp=True, horizon=horizon, gamma=0.99, n_envs=1)
+
+    key = jax.random.PRNGKey(0)
+    fresh = env.mjx_reset(key)
+    step = jax.jit(env.mjx_step)
+    action = jnp.zeros(env.info.action_space.shape)
+
+    state = fresh
+    for _ in range(horizon + 1):
+        state = step(state, action)
+        if bool(state.done):
+            break
+    assert bool(state.done), "the episode should end at the horizon"
+
+    # every field outside the buffers MjWarp shares between worlds is back at its initial value
+    for field in dataclasses.fields(state.data):
+        value = getattr(state.data, field.name)
+        if field.name != "_impl" and hasattr(value, "shape"):
+            np.testing.assert_allclose(np.asarray(value), np.asarray(getattr(fresh.data, field.name)),
+                                       atol=1e-6, err_msg=field.name)
+
+    # and the next episode runs instead of ending again right away
+    state = step(state, action)
+    assert not bool(state.done)
+    assert int(state.additional_carry.cur_step_in_episode) == 2
+
+
+def test_mjx_warp_refresh_kinematics_with_warp_only_collisions(tmp_path):
+    """
+    Under MjWarp the kinematics are refreshed on a JAX copy of the model. A collision pair that only MjWarp
+    implements (cylinder-mesh) must not stop the environment from being built, and the refreshed fields must
+    still match MuJoCo's.
+    """
+    pytest.importorskip("mujoco_warp")
+    spec = mujoco.MjSpec.from_file(DummyHumamoidEnv.get_default_xml_file_path())
+    spec.add_mesh(name="tetrahedron", uservert=[0, 0, 0, 0.05, 0, 0, 0, 0.05, 0, 0, 0, 0.05])
+    # a collision bit of their own, so the two only collide with each other
+    spec.body("torso").add_geom(type=mujoco.mjtGeom.mjGEOM_MESH, meshname="tetrahedron", margin=0,
+                                contype=2, conaffinity=2)
+    spec.body("left_thigh").add_geom(type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.02, 0.05, 0], margin=0,
+                                     contype=2, conaffinity=2)
+    xml_path = tmp_path / "humanoid_cylinder_mesh.xml"
+    xml_path.write_text(spec.to_xml())
+
+    env = DummyHumamoidEnv(spec=xml_path.as_posix(), enable_mjx=True, use_mjwarp=True, refresh_kinematics=True,
+                           horizon=10, gamma=0.99, n_envs=1)
+
+    key = jax.random.PRNGKey(0)
+    state = env.mjx_reset(key)
+    state = jax.jit(env.mjx_step)(state, env.sample_action_space(key))
+
+    data = mujoco.MjData(env._model)
+    data.qpos, data.qvel = np.asarray(state.data.qpos), np.asarray(state.data.qvel)
+    mujoco.mj_forward(env._model, data)
+    for field in ("xpos", "xquat", "geom_xpos", "site_xpos", "subtree_com", "cvel"):
+        np.testing.assert_allclose(np.asarray(getattr(state.data, field)), getattr(data, field),
+                                   atol=1e-5, err_msg=field)

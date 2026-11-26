@@ -1,3 +1,7 @@
+"""
+Environment of the Booster T1 humanoid robot (CPU/MuJoCo version).
+"""
+
 from typing import Union, List, Tuple
 import mujoco
 from mujoco import MjSpec
@@ -11,14 +15,27 @@ from loco_mujoco.core.utils import info_property
 class BoosterT1(BaseRobotHumanoid):
 
     """
+    Environment of the Booster T1 humanoid robot.
 
     Description
-    ------------
-    Environment of the Booster T1 robot. The Booster T1 is a humanoid robot from Booster Robotics.
+    -----------
 
+    MuJoCo environment of the Booster T1, a humanoid robot by Booster Robotics. This class uses the CPU (MuJoCo)
+    backend; :class:`~loco_mujoco.environments.humanoids.boostert1_mjx.MjxBoosterT1` is its Mjx counterpart.
+
+    The model (``booster_t1/booster_t1.xml``) has a floating base and 23 actuated joints: two head joints, four joints
+    per arm, the waist joint and six joints per leg.
+
+    By default, the observation has 57 dimensions: the height and the orientation quaternion of the floating base (its
+    horizontal position is left out), the 23 joint positions, the 6D velocity of the floating base and the 23 joint
+    velocities. The action has 23 dimensions, one per actuated joint. Unless ``control_type`` is given, a PD
+    controller (``PDControl``) with the gains in :attr:`p_gains` and :attr:`d_gains` is used: the action is added to
+    the nominal joint positions to obtain the position targets of the controller, without scaling to the joint limits.
+    Both spaces are listed below and can be changed with the constructor arguments ``observation_spec`` and
+    ``actuation_spec``.
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ======================= ================ ==================================== ============================== ===
     Index in Obs Name                    ObservationType  Min                                  Max                            Dim
@@ -121,7 +138,7 @@ class BoosterT1(BaseRobotHumanoid):
     ============ ======================= ================ ==================================== ============================== ===
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **PDControl**
 
@@ -191,11 +208,19 @@ class BoosterT1(BaseRobotHumanoid):
         Constructor.
 
         Args:
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            observation_spec (List[Observation]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments
+            spec (Union[str, MjSpec], optional): Model of the robot, either the path to a MuJoCo XML file or an
+                ``MjSpec`` object. If None, the default XML file is used (see :meth:`get_default_xml_file_path`).
+            observation_spec (List[Observation], optional): Observations that make up the observation space, as
+                :class:`~loco_mujoco.core.observations.base.Observation` objects or as dictionaries that are parsed
+                with ``parse_observation_spec``. If None, the default observation space listed in the class docstring
+                is used.
+            actuation_spec (List[str], optional): Names of the actuators in the model that make up the action
+                space. If None, the default action space listed in the class docstring is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. The
+                keyword ``mjx_reduced_contacts`` (bool, default True) is consumed here: if False, the Mjx version of
+                this environment keeps the collision geoms of the model instead of the reduced set of contacts of
+                ``_modify_spec_for_mjx``. It has no effect on the CPU version.
+                If ``control_type`` is not given, ``PDControl`` is used with the gains of this class.
 
         """
 
@@ -221,7 +246,9 @@ class BoosterT1(BaseRobotHumanoid):
             kwargs["control_params"] = dict(p_gain=self.p_gains, d_gain=self.d_gains, scale_action_to_jnt_limits=False)
 
         # modify the specification if needed
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             spec = self._modify_spec_for_mjx(spec)
 
         super().__init__(spec=spec, actuation_spec=actuation_spec, observation_spec=observation_spec, **kwargs)
@@ -229,13 +256,17 @@ class BoosterT1(BaseRobotHumanoid):
     @staticmethod
     def _get_observation_specification(spec: MjSpec) -> List[Observation]:
         """
-        Returns the observation specification of the environment.
+        Returns the default observation specification of the environment.
+
+        The default observation consists of the height and orientation of the floating base, the joint positions,
+        the velocity of the floating base and the joint velocities.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of observations.
+            List[Observation]: The list of default observations.
+
         """
         observation_spec = [
             # ------------- JOINT POS -------------
@@ -297,13 +328,13 @@ class BoosterT1(BaseRobotHumanoid):
     @staticmethod
     def _get_action_specification(spec: MjSpec) -> List[str]:
         """
-        Getter for the action space specification.
+        Returns the default action specification of the environment.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of actuator names.
+            List[str]: The names of the actuators that make up the default action space.
 
         """
         action_spec = ["AAHead_yaw", "Head_pitch", "Left_Shoulder_Pitch", "Left_Shoulder_Roll", "Left_Elbow_Pitch",
@@ -317,7 +348,10 @@ class BoosterT1(BaseRobotHumanoid):
     @classmethod
     def get_default_xml_file_path(cls) -> str:
         """
-        Returns the default path to the xml file of the environment.
+        Returns the default path to the XML file of the Booster T1 model.
+
+        Returns:
+            str: Path to the XML file.
 
         """
         return cls.get_model_path("booster_t1", "booster_t1.xml")
@@ -325,7 +359,10 @@ class BoosterT1(BaseRobotHumanoid):
     @info_property
     def p_gains(self) -> Union[float, List[float]]:
         """
-        Returns the proportional gains for the default PD controller.
+        Returns the proportional gain of the default PD controller.
+
+        Returns:
+            Union[float, List[float]]: The proportional gain, here one value shared by all actuators.
 
         """
         return 75.0
@@ -333,7 +370,10 @@ class BoosterT1(BaseRobotHumanoid):
     @info_property
     def d_gains(self) -> Union[float, List[float]]:
         """
-        Returns the derivative gains for the default PD controller.
+        Returns the derivative gain of the default PD controller.
+
+        Returns:
+            Union[float, List[float]]: The derivative gain, here one value shared by all actuators.
 
         """
         return 0.0
@@ -341,7 +381,10 @@ class BoosterT1(BaseRobotHumanoid):
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body in the Mujoco xml.
+        Returns the name of the upper body in the XML file. For this robot, it is the root body.
+
+        Returns:
+            str: Name of the upper body.
 
         """
         return self.root_body_name
@@ -349,7 +392,10 @@ class BoosterT1(BaseRobotHumanoid):
     @info_property
     def root_body_name(self) -> str:
         """
-        Returns the name of the root body in the Mujoco xml.
+        Returns the name of the root body in the XML file.
+
+        Returns:
+            str: Name of the root body.
 
         """
         return "Trunk"
@@ -357,7 +403,10 @@ class BoosterT1(BaseRobotHumanoid):
     @info_property
     def root_free_joint_xml_name(self) -> str:
         """
-        Returns the name of the free joint of the root body in the Mujoco xml.
+        Returns the name of the free joint of the root in the XML file.
+
+        Returns:
+            str: Name of the free joint.
 
         """
         return "root"
@@ -365,7 +414,12 @@ class BoosterT1(BaseRobotHumanoid):
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
-        Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+        Returns the range of root heights in which the robot is considered healthy.
+
+        This is only used when the ``HeightBasedTerminalStateHandler`` is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
 
         """
         return (0.3, 1.0)

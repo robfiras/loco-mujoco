@@ -1,0 +1,85 @@
+cff-version: 1.2.0
+message: >-
+  If you use LocoMuJoCo in your research, please cite the paper given under
+  "preferred-citation", which describes the current version, and the original
+  paper on version 0.1.0, given under "references".
+type: software
+title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Whole-Body Control"
+abstract: >-
+  LocoMuJoCo is a library for imitation and reinforcement learning on whole-body
+  control. It runs the same environments on MuJoCo (CPU), MJX and MuJoCo Warp
+  (GPU), and provides humanoid robots, quadrupeds and (musculo-)skeletal human
+  models with retargeted motion capture data, a human-to-robot and
+  robot-to-robot retargeting pipeline, JAX implementations of learning
+  algorithms, and trajectory-similarity metrics.
+version: 1.2.1
+date-released: "2026-11-23"
+license: MIT
+repository-code: "https://github.com/robfiras/loco-mujoco"
+url: "https://loco-mujoco.readthedocs.io"
+keywords:
+  - imitation learning
+  - reinforcement learning
+  - whole-body control
+  - humanoid robots
+  - benchmark
+authors:
+  - family-names: Al-Hafez
+    given-names: Firas
+    affiliation: Technische Universität Darmstadt
+  - family-names: Tateo
+    given-names: Davide
+    affiliation: Technische Universität Darmstadt
+  - family-names: Kaidanov
+    given-names: Oleg
+    affiliation: German Research Center for Artificial Intelligence (DFKI)
+  - family-names: Bhatt
+    given-names: Aditya
+    affiliation: German Research Center for Artificial Intelligence (DFKI)
+  - family-names: Zelik
+    given-names: Artur
+    affiliation: German Research Center for Artificial Intelligence (DFKI)
+  - family-names: Luo
+    given-names: Zhengyi
+    affiliation: Carnegie Mellon University
+  - family-names: Peters
+    given-names: Jan
+    affiliation: >-
+      German Research Center for Artificial Intelligence (DFKI); Centre for
+      Cognitive Science, Hessian.AI; Technische Universität Darmstadt
+preferred-citation:
+  type: article
+  title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Whole-Body Control"
+  authors:
+    - family-names: Al-Hafez
+      given-names: Firas
+    - family-names: Tateo
+      given-names: Davide
+    - family-names: Kaidanov
+      given-names: Oleg
+    - family-names: Bhatt
+      given-names: Aditya
+    - family-names: Zelik
+      given-names: Artur
+    - family-names: Luo
+      given-names: Zhengyi
+    - family-names: Peters
+      given-names: Jan
+  journal: "arXiv preprint arXiv:2611.26293"
+  year: 2026
+  url: "https://arxiv.org/abs/2611.26293"
+references:
+  - type: conference-paper
+    title: "LocoMuJoCo: A Comprehensive Imitation Learning Benchmark for Locomotion"
+    authors:
+      - family-names: Al-Hafez
+        given-names: Firas
+      - family-names: Zhao
+        given-names: Guoping
+      - family-names: Peters
+        given-names: Jan
+      - family-names: Tateo
+        given-names: Davide
+    collection-title: "6th Robot Learning Workshop, NeurIPS"
+    year: 2023
+    url: "https://arxiv.org/abs/2311.02496"

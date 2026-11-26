@@ -1,7 +1,8 @@
-include requirements.txt
 include setup.py
 prune tests*
 prune .github*
 prune examples*
-# Models live in robfiras/loco-mujoco-models; downloaded at runtime if missing
+# Models live in robfiras/loco-mujoco-models; downloaded on first use (loco_mujoco/core/utils/models.py)
 prune loco_mujoco/models
+# bytecode caches of a working copy
+global-exclude __pycache__ *.py[cod]

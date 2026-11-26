@@ -41,6 +41,18 @@ def test_make_rejects_unregistered_env():
         ImitationFactory.make("DefinitelyNotARegisteredEnv")
 
 
+def test_make_without_dataset_conf_explains_what_is_missing():
+    with pytest.raises(ValueError, match="at least one dataset configuration"):
+        ImitationFactory.make("UnitreeH1")
+
+
+def test_default_dataset_conf_only_offers_mocap():
+    from loco_mujoco.task_factories.dataset_confs import DefaultDatasetConf
+    assert DefaultDatasetConf(task="walk").dataset_type == "mocap"
+    with pytest.raises(ValueError, match="Only 'mocap'"):
+        DefaultDatasetConf(task="walk", dataset_type="pretrained")
+
+
 def test_get_amass_traj_unknown_group():
     env = _dummy_env()
     conf = AMASSDatasetConf(dataset_group="BOGUS_GROUP")

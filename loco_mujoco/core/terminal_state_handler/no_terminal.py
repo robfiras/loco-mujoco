@@ -1,3 +1,5 @@
+"""Terminal state handler that never terminates an episode."""
+
 from typing import Dict, Any, Union, Tuple
 from types import ModuleType
 
@@ -43,6 +45,7 @@ class NoTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -67,6 +70,7 @@ class NoTerminalStateHandler(TerminalStateHandler):
             info (Dict[str, Any]): The info dictionary.
             data (MjData): The Mujoco data structure.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -90,9 +94,29 @@ class NoTerminalStateHandler(TerminalStateHandler):
             info (Dict[str, Any]): The info dictionary.
             data (Data): The Mujoco data structure for Mjx.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
         return False, carry
+
+    def mjx_absorbing_prob(self, env: Any, obs: jnp.ndarray, info: Dict[str, Any], data: Data, carry: Any,
+                           traj=None) -> jnp.ndarray:
+        """
+        Always 0: there are no terminal states.
+
+        Args:
+            env (Any): The environment instance.
+            obs (jnp.ndarray): Observation of the environment.
+            info (Dict[str, Any]): The info dictionary.
+            data (Data): The Mujoco data structure for Mjx.
+            carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            jnp.ndarray: Probability in [0, 1] that the current state is terminal.
+
+        """
+        return jnp.array(0.0)

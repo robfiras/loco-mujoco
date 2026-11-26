@@ -1,3 +1,11 @@
+"""
+Base class of all LocoMuJoCo environments.
+
+:class:`LocoEnv` extends the simulation classes in :mod:`loco_mujoco.core` with everything related to reference
+trajectories: loading and processing a trajectory, tracking the position within it during an episode, replaying
+it, and converting it to a dataset of transitions.
+"""
+
 from typing import List, Tuple, Dict, Any, Union
 from types import ModuleType
 
@@ -19,7 +27,7 @@ from loco_mujoco.core.stateful_object import EmptyState
 from loco_mujoco.core.observations import Observation
 from loco_mujoco.core.mujoco_mjx import Mjx, MjxAdditionalCarry, MjxState
 from loco_mujoco.core.visuals import VideoRecorder
-from loco_mujoco.core.trajectory import TrajectoryHandler
+from loco_mujoco.core.trajectory import TrajectoryHandler, FixedStartTrajectoryHandler
 from loco_mujoco.core.utils import info_property
 from loco_mujoco.core.utils.mujoco import mj_jntname2qposid
 from loco_mujoco.core.trajectory import Trajectory, TrajState, TrajectoryTransitions
@@ -28,20 +36,42 @@ from loco_mujoco.core.trajectory import Trajectory, TrajState, TrajectoryTransit
 @struct.dataclass
 class LocoCarry(MjxAdditionalCarry):
     """
-    Additional carry for the LocoEnv.
+    Additional carry of :class:`LocoEnv`.
 
-    Args:
-        traj_state (TrajState): Trajectory state.
+    Extends :class:`~loco_mujoco.core.mujoco_mjx.MjxAdditionalCarry` by the state of the trajectory handler.
+
+    Attributes:
+        traj_state (TrajState): State of the trajectory handler (current trajectory and step within it), or an
+            empty state if the environment has no trajectory handler.
+
     """
     traj_state: TrajState
 
 
 class LocoEnv(Mjx):
     """
-    Base class for all kinds of environments.
+    Base class of all LocoMuJoCo environments.
 
-    Args:
+    The class adds reference trajectories to the simulation: a trajectory can be loaded with
+    :meth:`process_trajectory`, which also creates the trajectory handler ``th`` that selects the trajectory and the
+    starting point of an episode and advances the trajectory state stored in the carry (:class:`LocoCarry`) at every
+    step. On top of that, a loaded trajectory can be replayed (:meth:`play_trajectory`) and converted to a dataset of
+    transitions (:meth:`create_dataset`). Episodes end when the end of the trajectory is reached, if the goal or the
+    reward depends on the trajectory.
+
+    Every environment exists for both simulation backends. A robot class deriving from this class (e.g.
+    ``UnitreeH1``) runs on the CPU with MuJoCo; its counterpart with the prefix ``Mjx`` sets ``mjx_enabled = True``
+    and additionally provides the functional, JAX-based interface of :class:`~loco_mujoco.core.mujoco_mjx.Mjx`.
+    Subclasses provide the model through the observation and action specification and describe the robot through
+    info properties such as :attr:`root_body_name` or :attr:`root_height_healthy_range`.
+
+    Environments are usually not constructed directly, but through
+    :class:`~loco_mujoco.task_factories.imitation_factory.ImitationFactory` or
+    :class:`~loco_mujoco.task_factories.rl_factory.RLFactory`.
+
+    Attributes:
         mjx_enabled (bool): If True, the environment is enabled for the MJX backend.
+        th (TrajectoryHandler): The trajectory handler, or ``None`` as long as no trajectory has been loaded.
 
     """
 
@@ -53,16 +83,36 @@ class LocoEnv(Mjx):
                  default_camera_mode: str = "follow",
                  th_params: Dict = None,
                  traj_params: Dict = None,
+                 recenter_root_xy: Union[bool, None] = None,
                  **core_params):
         """
         Constructor.
 
         Args:
-            th_params (Dict): Dictionary of parameters for the trajectory handler.
-            traj_params (Dict): Dictionary of parameters to load trajectories.
-            core_params (Dict): Dictionary of other core parameters.
+            n_substeps (int): Number of simulation steps per environment (control) step.
+            timestep (float): Simulation time step in seconds. The control time step is ``n_substeps * timestep``.
+            default_camera_mode (str): Camera mode the viewer starts with.
+            th_params (Dict): Parameters for the trajectory handler: ``name``, a registered TrajectoryHandler
+                (default "RandomStartTrajectoryHandler"), and the keyword arguments of that class.
+            traj_params (Dict): Dictionary of parameters to load a trajectory at construction: either ``traj``
+                (a :class:`~loco_mujoco.core.trajectory.dataclasses.Trajectory`) or ``traj_path`` (path to a saved
+                trajectory, which takes precedence).
+            recenter_root_xy (Union[bool, None]): If True, episodes start at the origin in xy (or at the env's
+                origin on terrains that place envs). If False, they start at the xy of the
+                trajectory, so that the robot and the trajectory share a world frame. None (default): False on
+                terrains built around the dataset's clips (``trajectories_in_world_frame``, e.g. HeightmapTerrain),
+                True otherwise.
+            **core_params: Other parameters passed to the constructor of the simulation base class
+                (:class:`~loco_mujoco.core.mujoco_mjx.Mjx` if ``mjx_enabled``, otherwise
+                :class:`~loco_mujoco.core.mujoco_base.Mujoco`).
+
+        Raises:
+            ValueError: If ``recenter_root_xy`` contradicts the way the terrain places the robot.
 
         """
+
+        # resolved against the terrain once it exists (see _resolve_recenter_root_xy)
+        self._recenter_root_xy = True if recenter_root_xy is None else recenter_root_xy
 
         if "geom_group_visualization_on_startup" not in core_params.keys():
             core_params["geom_group_visualization_on_startup"] = [0, 2]   # enable robot geom [0] and floor visual [2]
@@ -79,6 +129,8 @@ class LocoEnv(Mjx):
             # call grandparent constructor (Mujoco (CPU) environment)
             super(Mjx, self).__init__(**core_params)
 
+        self._recenter_root_xy = self._resolve_recenter_root_xy(recenter_root_xy)
+
         # dataset dummy
         self._dataset = None
 
@@ -94,17 +146,73 @@ class LocoEnv(Mjx):
             if traj is not None:
                 self.process_trajectory(traj)
 
+    def _resolve_recenter_root_xy(self, recenter_root_xy: Union[bool, None]) -> bool:
+        """
+        Whether episodes are recentered in xy, given the constructor argument and the terrain.
+
+        Args:
+            recenter_root_xy (Union[bool, None]): The constructor argument.
+
+        Returns:
+            bool: True if trajectories are moved to the origin (plus the env's terrain origin) on reset.
+
+        Raises:
+            ValueError: If the argument contradicts the terrain's placement of the robot.
+        """
+        terrain = self._terrain
+        if recenter_root_xy is None:
+            return not terrain.trajectories_in_world_frame
+        if recenter_root_xy and terrain.trajectories_in_world_frame:
+            raise ValueError(f"{terrain.get_name()} is built around the dataset's clips, so episodes have to start "
+                             f"where their clip is: use recenter_root_xy=False (or leave it at None).")
+        if not recenter_root_xy and terrain.has_env_origins:
+            raise ValueError(f"{terrain.get_name()} places every env at its own origin, which needs recentered "
+                             f"trajectories: use recenter_root_xy=True (or leave it at None).")
+        return recenter_root_xy
+
+    def get_traj_offset_xy(self, carry: Any, backend: ModuleType, traj: Trajectory = None):
+        """
+        Get the offset from the current trajectory's xy to the world xy of the env.
+
+        The reference root is at ``trajectory xy + offset`` in the world. The offset is the env's terrain origin minus
+        the trajectory's start when episodes are recentered, and zero otherwise.
+
+        Args:
+            carry (Any): Carry instance with the trajectory state.
+            backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory): Trajectory to use. Defaults to the env's trajectory.
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: The xy offset, shape ``(2,)``.
+
+        """
+        if not self._recenter_root_xy:
+            return backend.zeros(2)
+        traj_data = (traj if traj is not None else self._traj).data
+        traj_state = carry.traj_state
+        qpos_init = traj_data.get_qpos(traj_state.traj_no, traj_state.subtraj_step_no_init, backend)
+        root_xy = np.array(mj_jntname2qposid(self.root_free_joint_xml_name, self._model))[:2]
+        return self._terrain.get_env_origin_xy(carry, backend) - qpos_init[root_xy]
+
     def process_trajectory(self, traj: Trajectory) -> Trajectory:
         """
-        Processes a trajectory: filter+extend to match model, interpolate if needed,
-        create/validate TrajectoryHandler, store as self._traj, and initialise all
-        trajectory-dependent components (observations, goal, reward, terminal state handler).
+        Process a trajectory and load it into the environment.
+
+        The trajectory is filtered and extended to match the model of the environment and interpolated to the control
+        frequency of the environment if needed. On the first call, the trajectory handler is created from the
+        ``th_params`` given at construction; on later calls, the new trajectory has to have the same structure (joints,
+        bodies, sites) as the one the handler was created with. The trajectory data is padded to the fixed shapes of the
+        handler, so that trajectories can be swapped without recompilation, and stored in the environment.
 
         Args:
             traj (Trajectory): The trajectory to process.
 
         Returns:
-            Trajectory: The processed trajectory.
+            Trajectory: The processed (and padded) trajectory.
+
+        Raises:
+            ValueError: If the trajectory handler named in ``th_params`` is not registered.
+
         """
         from loco_mujoco.core.trajectory import interpolate_trajectories
 
@@ -119,20 +227,17 @@ class LocoEnv(Mjx):
         processed_traj = traj.replace(data=traj_data, info=traj_info)
 
         # create or validate TrajectoryHandler using _th_params
-        th_params = self._th_params if self._th_params is not None else {}
-        random_start = th_params.get("random_start", True)
-        fixed_start_conf = th_params.get("fixed_start_conf", None)
-        max_n_samples = th_params.get("max_n_samples", 100_000)
-        max_n_trajs = th_params.get("max_n_trajs", 100)
-        if fixed_start_conf is not None:
-            random_start = False
+        th_params = _resolve_legacy_th_params(dict(self._th_params) if self._th_params is not None else {})
+        th_name = th_params.pop("name", "RandomStartTrajectoryHandler")
 
         if self.th is None:
-            self.th = TrajectoryHandler(traj_info, control_dt=self.dt,
-                                        random_start=(fixed_start_conf is None and random_start),
-                                        fixed_start_conf=fixed_start_conf,
-                                        max_n_samples=max_n_samples,
-                                        max_n_trajs=max_n_trajs)
+            if th_name not in TrajectoryHandler.registered:
+                raise ValueError(
+                    f"Unknown TrajectoryHandler '{th_name}'. "
+                    f"Registered: {TrajectoryHandler.list_registered()}"
+                )
+            th_cls = TrajectoryHandler.registered[th_name]
+            self.th = th_cls(traj_info, control_dt=self.dt, **th_params)
         else:
             assert self.th.traj_info == traj_info, (
                 "New trajectory has incompatible structure with existing trajectory handler. "
@@ -229,16 +334,16 @@ class LocoEnv(Mjx):
                               carry: LocoCarry,
                               traj=None) -> Tuple[MjData, LocoCarry]:
         """
-        Allows to access and modify the model, data and carry to be modified after the main simulation step.
+        Update the data and the carry after the main simulation step, including the trajectory state.
 
         Args:
             model (MjModel): Mujoco model.
             data (MjData): Mujoco data structure.
-            carry (AdditionalCarry): Additional carry information.
+            carry (LocoCarry): Additional carry information.
             traj: Trajectory to use (optional).
 
         Returns:
-            The updated model, data and carry.
+            Tuple[MjData, LocoCarry]: The updated data and carry.
 
         """
         # call parent to update domain randomization and terrain
@@ -283,32 +388,35 @@ class LocoEnv(Mjx):
 
     def create_dataset(self, rng_key=None) -> TrajectoryTransitions:
         """
-        Generates a dataset from the specified trajectories without including actions.
+        Generate a dataset of transitions from the loaded trajectories, without actions.
+
+        The result is cached in the trajectory, so the dataset is only built on the first call.
 
         Notes:
-        - Observations are created by following steps similar to the `reset()` and `step()` methods.
-        - TrajectoryData is used instead of MjData to reduce memory usage. Forward dynamics are applied
-          to compute additional entities.
-        - Since TrajectoryData only contains very few kinematic properties (to save memory), Mujoco's
-          forward dynamics are used to calculate other entities.
-        - Kinematic entities derived from mocap data are generally reliable, while dynamics-related
-          properties may be less accurate.
-        - Observations based on kinematic entities are recommended to ensure realistic datasets.
+
+        - Observations are created by following steps similar to the ``reset()`` and ``step()`` methods.
+        - The trajectory only contains a few kinematic quantities (to save memory), so Mujoco's forward kinematics and
+          dynamics are used to compute all other quantities.
+        - Kinematic quantities derived from mocap data are generally reliable, while dynamics-related
+          quantities may be less accurate. Observations based on kinematic quantities are therefore recommended.
         - The dataset is built iteratively to compute stateful observations consistently with the
-          `reset()` and `step()` methods.
+          ``reset()`` and ``step()`` methods.
 
         Args:
-            rng_key (jax.random.PRNGKey, optional): A random key for reproducibility. Defaults to None.
+            rng_key (jax.random.PRNGKey, optional): A random key for reproducibility. Defaults to ``jax.random.key(0)``.
 
         Returns:
-        TrajectoryTransitions: A dataclass containing the following fields:
-            - observations (array): An array of shape (N_traj x (N_samples_per_traj-1), dim_state).
-            - next_observations (array): An array of shape (N_traj x (N_samples_per_traj-1), dim_state).
-            - absorbing (array): A flag array of shape (N_traj x (N_samples_per_traj-1)), indicating absorbing states.
-            - For non-mocap datasets, actions may also be included.
+            TrajectoryTransitions: A dataclass with ``N`` transitions, where ``N`` is the sum of ``len - 1`` over all
+            trajectories, containing the fields:
+
+            - ``observations``: array of shape ``(N, obs_dim)``.
+            - ``next_observations``: array of shape ``(N, obs_dim)``.
+            - ``absorbings``: array of shape ``(N,)``, all zero, since trajectories are assumed to contain no
+              absorbing states.
+            - ``dones``: array of shape ``(N,)``, one for the last transition of each trajectory.
 
         Raises:
-        ValueError: If no trajectory is provided to the environment.
+            ValueError: If no trajectory is provided to the environment.
 
         """
 
@@ -321,7 +429,7 @@ class LocoEnv(Mjx):
                 data = deepcopy(self._traj.data)
                 data = data.to_numpy()
                 tmp_traj = Trajectory(info=info, data=data)
-                tmp_th = TrajectoryHandler(info, control_dt=self.dt, random_start=False, fixed_start_conf=(0, 0))
+                tmp_th = FixedStartTrajectoryHandler(info, control_dt=self.dt, start_conf=(0, 0))
 
                 # set trajectory handler and store old ones for later
                 orig_th = self.th
@@ -343,7 +451,7 @@ class LocoEnv(Mjx):
                 for i in tqdm(range(self.th.n_trajectories(self._traj.data)), desc="Creating Transition Dataset"):
 
                     # set configuration to the first state of the current trajectory
-                    self.th.fixed_start_conf = (i, 0)
+                    self.th.start_conf = (i, 0)
 
                     # do a reset
                     key, subkey = jax.random.split(rng_key)
@@ -426,18 +534,21 @@ class LocoEnv(Mjx):
                         usd: bool = False,
                         usd_params: Dict = None) -> None:
         """
-        Plays a demo of the loaded trajectory by forcing the model
+        Play a demo of the loaded trajectory by forcing the model
         positions to the ones in the trajectories at every step.
 
         Args:
-            n_episodes (int): Number of episode to replay.
-            n_steps_per_episode (int): Number of steps to replay per episode.
+            n_episodes (int): Number of episodes to replay. If None, the replay runs until it is interrupted.
+            n_steps_per_episode (int): Number of steps to replay per episode. If None, each episode runs to the end
+                of its trajectory.
             from_velocity (bool): If True, the joint positions are calculated from the joint
                 velocities in the trajectory.
             render (bool): If True, trajectory will be rendered.
             record (bool): If True, the rendered trajectory will be recorded.
             recorder_params (dict): Dictionary containing the recorder parameters.
-            callback_class: Object to be called at each step of the simulation.
+            callback_class: Object to be called at each step of the simulation, in place of the default update. It is
+                called with ``(env, model, data, traj_sample, carry)`` and returns ``(model, data, carry)``; see
+                :class:`~loco_mujoco.datasets.data_generation.utils.ReplayCallback`.
             quiet (bool): If True, disable tqdm.
             key (jax.random.PRNGKey): Random key to use for the simulation.
             viser (bool): If True, the browser-based viser viewer is used instead of the
@@ -446,6 +557,9 @@ class LocoEnv(Mjx):
             usd (bool): If True, collect the trajectory into an animated USD stage instead of
                 opening an interactive viewer.
             usd_params (dict): Parameters passed to ``render_usd`` on its first frame.
+
+        Raises:
+            ValueError: If ``viser`` and ``usd``, or ``usd`` and ``record``, are enabled together.
 
         """
 
@@ -588,20 +702,19 @@ class LocoEnv(Mjx):
                                       quiet: bool = False,
                                       key: jax.random.PRNGKey = None) -> None:
         """
-        Plays a demo of the loaded trajectory by forcing the model
-        positions to the ones calculated from the joint velocities
-        in the trajectories at every step. Therefore, the joint positions
-        are set from the trajectory in the first step. Afterward, numerical
+        Play a demo of the loaded trajectory by integrating the joint velocities (deprecated).
+
+        The joint positions are set from the trajectory in the first step. Afterward, numerical
         integration is used to calculate the next joint positions using
-        the joint velocities in the trajectory.
+        the joint velocities in the trajectory. Deprecated: use :meth:`play_trajectory` with ``from_velocity=True``.
 
         Args:
-            n_episodes (int): Number of episode to replay.
+            n_episodes (int): Number of episodes to replay.
             n_steps_per_episode (int): Number of steps to replay per episode.
             render (bool): If True, trajectory will be rendered.
             record (bool): If True, the rendered trajectory will be recorded.
             recorder_params (dict): Dictionary containing the recorder parameters.
-            callback_class (class): Class to be called at each step of the simulation.
+            callback_class: Object to be called at each step of the simulation.
             quiet (bool): If True, disable tqdm.
             key (jax.random.PRNGKey): Random key to use for the simulation.
 
@@ -619,16 +732,23 @@ class LocoEnv(Mjx):
 
     def set_sim_state_from_traj_data(self, data, traj_data, carry) -> MjData:
         """
-        Sets the Mujoco datastructure to the state specified in the trajectory data.
+        Set the Mujoco data structure to the state specified in the trajectory data.
+
+        If episodes are recentered (``recenter_root_xy``), the xy position of the robot's root at the start of the
+        current trajectory segment is subtracted from the xy position of all free joints first; this changes
+        ``traj_data.qpos`` in place.
 
         Args:
             data (MjData): The Mujoco data structure.
-            traj_data: The trajectory data containing state information.
-            carry (AdditionalCarry): Additional carry information.
+            traj_data: The trajectory data of a single sample.
+            carry (LocoCarry): Additional carry information.
 
         Returns:
             MjData: The updated Mujoco data structure.
+
         """
+        if not self._recenter_root_xy:
+            return Mjx.set_sim_state_from_traj_data(data, traj_data, carry)
         robot_free_jnt_name = self.root_free_joint_xml_name
         robot_free_jnt_qpos_id_xy = np.array(mj_jntname2qposid(robot_free_jnt_name, self._model))[:2]
         all_free_jnt_qpos_id_xy = self.free_jnt_qpos_id[:, :2].reshape(-1)
@@ -641,17 +761,23 @@ class LocoEnv(Mjx):
 
     def mjx_set_sim_state_from_traj_data(self, data, traj_data, carry, traj=None) -> Data:
         """
-        Sets the simulation state from the trajectory data.
+        Set the MJX data structure to the state specified in the trajectory data.
+
+        If episodes are recentered (``recenter_root_xy``), the xy position of the robot's root at the start of the
+        current trajectory segment is subtracted from the xy position of all free joints first.
 
         Args:
             data (Data): Current Mujoco data.
-            traj_data (TrajectoryData): Data from the trajectory.
+            traj_data (TrajectoryData): The trajectory data of a single sample.
             carry (MjxAdditionalCarry): Additional carry information.
-            traj (Trajectory, optional): Full trajectory for initial state lookup. Falls back to self._traj.
+            traj (Trajectory, optional): Full trajectory for initial state lookup. Falls back to the env's trajectory.
 
         Returns:
             Data: Updated Mujoco data.
+
         """
+        if not self._recenter_root_xy:
+            return Mjx.mjx_set_sim_state_from_traj_data(data, traj_data, carry)
         if traj is None:
             traj = self._traj
         robot_free_jnt_name = self.root_free_joint_xml_name
@@ -672,7 +798,7 @@ class LocoEnv(Mjx):
                                backend: ModuleType,
                                traj=None) -> LocoCarry:
         """
-        Initializes the additional carry structure.
+        Initialize the additional carry structure, including the trajectory state.
 
         Args:
             key (jax.Array): Random key for JAX operations.
@@ -682,7 +808,8 @@ class LocoEnv(Mjx):
             traj: Trajectory to use (optional).
 
         Returns:
-            AdditionalCarry: The initialized additional carry structure.
+            LocoCarry: The initialized additional carry structure.
+
         """
 
         carry = super()._init_additional_carry(key, model, data, backend, traj)
@@ -705,16 +832,16 @@ class LocoEnv(Mjx):
                      carry: LocoCarry,
                      traj=None) -> Tuple[MjData, LocoCarry]:
         """
-        Resets the additional carry. Also allows modification to the MjData.
+        Reset the additional carry, including the trajectory state. Also allows modification to the MjData.
 
         Args:
             model (MjModel): Mujoco model.
             data (MjData): Mujoco data structure.
-            carry (AdditionalCarry): Additional carry information.
+            carry (LocoCarry): Additional carry information.
             traj: Trajectory to use (optional).
 
         Returns:
-            The updated carry and data.
+            Tuple[MjData, LocoCarry]: The updated data and carry.
 
         """
 
@@ -757,15 +884,14 @@ class LocoEnv(Mjx):
 
     def _get_from_obs(self, obs: Union[np.ndarray, jnp.ndarray], obs_name: str) -> Union[np.ndarray, jnp.ndarray]:
         """
-        Returns a part of the observation based on the specified keys.
+        Return the part of an observation that belongs to one named observation.
 
         Args:
             obs (Union[np.ndarray, jnp.ndarray]): Observation array.
-            key str: Key which are used to extract entries from the observation.
+            obs_name (str): Name of the observation in the observation container.
 
         Returns:
-            np or jnp array including the parts of the original observation whose
-            keys were specified.
+            Union[np.ndarray, jnp.ndarray]: The entries of ``obs`` that belong to ``obs_name``.
 
         """
 
@@ -792,19 +918,24 @@ class LocoEnv(Mjx):
                  clip_trajectory_to_joint_ranges: bool = False,
                  **kwargs) -> Any:
         """
-        Returns an environment corresponding to the specified task.
+        Create an environment of this class for the specified task (deprecated).
+
+        Deprecated: use :class:`~loco_mujoco.task_factories.imitation_factory.ImitationFactory` or
+        :class:`~loco_mujoco.task_factories.rl_factory.RLFactory` instead.
 
         Args:
-            task (str): Main task to solve.
-            dataset_type (str): "mocap" or "pretrained". "real" uses real motion capture data as the
-            reference trajectory. This data does not perfectly match the kinematics
-            and dynamics of this environment, hence it is more challenging. "perfect" uses
-            a perfect dataset.
-            debug (bool): If True, the smaller test datasets are used for debugging purposes.
-            clip_trajectory_to_joint_ranges (bool): If True, trajectory is clipped to joint ranges.
+            task (str): Task of the default dataset to load (e.g. ``"walk"``). If None, a plain RL environment
+                without trajectory is created.
+            dataset_type (str): Only "mocap" is available: motion capture data retargeted to the
+                robot. This data does not perfectly match the kinematics and dynamics of the
+                environment.
+            debug (bool): Passed to :class:`~loco_mujoco.task_factories.dataset_confs.DefaultDatasetConf`.
+            clip_trajectory_to_joint_ranges (bool): Not used.
+            **kwargs: Passed to the task factory and from there to the constructor of the environment.
 
         Returns:
-            An environment of specified class and task.
+            Tuple[LocoEnv, Trajectory]: The return value of the task factory: the environment and its processed
+            trajectory (``None`` if ``task`` is None).
 
         """
 
@@ -828,15 +959,22 @@ class LocoEnv(Mjx):
     @classmethod
     def get_default_xml_file_path(cls) -> str:
         """
-        Returns the default path to the xml file of the environment.
+        Return the default path to the xml file of the environment.
+
+        Returns:
+            str: Path to the xml file. Has to be implemented by the subclass.
+
         """
         raise NotImplementedError(f"Please implement the default_xml_file_path property "
-                                  f"in the {type(cls).__name__} environment.")
+                                  f"in the {cls.__name__} environment.")
 
     @info_property
     def root_body_name(self) -> str:
         """
-        Returns the name of the root body.
+        Return the name of the root body.
+
+        Returns:
+            str: Name of the root body in the Mujoco model. Has to be implemented by the subclass.
 
         """
         raise NotImplementedError(f"Please implement the root_body_name "
@@ -845,7 +983,10 @@ class LocoEnv(Mjx):
     @info_property
     def root_free_joint_xml_name(self) -> str:
         """
-        Returns the name of the root free joint.
+        Return the name of the root free joint.
+
+        Returns:
+            str: Name of the free joint of the root in the Mujoco model, ``"root"`` by default.
 
         """
         return "root"
@@ -853,7 +994,10 @@ class LocoEnv(Mjx):
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body.
+        Return the name of the upper body.
+
+        Returns:
+            str: Name of the upper body in the Mujoco model. Has to be implemented by the subclass.
 
         """
         raise NotImplementedError(f"Please implement the upper_body_xml_name property "
@@ -862,7 +1006,11 @@ class LocoEnv(Mjx):
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
-        Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+        Return the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+
+        Returns:
+            Tuple[float, float]: Lower and upper bound of the root height in meters. Has to be implemented by the
+            subclass.
 
         """
         raise NotImplementedError(f"Please implement the root_height_healthy_range property "
@@ -871,7 +1019,10 @@ class LocoEnv(Mjx):
     @info_property
     def foot_geom_names(self) -> List[str]:
         """
-        Returns the names of the foot geometries.
+        Return the names of the foot geometries.
+
+        Returns:
+            List[str]: Names of the foot geoms in the Mujoco model; empty by default.
 
         """
         # todo: raise NotImplementedError, once added to all envs
@@ -880,7 +1031,10 @@ class LocoEnv(Mjx):
     @info_property
     def goal_visualization_arrow_offset(self) -> List[float]:
         """
-        Returns the offset of the goal visualization arrow. Needs to be a 3D vector for the x, y, z offset.
+        Return the offset of the goal visualization arrow.
+
+        Returns:
+            List[float]: The x, y and z offset; zero by default.
 
         """
         return [0.0, 0.0, 0.0]
@@ -920,7 +1074,7 @@ class LocoEnv(Mjx):
         List registered loco_mujoco environments.
 
         Returns:
-             The list of the registered loco_mujoco environments.
+            List[str]: The names of the registered loco_mujoco environments.
 
         """
         return list(LocoEnv.registered_envs.keys())
@@ -931,7 +1085,9 @@ class LocoEnv(Mjx):
                           actuators_to_remove: List[str],
                           equ_constraints_to_remove: List[str]):
         """
-        Deletes certain joints, motors and equality constraints from a Mujoco specification.
+        Delete certain joints, motors and equality constraints from a Mujoco specification.
+
+        Names that do not exist in the specification are ignored.
 
         Args:
             spec (MjSpec): Mujoco specification.
@@ -940,7 +1096,7 @@ class LocoEnv(Mjx):
             equ_constraints_to_remove (List[str]): List of equality constraint names to remove.
 
         Returns:
-            Modified Mujoco specification.
+            MjSpec: Modified Mujoco specification.
 
         """
 
@@ -956,3 +1112,32 @@ class LocoEnv(Mjx):
                 spec.delete(equality)
 
         return spec
+
+
+def _resolve_legacy_th_params(th_params: Dict) -> Dict:
+    """
+    Map the trajectory handler parameters of earlier versions (``random_start``, ``fixed_start_conf``) to the
+    handler classes, with a DeprecationWarning.
+
+    Args:
+        th_params (Dict): The ``th_params`` given to the environment (a copy, changed in place).
+
+    Returns:
+        Dict: Parameters with ``name`` and the class's keyword arguments.
+    """
+    if "name" in th_params or not {"random_start", "fixed_start_conf"} & th_params.keys():
+        return th_params
+    random_start = th_params.pop("random_start", True)
+    fixed_start_conf = th_params.pop("fixed_start_conf", None)
+    if fixed_start_conf is not None:
+        th_params.update(name="FixedStartTrajectoryHandler", start_conf=fixed_start_conf)
+        new = 'name="FixedStartTrajectoryHandler", start_conf=...'
+    elif random_start:
+        th_params.update(name="RandomStartTrajectoryHandler")
+        new = 'name="RandomStartTrajectoryHandler" (the default)'
+    else:
+        raise ValueError("th_params: random_start=False needs a fixed_start_conf (use "
+                         "name=\"FixedStartTrajectoryHandler\", start_conf=...).")
+    warnings.warn(f"th_params random_start / fixed_start_conf are deprecated, use {new}.", DeprecationWarning,
+                  stacklevel=3)
+    return th_params

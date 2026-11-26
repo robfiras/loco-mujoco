@@ -195,7 +195,7 @@ def _export_robot_frames(env_name, conf, qpos, indices, output):
     env_cls = LocoEnv.registered_envs[env_name]
     env = env_cls(
         **conf.env_params,
-        th_params=dict(random_start=False, fixed_start_conf=(0, 0)),
+        th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
     )
     paths = []
     for label, index in zip(("past", "current", "future"), indices):
@@ -264,7 +264,7 @@ def _prepare_assets(args):
 
     target_env = LocoEnv.registered_envs[args.target_env](
         **target_conf.env_params,
-        th_params=dict(random_start=False, fixed_start_conf=(0, 0)),
+        th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
     )
     site_names = list(target_env.sites_for_mimic)
     mimic_indices = np.asarray([

@@ -1,22 +1,26 @@
-"""Vanilla DAgger with swappable student / teacher / trajectory.
+"""
+Vanilla DAgger distillation with a swappable student, teacher and trajectory.
 
-Rollout uses a sticky per-env mixture: each env independently picks either
-the student or the teacher with probability `teacher_beta` and commits to
-that choice for a uniformly-random number of steps in
-`[sticky_min, sticky_max]`. Whoever acts, the transition is *labeled with
-the teacher's action on that observation* — that's the DAgger trick.
+Implements teacher-student distillation with Dataset Aggregation (DAgger; Ross et al., 2011). The rollout uses
+a sticky per-environment mixture: each environment independently picks either the student or the teacher with
+probability ``teacher_beta`` and commits to that choice for a uniformly random number of steps in
+``[sticky_min, sticky_max]``. Whoever acts, the transition is *labeled with the teacher's action on that
+observation*; that is the DAgger trick.
 
-Training is supervised: minibatch from the replay buffer and minimise the
-NLL of the student Gaussian at the stored teacher action.
+Training is supervised: minibatches are drawn from the buffers and the negative log-likelihood of the stored
+teacher action under the student's Gaussian policy is minimized. Optionally the student's critic is trained
+to match the teacher's value estimate.
 
-Swap semantics (all parts of the JAX pytree):
-  - traj:           passed as arg to `train_fn(rng, agent_state, traj)`.
-  - teacher:        `agent_state.replace(teacher_params=..., teacher_run_stats=...)`.
-  - student:        `agent_state.replace(student_train_state=...)`.
-  - replay buffer:  preserved by default across chunks (this is the whole
-                    point — data collected under one teacher stays useful
-                    after a teacher/traj swap). Reset with `.replace(
-                    replay_buffer=None)` if you want a clean slate.
+Swap semantics (everything is part of the JAX pytree, so nothing has to be recompiled):
+
+- trajectory: passed as an argument to ``train_fn(rng, agent_state, traj)``.
+- teacher: ``agent_state.replace(teacher_params=..., teacher_run_stats=...)``.
+- student: ``agent_state.replace(student_train_state=...)``.
+- replay buffer: preserved across training chunks by default, so that data collected under one teacher stays
+  useful after a teacher or trajectory swap.
+
+Example: ``examples/training_examples/jax_distill``.
+
 """
 import ast
 from dataclasses import dataclass
@@ -43,13 +47,13 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 # ---------------------------------------------------------------------------
 
 def _resolve_store_next_obs(exp) -> bool:
-    """Whether the replay buffer should materialise `next_obs`.
+    """
+    Return whether the replay buffer should materialize ``next_obs``.
 
-    VanillaDagger does not use `next_obs` itself — the critic is trained
-    by distilling `V_teacher(s)`, not by TD bootstrapping. The option
-    exists so the buffer machinery stays reusable for algorithms that do
-    need it. Default is False; set `store_next_obs: true` in config to
-    opt in.
+    VanillaDagger does not use ``next_obs`` itself: the critic is trained by distilling ``V_teacher(s)``, not by
+    TD bootstrapping. The option exists so that the buffer machinery stays reusable for algorithms that do need
+    it. The default is False; set ``store_next_obs: true`` in the configuration to opt in.
+
     """
     if hasattr(exp, "store_next_obs") and exp.get("store_next_obs") is not None:
         return bool(exp.store_next_obs)
@@ -57,10 +61,12 @@ def _resolve_store_next_obs(exp) -> bool:
 
 
 def _resolve_store_value_target(exp) -> bool:
-    """Whether the buffer stores `V_teacher(s)` per transition.
+    """
+    Return whether the buffers store ``V_teacher(s)`` per transition.
 
-    Required for critic learning (value distillation). Auto-ties to
-    `use_critic_learning` unless overridden.
+    This is required for critic learning (value distillation). It follows ``use_critic_learning`` unless
+    ``store_value_target`` is set explicitly.
+
     """
     if hasattr(exp, "store_value_target") and exp.get("store_value_target") is not None:
         return bool(exp.store_value_target)
@@ -68,20 +74,26 @@ def _resolve_store_value_target(exp) -> bool:
 
 
 def _resolve_long_term_buffer_size(exp) -> int:
-    """Capacity of the reservoir-sampled long-term memory. 0 disables it.
-    Defaults to 1_000_000."""
+    """
+    Return the capacity of the reservoir-sampled long-term memory (``long_term_buffer_size``).
+
+    A capacity of 0 disables it. Defaults to 1,000,000.
+
+    """
     if hasattr(exp, "long_term_buffer_size") and exp.get("long_term_buffer_size") is not None:
         return int(exp.long_term_buffer_size)
     return 1_000_000
 
 
 def _resolve_long_term_min_include_prob(exp) -> float:
-    """Floor on the reservoir's per-item inclusion probability. 0 keeps
-    pure reservoir semantics (uniform over all history). A positive value
-    caps the effective denominator so the buffer approximates a uniform
-    sample over the last `capacity / p_min` transitions — useful in
-    non-stationary settings like DAgger where the rollout state
-    distribution drifts as the student learns. Default 0.0.
+    """
+    Return the floor on the reservoir's per-item inclusion probability (``long_term_min_include_prob``).
+
+    A value of 0 keeps pure reservoir semantics (uniform over all history). A positive value caps the effective
+    denominator, so the buffer approximates a uniform sample over the last ``capacity / p_min`` transitions. This
+    is useful in non-stationary settings like DAgger, where the state distribution of the rollouts drifts as the
+    student learns. Defaults to 0.0.
+
     """
     if hasattr(exp, "long_term_min_include_prob") and exp.get("long_term_min_include_prob") is not None:
         return float(exp.long_term_min_include_prob)
@@ -94,25 +106,62 @@ def _resolve_long_term_min_include_prob(exp) -> float:
 
 @struct.dataclass
 class DaggerSummaryMetrics(SummaryMetrics):
+    """
+    Training metrics logged by VanillaDagger once per training iteration.
+
+    Extends :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics`. The episode return and length are the means
+    over all environments of their last completed episode. The losses are means over the gradient steps of the
+    iteration and zero while no updates are performed.
+
+    Attributes:
+        mean_bc_loss (float): Negative log-likelihood of the teacher actions under the student policy (the
+            quantity that is minimized).
+        mean_mse_action (float): Diagnostic: mean squared error between the student's mean action and the teacher
+            action.
+        mean_critic_loss (float): Mean squared error between the student's and the teacher's value estimate; zero
+            if critic learning is off.
+        buffer_size (int): Number of transitions in the short-term replay buffer.
+        frac_teacher_steps (float): Fraction of environments currently controlled by the teacher.
+
+    """
     mean_bc_loss: float = 0.0       # actor NLL (what gets minimised)
     mean_mse_action: float = 0.0    # diagnostic: ||pi.mean - a_teacher||^2
-    mean_critic_loss: float = 0.0   # TD(0) MSE, 0 when critic learning is off
+    mean_critic_loss: float = 0.0   # MSE to V_teacher, 0 when critic learning is off
     buffer_size: int = 0
     frac_teacher_steps: float = 0.0
 
 
 @struct.dataclass
 class DaggerRolloutState:
-    """Per-env sticky mixture state.
+    """
+    State of the sticky student/teacher mixture, one entry per environment.
 
-    using_teacher[i]    : current env i is rolling out with the teacher.
-    steps_remaining[i]  : steps left before resampling the mixture for env i.
+    Attributes:
+        using_teacher (jax.Array): Boolean array of shape ``(num_envs,)``; True where the teacher currently
+            controls the environment.
+        steps_remaining (jax.Array): Integer array of shape ``(num_envs,)`` with the number of steps left before
+            the choice is resampled for the environment.
+
     """
     using_teacher: jnp.ndarray
     steps_remaining: jnp.ndarray
 
     @classmethod
     def create(cls, num_envs: int, rng, beta: float, h_min: int, h_max: int):
+        """
+        Sample an initial mixture state.
+
+        Args:
+            num_envs (int): Number of parallel environments.
+            rng (jax.Array): PRNG key.
+            beta (float): Probability of picking the teacher.
+            h_min (int): Minimum number of steps a choice is kept.
+            h_max (int): Maximum number of steps a choice is kept (inclusive).
+
+        Returns:
+            DaggerRolloutState: The initial mixture state.
+
+        """
         k1, k2 = jax.random.split(rng)
         using_teacher = jax.random.uniform(k1, (num_envs,)) < beta
         steps_remaining = jax.random.randint(k2, (num_envs,), h_min, h_max + 1)
@@ -125,12 +174,31 @@ class DaggerRolloutState:
 
 @dataclass(frozen=True)
 class VanillaDaggerAgentConf(AgentConfBase):
+    """
+    Static configuration of a VanillaDagger agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        student_net (ActorCritic): The network definition of the student.
+        teacher_net (ActorCritic): The network definition of the teacher.
+        student_tx: The Optax optimizer of the student.
+
+    """
     config: DictConfig
     student_net: ActorCritic
     teacher_net: ActorCritic
     student_tx: Any
 
     def serialize(self):
+        """
+        Serialize the agent configuration and the network definitions.
+
+        The optimizer is not serialized; it is rebuilt from the configuration in :meth:`from_dict`.
+
+        Returns:
+            dict: Dictionary with the keys ``"config"``, ``"student_net"`` and ``"teacher_net"``.
+
+        """
         conf_dict = OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True)
         return {
             "config": conf_dict,
@@ -140,6 +208,19 @@ class VanillaDaggerAgentConf(AgentConfBase):
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        The networks are rebuilt from the configuration, which contains the resolved observation indices, so no
+        environment is needed.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            VanillaDaggerAgentConf: The restored configuration with a newly built optimizer.
+
+        """
         config = OmegaConf.create(d["config"])
         student_tx = VanillaDaggerJax._get_optimizer(config)
         student_net = flax.serialization.from_state_dict(
@@ -154,15 +235,28 @@ class VanillaDaggerAgentConf(AgentConfBase):
 
 @struct.dataclass
 class VanillaDaggerAgentState(AgentStateBase):
-    """Dynamic agent state. All three swappable entities live here:
-    `student_train_state`, `teacher_params`/`teacher_run_stats`, and the
-    trajectory (passed separately to `_train_fn`).
+    """
+    Dynamic state of a VanillaDagger agent.
 
-    The buffer is actually two: `replay_buffer` is a short-term rolling
-    window (most recent transitions), `long_term_buffer` is a
-    reservoir-sampled long-term memory (approx. uniform over all
-    transitions ever collected). At training time we sample 50/50 from
-    each to mitigate forgetting across expert/trajectory swaps.
+    All swappable entities live here: ``student_train_state`` and ``teacher_params``/``teacher_run_stats`` (the
+    trajectory is passed separately to the training function).
+
+    There are two buffers: ``replay_buffer`` is a short-term rolling window of the most recent transitions,
+    ``long_term_buffer`` is a reservoir-sampled long-term memory (approximately uniform over all transitions ever
+    collected). At training time half of every batch is sampled from each to mitigate forgetting across
+    teacher/trajectory swaps.
+
+    Attributes:
+        student_train_state (TrainState): Parameters, optimizer state and running statistics of the student.
+        teacher_params: Parameters of the frozen teacher network.
+        teacher_run_stats: Running observation statistics of the teacher network.
+        replay_buffer (ReplayBuffer): Short-term replay buffer; created by the training function if ``None``.
+        long_term_buffer (ReservoirBuffer): Long-term reservoir; created by the training function if ``None``.
+        rollout_state (DaggerRolloutState): State of the student/teacher mixture; created by the training
+            function if ``None``.
+        env_state: Environment state at the end of the last training chunk; not saved to disk.
+        last_obs (jax.Array): Last observations of the previous training chunk; not saved to disk.
+
     """
     student_train_state: TrainState
     teacher_params: Any
@@ -174,6 +268,17 @@ class VanillaDaggerAgentState(AgentStateBase):
     last_obs: Any = None
 
     def serialize(self):
+        """
+        Serialize the agent state.
+
+        Only the student train state and the teacher parameters and running statistics are serialized; the buffers,
+        the mixture state, ``env_state`` and ``last_obs`` are dropped.
+
+        Returns:
+            dict: Dictionary with the keys ``"student_train_state"``, ``"teacher_params"`` and
+            ``"teacher_run_stats"``.
+
+        """
         return {
             "student_train_state": flax.serialization.to_state_dict(self.student_train_state),
             "teacher_params": flax.serialization.to_state_dict(self.teacher_params),
@@ -182,6 +287,20 @@ class VanillaDaggerAgentState(AgentStateBase):
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        The buffers are created empty and the mixture state is freshly sampled, at the configured shapes, so that
+        the loaded state has the same pytree structure as one produced by ``init_agent_state``.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+            agent_conf (VanillaDaggerAgentConf): Agent configuration providing the network and the optimizer.
+
+        Returns:
+            VanillaDaggerAgentState: The restored agent state; ``env_state`` and ``last_obs`` are ``None``.
+
+        """
         student_net = agent_conf.student_net
         train_state = TrainState.create(
             apply_fn=student_net.apply,
@@ -229,11 +348,26 @@ class VanillaDaggerAgentState(AgentStateBase):
 # ---------------------------------------------------------------------------
 
 class VanillaDaggerJax(JaxRLAlgorithmBase):
-    """DAgger with a frozen teacher and a trainable student, both ActorCritic.
+    """
+    DAgger distillation with a frozen teacher and a trainable student, both
+    :class:`~loco_mujoco.algorithms.common.networks.ActorCritic` networks.
 
-    See the module docstring for swap semantics. The training loop interleaves
-    one env step (per vmapped env) with `gradient_steps` BC updates, once the
-    buffer contains at least `learning_starts` transitions.
+    The training loop interleaves one environment step (per parallel environment) with ``gradient_steps``
+    behavior-cloning updates, once the buffers contain at least ``learning_starts`` transitions. See the
+    docstring of this module for the rollout mixture and the swap semantics. Usage::
+
+        agent_conf = VanillaDaggerJax.init_agent_conf(env, config)
+        agent_state = VanillaDaggerJax.init_agent_state(
+            env, agent_conf, rng,
+            teacher_params=teacher_state.train_state.params,
+            teacher_run_stats=teacher_state.train_state.run_stats)
+        train_fn = jax.jit(VanillaDaggerJax.build_train_fn(env, agent_conf))
+        out = train_fn(rng, agent_state, traj)
+
+    where ``teacher_state`` is, for example, a loaded
+    :class:`~loco_mujoco.algorithms.ppo_jax.PPOAgentState`. Complete scripts are in
+    ``examples/training_examples/jax_distill``.
+
     """
 
     _agent_conf = VanillaDaggerAgentConf
@@ -245,16 +379,23 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
 
     @classmethod
     def _build_net(cls, config: DictConfig, role: str) -> ActorCritic:
-        """Build an ActorCritic for `role` ∈ {student, teacher}.
+        """
+        Build the :class:`~loco_mujoco.algorithms.common.networks.ActorCritic` of the student or the teacher.
 
-        Reads `config.experiment.<role>.*` if present, else falls back to
-        `config.experiment.*` — so a minimal config with only shared fields
-        works out of the box.
+        Reads ``config.experiment.<role>.*`` if present and falls back to ``config.experiment.*`` otherwise, so a
+        minimal configuration with only shared fields works out of the box.
 
-        `actor_obs_ind` / `critic_obs_ind` (lists of ints) are set by
-        `init_agent_conf` after resolving `actor_obs_group` / `critic_obs_group`
-        against `env.obs_container`. They survive save/load because they
-        live on the config, so `from_dict` doesn't need env.
+        ``actor_obs_ind`` and ``critic_obs_ind`` (lists of integers) are set by :meth:`init_agent_conf` after
+        resolving ``actor_obs_group`` and ``critic_obs_group`` against the environment. They survive saving and
+        loading because they live in the configuration.
+
+        Args:
+            config (DictConfig): The full configuration.
+            role (str): ``"student"`` or ``"teacher"``.
+
+        Returns:
+            ActorCritic: The network definition.
+
         """
         exp = config.experiment
         sub = getattr(exp, role, None)
@@ -285,6 +426,17 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
 
     @classmethod
     def _get_optimizer(cls, config: DictConfig):
+        """
+        Build the optimizer of the student: gradient clipping by global norm followed by AdamW.
+
+        Args:
+            config (DictConfig): The full configuration; ``lr``, ``max_grad_norm`` (default 0.5) and
+                ``weight_decay`` (default 0.0) are read from ``config.experiment``.
+
+        Returns:
+            optax.GradientTransformation: The optimizer.
+
+        """
         exp = config.experiment
         max_grad = float(getattr(exp, "max_grad_norm", 0.5))
         lr = float(exp.lr)
@@ -300,6 +452,38 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
 
     @classmethod
     def init_agent_conf(cls, env, config: DictConfig):
+        """
+        Create the static agent configuration: derived hyperparameters, the networks and the optimizer.
+
+        The hyperparameters are read from ``config.experiment``:
+
+        - ``student``, ``teacher``: sub-configurations with ``hidden_layers``, ``activation``, ``init_std``,
+          ``learnable_std`` and optionally ``actor_obs_group`` and ``critic_obs_group``. Keys missing there are
+          looked up at the top level. The teacher settings must match the loaded teacher checkpoint.
+        - ``teacher_beta``, ``sticky_min``, ``sticky_max``: probability of acting with the teacher and the range of
+          the number of steps a choice is kept.
+        - ``use_critic_learning``, ``critic_loss_coef``: whether the student's critic is trained to match the
+          teacher's value estimate, and the weight of that loss.
+        - ``buffer_size``, ``long_term_buffer_size``, ``long_term_min_include_prob``: capacity of the short-term
+          buffer, and capacity (0 disables it) and minimum inclusion probability of the long-term reservoir.
+        - ``batch_size``, ``learning_starts``, ``gradient_steps``: minibatch size, number of stored transitions
+          before learning starts and gradient steps per environment step.
+        - ``lr``, ``max_grad_norm``, ``weight_decay``: optimizer settings of the student.
+        - ``num_envs``, ``total_timesteps``: number of parallel environments and number of environment steps per
+          call of the training function.
+
+        The keys ``obs_dim``, ``action_dim``, ``num_updates`` (``total_timesteps // num_envs``) and, if observation
+        groups are used, ``<role>.actor_obs_ind`` and ``<role>.critic_obs_ind`` are written to ``config.experiment``
+        (the configuration is modified in place).
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            VanillaDaggerAgentConf: The agent configuration.
+
+        """
         from omegaconf import open_dict, OmegaConf
         obs_dim = int(env.info.observation_space.shape[0])
 
@@ -343,11 +527,22 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
     @classmethod
     def init_agent_state(cls, env, agent_conf: VanillaDaggerAgentConf, rng,
                          teacher_params=None, teacher_run_stats=None):
-        """Initialise the agent state.
+        """
+        Initialize the agent state: the student, the teacher, empty buffers and the rollout-mixture state.
 
-        `teacher_params`/`teacher_run_stats` should be passed from a
-        pretrained checkpoint (e.g. a PPO `TrainState`). If omitted, the
-        teacher is randomly initialised — useful only as a placeholder.
+        Args:
+            env: The environment (unused; the dimensions are taken from the configuration).
+            agent_conf (VanillaDaggerAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key.
+            teacher_params: Parameters of a pretrained teacher, e.g. ``train_state.params`` of a PPO agent.
+            teacher_run_stats: Running statistics of the pretrained teacher, e.g. ``train_state.run_stats``. If
+                either of the two is omitted, the teacher is randomly initialized (with a warning), which is only
+                useful as a placeholder.
+
+        Returns:
+            VanillaDaggerAgentState: The initial agent state; ``env_state`` and ``last_obs`` are ``None`` and get
+            initialized by the training function.
+
         """
         exp = agent_conf.config.experiment
         rng, rng_s, rng_t = jax.random.split(rng, 3)
@@ -409,6 +604,20 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
 
     @staticmethod
     def _wrap_env(env, config):
+        """
+        Wrap the environment for training.
+
+        Applies a :class:`~loco_mujoco.core.wrappers.mjx.LogWrapper` and a
+        :class:`~loco_mujoco.core.wrappers.mjx.VecEnv`. Rewards are not used and hence not normalized.
+
+        Args:
+            env: The (unwrapped) environment.
+            config (DictConfig): The ``experiment`` node of the configuration (unused).
+
+        Returns:
+            The wrapped, vectorized environment.
+
+        """
         env = LogWrapper(env)
         env = VecEnv(env)
         # DAgger doesn't use reward, so no reward normalization.
@@ -424,6 +633,41 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                   agent_state: VanillaDaggerAgentState = None,
                   traj=None,
                   mh: MetricsHandler = None):
+        """
+        Run DAgger for ``num_updates`` iterations.
+
+        Each iteration steps all environments once. Per environment the acting policy is the teacher (mean action)
+        or the student (sampled action), according to the sticky mixture; the observation is stored together with
+        the teacher's mean action and, with critic learning, the teacher's value estimate in the short-term buffer
+        and in the long-term reservoir. Once the buffers hold at least ``learning_starts`` transitions each,
+        ``gradient_steps`` updates are performed on batches that are drawn half from each buffer (entirely from the
+        short-term buffer if the reservoir is disabled). The loss is the negative log-likelihood of the teacher
+        action plus, with critic learning, ``critic_loss_coef`` times the squared error to the teacher value. The
+        teacher is never updated. If ``agent_state`` carries an environment state from a previous call, training
+        continues from it.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (VanillaDaggerAgentConf): Static agent configuration.
+            agent_state (VanillaDaggerAgentState): Agent state holding the teacher; required.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Unused; use :meth:`_eval_fn` (via ``build_eval_fn``) for validation.
+
+        Returns:
+            dict: Dictionary with the keys
+
+            - ``"agent_state"`` (:class:`VanillaDaggerAgentState`): the agent state after training, including the
+              buffers, the mixture state, the last environment state and the last observation.
+            - ``"training_metrics"`` (:class:`DaggerSummaryMetrics`): metrics with a leading axis of length
+              ``num_updates``.
+            - ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`): always empty.
+
+        Raises:
+            ValueError: If ``agent_state`` is ``None``, or if critic learning is enabled but a buffer does not store
+                value targets.
+
+        """
         if agent_state is None:
             raise ValueError(
                 "VanillaDagger._train_fn requires an agent_state with teacher "
@@ -741,13 +985,27 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                  agent_state: VanillaDaggerAgentState,
                  traj=None,
                  mh: MetricsHandler = None):
-        """Deterministic student-only rollout for evaluation.
+        """
+        Run a deterministic student-only rollout for evaluation.
 
-        Resets `config.eval_num_envs` (falls back to `num_envs`) fresh envs
-        and runs the student policy with its mean action for
-        `config.eval_num_steps` steps (default 500). Returns an episode
-        summary plus the `mh` validation summary if provided. Does not
-        touch the teacher, the replay buffer, or the training state.
+        Resets ``eval_num_envs`` (default: ``num_envs``) fresh environments and runs the student policy with its
+        mean action for ``eval_num_steps`` steps (default 500). The teacher, the buffers and the training state are
+        not touched.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (VanillaDaggerAgentConf): Static agent configuration.
+            agent_state (VanillaDaggerAgentState): Agent state holding the student to evaluate.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Optional metrics handler computing the validation metrics.
+
+        Returns:
+            dict: Dictionary with the keys ``"eval_summary"``
+            (:class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics` with the mean return and length of the episodes
+            finished during the rollout) and ``"validation_metrics"``
+            (:class:`~loco_mujoco.utils.metrics.ValidationSummary`; empty if ``mh`` is ``None``).
+
         """
         exp = agent_conf.config.experiment
         student_net = agent_conf.student_net
@@ -814,10 +1072,29 @@ class VanillaDaggerJax(JaxRLAlgorithmBase):
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
                     use_teacher=False, traj=None):
-        """Roll out either the student (default) or the teacher.
+        """
+        Roll out the student (default) or the teacher in a Python loop and render it.
 
-        Set `use_teacher=True` to sanity-check the teacher; otherwise the
-        student is played.
+        By default the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU
+        MuJoCo environment instead. The environment is stopped at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (VanillaDaggerAgentConf): Agent configuration.
+            agent_state (VanillaDaggerAgentState): Agent state holding the student and the teacher.
+            n_envs (int): Number of parallel environments; must be 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Unused; the environment is rendered at every step.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action sampling. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the student applies its mean action. Has no effect with ``use_teacher``,
+                where actions are always sampled from the teacher's policy.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            use_teacher (bool): If True, the teacher is played instead of the student, e.g. as a sanity check.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
         """
         import numpy as np
 

@@ -1,4 +1,15 @@
+"""
+Trajectory handlers.
+
+A trajectory handler keeps track of which trajectory and which sample of it an environment currently follows
+(:class:`TrajState`), advances that position at every step and chooses the start of every episode. It also
+provides the preprocessing that makes a loaded trajectory match a MuJoCo model and a control frequency.
+
+"""
+
+import warnings
 from dataclasses import replace
+from typing import Dict, List, Tuple
 import mujoco
 import numpy as np
 import jax
@@ -11,60 +22,172 @@ from loco_mujoco.core.trajectory.dataclasses import Trajectory, interpolate_traj
 
 @struct.dataclass
 class TrajState:
+    """
+    Position of an environment in its trajectory data, stored in the carry as ``traj_state``.
+
+    Attributes:
+        traj_no (int): Index of the trajectory that is currently followed.
+        subtraj_step_no (int): Index of the current sample within that trajectory.
+        subtraj_step_no_init (int): Index of the sample within the trajectory at which the episode started. It is
+            set to 0 when the handler moves on to the next trajectory within an episode.
+        next_traj_no (int): If non-negative, the trajectory with which the next episode starts. Set by algorithms
+            that choose their own resets; ``-1`` lets the handler sample the start.
+        next_subtraj_step_no (int): Sample within ``next_traj_no`` at which the next episode starts. Only used
+            if ``next_traj_no`` is non-negative.
+
+    """
+
     traj_no: int
     subtraj_step_no: int
     subtraj_step_no_init: int
+    # If non-negative, the start of the next episode: set by algorithms that choose their own resets.
+    next_traj_no: int = -1
+    next_subtraj_step_no: int = -1
 
 
 class TrajectoryHandler(StatefulObject):
     """
-    General class to handle Trajectories. It stores only traj_info (not the full trajectory).
-    The full trajectory data is stored on LocoEnv as self._traj.
+    Base class of all trajectory handlers.
+
+    The handler stores only the :class:`~loco_mujoco.core.trajectory.dataclasses.TrajectoryInfo`; the trajectory
+    data itself is owned by the environment (``LocoEnv``) and passed to the methods as ``traj_data``. The position
+    in the data is kept in a :class:`TrajState` in the carry. At every step :meth:`update_state` advances it by one
+    sample, and at every reset :meth:`reset_state` sets it to the start chosen by :meth:`sample_start`, which the
+    subclasses implement.
+
+    Attributes:
+        registered (Dict[str, type]): Registry of handler classes by name.
+        control_dt (float): Control timestep of the environment in seconds.
+        max_n_samples (int): Number of samples the trajectory data is padded to.
+        max_n_trajs (int): Number of trajectories the split points are padded to.
 
     """
-    def __init__(self, traj_info, control_dt=0.01, random_start=True, fixed_start_conf=None,
-                 max_n_samples=100_000, max_n_trajs=100):
+
+    registered: Dict[str, type] = dict()
+
+    def __init__(self, traj_info, control_dt=0.01, max_n_samples=100_000, max_n_trajs=100):
         """
         Constructor.
 
         Args:
             traj_info (TrajectoryInfo): Information about the trajectory.
-            control_dt (float): Model control frequency.
-            random_start (bool): If True, the trajectory is started at a random position.
-            fixed_start_conf (tuple): If not None, the trajectory is started at the specified position.
+            control_dt (float): Control timestep of the environment in seconds.
             max_n_samples (int): Maximum number of samples for padding (for JIT shape stability).
             max_n_trajs (int): Maximum number of sub-trajectories for padding (for JIT shape stability).
 
         """
-        assert (fixed_start_conf is not None) != random_start, "Please specify either fixed_start_conf or random_start."
         self._traj_info = traj_info
-        self.random_start = random_start
-        self.fixed_start_conf = fixed_start_conf
-        self.use_fixed_start = True if fixed_start_conf is not None else False
         self.control_dt = control_dt
         self.max_n_samples = max_n_samples
         self.max_n_trajs = max_n_trajs
 
+    @classmethod
+    def get_name(cls) -> str:
+        """
+        Return the registry key of this class, which defaults to the class name.
+
+        Returns:
+            str: Name under which the class is registered.
+
+        """
+        return cls.__name__
+
+    @classmethod
+    def register(cls) -> None:
+        """Add this class to the registry of trajectory handlers under its name, unless that name is taken."""
+        name = cls.get_name()
+        if name not in TrajectoryHandler.registered:
+            TrajectoryHandler.registered[name] = cls
+
+    @staticmethod
+    def list_registered() -> List[str]:
+        """
+        Return the names of all registered trajectory handlers.
+
+        Returns:
+            List[str]: Names of the registered classes.
+
+        """
+        return list(TrajectoryHandler.registered.keys())
+
     def len_trajectory(self, traj_ind, traj_data):
+        """
+        Return the number of samples of one trajectory.
+
+        Args:
+            traj_ind (Union[int, jax.Array]): Index of the trajectory.
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Union[int, jax.Array]: Number of samples of trajectory ``traj_ind``.
+
+        """
         return traj_data.split_points[traj_ind + 1] - traj_data.split_points[traj_ind]
 
     def n_trajectories(self, traj_data):
+        """
+        Return the number of trajectories in the data, not counting padding.
+
+        Args:
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Union[int, jax.Array]: Number of trajectories.
+
+        """
         return traj_data.n_trajectories
 
     @property
     def traj_info(self):
+        """
+        Static information about the trajectories this handler was created for.
+
+        Returns:
+            TrajectoryInfo: The trajectory info.
+
+        """
         return self._traj_info
 
     @staticmethod
     def is_numpy(traj_data):
+        """
+        Check whether the trajectory data is stored in NumPy arrays.
+
+        Args:
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            bool: True if ``traj_data.qpos`` is a ``np.ndarray``.
+
+        """
         return isinstance(traj_data.qpos, np.ndarray)
 
     @staticmethod
     def to_numpy(traj_data):
+        """
+        Convert the trajectory data to NumPy arrays.
+
+        Args:
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            TrajectoryData: A new instance holding NumPy arrays.
+
+        """
         return traj_data.to_numpy()
 
     @staticmethod
     def to_jax(traj_data):
+        """
+        Convert the trajectory data to JAX arrays.
+
+        Args:
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            TrajectoryData: A new instance holding JAX arrays.
+
+        """
         return traj_data.to_jax()
 
     @staticmethod
@@ -72,14 +195,18 @@ class TrajectoryHandler(StatefulObject):
         """
         Filter, extend, and interpolate a trajectory to match the given model and control frequency.
 
+        Calls :meth:`filter_and_extend` and, if the trajectory frequency differs from ``1 / control_dt``,
+        :func:`~loco_mujoco.core.trajectory.dataclasses.interpolate_trajectories`.
+
         Args:
             traj (Trajectory): Raw trajectory to process.
-            model (mjModel): Current model.
-            control_dt (float): Desired control timestep.
-            backend: Array backend (jnp or np). Defaults to jnp.
+            model (MjModel): Current model.
+            control_dt (float): Desired control timestep in seconds.
+            backend (ModuleType): Array backend (``jax.numpy`` or ``numpy``). Defaults to ``jax.numpy``.
 
         Returns:
-            Trajectory: Processed trajectory.
+            Trajectory: Copy of ``traj`` with processed ``data`` and ``info``.
+
         """
         if backend is None:
             backend = jnp
@@ -93,21 +220,26 @@ class TrajectoryHandler(StatefulObject):
     @staticmethod
     def filter_and_extend(traj_data, traj_info, model, backend=None):
         """
-        To ensure that the data structure of the current model and the trajectory data have the same dimensionality
-        and order for all supported attributes, this function filters the elements present in the trajectory but not
-        the current model and extends the trajectory data's joints, bodies and sites with elements present in
-        the current model but not the trajectory. It is doing so by adding dummy joints, bodies and sites to the
-        trajectory data if they are not present in the trajectory data but in the model. It also reorders the
-        joints, bodies and sites based on the model.
+        Make the joints, bodies and sites of a trajectory match those of a model.
+
+        To ensure that the trajectory data and the current model have the same dimensionality and order for all
+        supported attributes, this function
+
+        - removes the joints, bodies and sites that are present in the trajectory but not in the model,
+        - adds dummy joints, bodies and sites for elements that are present in the model but not in the trajectory
+          (zero positions and velocities, identity rotations), and
+        - reorders the joints, bodies and sites to the order of the model.
+
+        Bodies and sites are only processed if the trajectory info contains body and site names, respectively.
 
         Args:
             traj_data (TrajectoryData): Trajectory data to be filtered and extended.
             traj_info (TrajectoryInfo): Trajectory info to be filtered and extended.
-            model (mjModel): Current model.
-            backend: Array backend (jnp or np). Defaults to jnp.
+            model (MjModel): Current model.
+            backend (ModuleType): Array backend (``jax.numpy`` or ``numpy``). Defaults to ``jax.numpy``.
 
         Returns:
-            TrajectoryData, TrajectoryInfo: Filtered and extended trajectory data and trajectory info.
+            Tuple[TrajectoryData, TrajectoryInfo]: Filtered and extended trajectory data and trajectory info.
 
         """
         if backend is None:
@@ -243,34 +375,44 @@ class TrajectoryHandler(StatefulObject):
         return traj_data, traj_info
 
     def init_state(self, env, key, model, data, backend, traj_model=None, traj_data=None):
+        """
+        Create the initial trajectory state, which points to the first sample of the first trajectory.
+
+        Args:
+            env (Any): The environment instance.
+            key (Any): JAX random key (unused).
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj_model (TrajectoryModel): Model of the trajectory (unused).
+            traj_data (TrajectoryData): The trajectory data (unused).
+
+        Returns:
+            TrajState: The initial trajectory state.
+
+        """
         return TrajState(0, 0, 0)
 
-    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
-
-        key = carry.key
-
-        if self.random_start:
-            if backend == jnp:
-                key, _k1, _k2 = jax.random.split(key, 3)
-                traj_idx = jax.random.randint(_k1, shape=(1,), minval=0, maxval=self.n_trajectories(traj_data))
-                subtraj_step_idx = jax.random.randint(_k2, shape=(1,), minval=0, maxval=self.len_trajectory(traj_idx, traj_data))
-                idx = [traj_idx[0], subtraj_step_idx[0]]
-            else:
-                traj_idx = np.random.randint(0, self.n_trajectories(traj_data))
-                subtraj_step_idx = np.random.randint(0, self.len_trajectory(traj_idx, traj_data))
-                idx = [traj_idx, subtraj_step_idx]
-        elif self.use_fixed_start:
-            idx = self.fixed_start_conf
-        else:
-            idx = [0, 0]
-
-        new_traj_no, new_subtraj_step_no = idx
-        new_subtraj_step_no_init = new_subtraj_step_no
-
-        return data, carry.replace(key=key, traj_state=TrajState(new_traj_no, new_subtraj_step_no,
-                                                                 new_subtraj_step_no_init))
-
     def update_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+        """
+        Advance the trajectory state by one sample.
+
+        When the end of the current trajectory is reached, the state moves on to the first sample of the next
+        trajectory, and from the last trajectory back to the first.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Additional carry; its ``traj_state`` is updated.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj_model (TrajectoryModel): Model of the trajectory (unused).
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Any: The carry with the updated ``traj_state``.
+
+        """
 
         traj_state = carry.traj_state
         traj_no = traj_state.traj_no
@@ -299,12 +441,224 @@ class TrajectoryHandler(StatefulObject):
 
         return carry.replace(traj_state=traj_state)
 
+    def reset_state(self, env, model, data, carry, backend, traj_model=None, traj_data=None):
+        """
+        Set the trajectory state to the start of a new episode.
+
+        The start is the one an algorithm chose (``next_traj_no`` / ``next_subtraj_step_no`` of the trajectory
+        state, if non-negative), otherwise the one :meth:`sample_start` draws. The choice is cleared afterwards.
+
+        Args:
+            env (Any): The environment instance.
+            model (Union[MjModel, Model]): The simulation model.
+            data (Union[MjData, Data]): The simulation data.
+            carry (Any): Additional carry; its ``key`` and ``traj_state`` are updated.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj_model (TrajectoryModel): Model of the trajectory (unused).
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Tuple[Union[MjData, Data], Any]: The unchanged simulation data and the updated carry.
+
+        """
+        key, new_traj_no, new_subtraj_step_no = self.sample_start(carry.key, backend, traj_data)
+        chosen = carry.traj_state.next_traj_no >= 0
+        new_traj_no = backend.where(chosen, carry.traj_state.next_traj_no, new_traj_no)
+        new_subtraj_step_no = backend.where(chosen, carry.traj_state.next_subtraj_step_no, new_subtraj_step_no)
+        no_choice = new_traj_no * 0 - 1
+
+        return data, carry.replace(key=key, traj_state=TrajState(new_traj_no, new_subtraj_step_no,
+                                                                 new_subtraj_step_no, no_choice, no_choice))
+
+    def sample_start(self, key, backend, traj_data) -> Tuple:
+        """
+        Draw the start of an episode. Subclasses implement their sampling policy (random, fixed, etc.).
+
+        Args:
+            key (jax.Array): The JAX random key of the carry.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Tuple: The (possibly split) key, the trajectory index and the step within that trajectory.
+
+        Raises:
+            NotImplementedError: If called on the base class.
+
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement sample_start. "
+            f"Use a concrete TrajectoryHandler subclass "
+            f"(e.g. RandomStartTrajectoryHandler, FixedStartTrajectoryHandler, "
+            f"RandomTrajFixedStepTrajectoryHandler)."
+        )
+
     def get_current_traj_data(self, traj_data, carry, backend):
+        """
+        Return the trajectory sample the environment is currently at.
+
+        Args:
+            traj_data (TrajectoryData): The trajectory data.
+            carry (Any): Additional carry holding the ``traj_state``.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+
+        Returns:
+            SingleData: The sample at ``(traj_no, subtraj_step_no)``.
+
+        """
         traj_no = carry.traj_state.traj_no
         subtraj_step_no = carry.traj_state.subtraj_step_no
         return traj_data.get(traj_no, subtraj_step_no, backend)
 
     def get_init_traj_data(self, traj_data, carry, backend):
+        """
+        Return the trajectory sample at which the current episode started.
+
+        Args:
+            traj_data (TrajectoryData): The trajectory data.
+            carry (Any): Additional carry holding the ``traj_state``.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+
+        Returns:
+            SingleData: The sample at ``(traj_no, subtraj_step_no_init)``.
+
+        """
         traj_no = carry.traj_state.traj_no
         subtraj_step_no_init = carry.traj_state.subtraj_step_no_init
         return traj_data.get(traj_no, subtraj_step_no_init, backend)
+
+
+class RandomStartTrajectoryHandler(TrajectoryHandler):
+    """Trajectory handler that starts every episode at a uniformly random sample of a uniformly random trajectory."""
+
+    def sample_start(self, key, backend, traj_data):
+        """
+        Draw a random trajectory and a random sample within it.
+
+        With the JAX backend the random key is split and used; with NumPy the global ``np.random`` state is used and
+        the key is returned unchanged.
+
+        Args:
+            key (jax.Array): The JAX random key of the carry.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Tuple: The key, the trajectory index and the step within that trajectory.
+
+        """
+        if backend == jnp:
+            key, _k1, _k2 = jax.random.split(key, 3)
+            traj_idx = jax.random.randint(_k1, shape=(1,), minval=0, maxval=self.n_trajectories(traj_data))
+            subtraj_step_idx = jax.random.randint(_k2, shape=(1,), minval=0,
+                                                  maxval=self.len_trajectory(traj_idx, traj_data))
+            return key, traj_idx[0], subtraj_step_idx[0]
+        traj_idx = np.random.randint(0, self.n_trajectories(traj_data))
+        return key, traj_idx, np.random.randint(0, self.len_trajectory(traj_idx, traj_data))
+
+
+class RandomTrajFixedStepTrajectoryHandler(TrajectoryHandler):
+    """
+    Trajectory handler that starts every episode at a fixed sample of a uniformly random trajectory.
+
+    Attributes:
+        fixed_step (int): Index of the sample within the trajectory at which every episode starts.
+
+    """
+
+    def __init__(self, traj_info, fixed_step: int = 0, control_dt: float = 0.01,
+                 max_n_samples: int = 100_000, max_n_trajs: int = 100):
+        """
+        Constructor.
+
+        Args:
+            traj_info (TrajectoryInfo): Information about the trajectory.
+            fixed_step (int): Index of the sample within the trajectory at which every episode starts.
+            control_dt (float): Control timestep of the environment in seconds.
+            max_n_samples (int): Maximum number of samples for padding (for JIT shape stability).
+            max_n_trajs (int): Maximum number of sub-trajectories for padding (for JIT shape stability).
+
+        """
+        super().__init__(traj_info, control_dt=control_dt,
+                         max_n_samples=max_n_samples, max_n_trajs=max_n_trajs)
+        self.fixed_step = int(fixed_step)
+
+    def sample_start(self, key, backend, traj_data):
+        """
+        Draw a random trajectory and return it together with the fixed step.
+
+        With the JAX backend the random key is split and used; with NumPy the global ``np.random`` state is used and
+        the key is returned unchanged.
+
+        Args:
+            key (jax.Array): The JAX random key of the carry.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+            traj_data (TrajectoryData): The trajectory data.
+
+        Returns:
+            Tuple: The key, the trajectory index and ``fixed_step``.
+
+        """
+        if backend == jnp:
+            key, _k = jax.random.split(key)
+            traj_idx = jax.random.randint(_k, shape=(1,), minval=0, maxval=self.n_trajectories(traj_data))
+            return key, traj_idx[0], self.fixed_step
+        return key, np.random.randint(0, self.n_trajectories(traj_data)), self.fixed_step
+
+
+class FixedStartTrajectoryHandler(TrajectoryHandler):
+    """
+    Trajectory handler that starts every episode at the same sample of the same trajectory.
+
+    Attributes:
+        start_conf (Tuple[int, int]): Trajectory index and step within that trajectory at which every episode
+            starts. It is a mutable attribute, so that test harnesses can sweep the starting frame between resets.
+
+    """
+
+    def __init__(self, traj_info, start_conf: Tuple[int, int] = (0, 0),
+                 control_dt: float = 0.01, max_n_samples: int = 100_000, max_n_trajs: int = 100):
+        """
+        Constructor.
+
+        Args:
+            traj_info (TrajectoryInfo): Information about the trajectory.
+            start_conf (Tuple[int, int]): Trajectory index and step within that trajectory at which every episode
+                starts.
+            control_dt (float): Control timestep of the environment in seconds.
+            max_n_samples (int): Maximum number of samples for padding (for JIT shape stability).
+            max_n_trajs (int): Maximum number of sub-trajectories for padding (for JIT shape stability).
+
+        """
+        super().__init__(traj_info, control_dt=control_dt,
+                         max_n_samples=max_n_samples, max_n_trajs=max_n_trajs)
+        self.start_conf = tuple(start_conf)
+
+    def sample_start(self, key, backend, traj_data):
+        """
+        Return the fixed start.
+
+        Args:
+            key (jax.Array): The JAX random key of the carry; returned unchanged.
+            backend (ModuleType): Backend module (unused).
+            traj_data (TrajectoryData): The trajectory data (unused).
+
+        Returns:
+            Tuple: The key, the trajectory index and the step within that trajectory from ``start_conf``.
+
+        """
+        return key, *self.start_conf
+
+    @property
+    def fixed_start_conf(self) -> Tuple[int, int]:
+        """Deprecated name of ``start_conf``; emits a ``DeprecationWarning``."""
+        warnings.warn("TrajectoryHandler.fixed_start_conf is deprecated, use start_conf.", DeprecationWarning,
+                      stacklevel=2)
+        return self.start_conf
+
+    @fixed_start_conf.setter
+    def fixed_start_conf(self, value: Tuple[int, int]) -> None:
+        """Deprecated setter of ``start_conf``; emits a ``DeprecationWarning``."""
+        warnings.warn("TrajectoryHandler.fixed_start_conf is deprecated, use start_conf.", DeprecationWarning,
+                      stacklevel=2)
+        self.start_conf = tuple(value)

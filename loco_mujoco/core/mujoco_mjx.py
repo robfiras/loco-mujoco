@@ -1,4 +1,13 @@
-from typing import Any, Dict, Optional, Tuple
+"""
+GPU simulation base class.
+
+:class:`Mjx` extends :class:`~loco_mujoco.core.mujoco_base.Mujoco` with functional, jittable ``mjx_reset`` and
+``mjx_step`` methods that run on MJX or MuJoCo Warp and can be vectorized with ``jax.vmap``. The complete state
+of an environment is an :class:`MjxState`.
+
+"""
+
+from typing import Any, Callable, Dict, Optional, Tuple
 from types import ModuleType
 import atexit
 
@@ -20,6 +29,13 @@ class MjxAdditionalCarry(AdditionalCarry):
     """
     Additional carry for the Mjx environment.
 
+    Extends :class:`~loco_mujoco.core.mujoco_base.AdditionalCarry` by the quantities of the last step of an
+    episode, which would otherwise be lost when the environment resets itself.
+
+    Attributes:
+        final_observation (jax.Array): Observation of the last step before the most recent reset.
+        final_info (Dict[str, Any]): Info dictionary of the last step before the most recent reset.
+
     """
     final_observation: jax.Array
     final_info: Dict[str, Any]
@@ -30,13 +46,13 @@ class MjxState:
     """
     State of the Mjx environment.
 
-    Args:
+    Attributes:
         data (Data): Mjx data structure.
         observation (jax.Array): Observation of the environment.
         reward (float): Reward of the environment.
         absorbing (bool): Whether the state is absorbing.
         done (bool): Whether the episode is done.
-        additional_carry (Any): Additional carry information.
+        additional_carry (MjxAdditionalCarry): Additional carry information.
         info (Dict[str, Any]): Information dictionary.
 
     """
@@ -54,7 +70,6 @@ class Mjx(Mujoco):
     Base class for Mujoco environments using JAX.
 
     Args:
-        n_envs (int): Number of environments to run in parallel.
         use_mjwarp (bool): If True, MjWarp will be used as the simulation backend instead of Mjx.
         nconmax (int): maximum number of contacts to allocate for warp across all worlds.
             Since the number of worlds is **not** pre-defined in JAX, we use the
@@ -66,15 +81,25 @@ class Mjx(Mujoco):
             ``naconmax`` argument to set the upper bound for the number of contacts
             across all worlds, rather than the ``nconmax`` argument from MuJoCo Warp.
         njmax (int): maximum number of constraints to allocate for warp across all worlds.
+        refresh_kinematics (bool): If True, derived quantities like body poses are recomputed after each control
+            step. Otherwise they lag qpos and qvel by one simulation step.
+        naccdmax (int): maximum number of CCD (convex, e.g. heightfield-vs-mesh) contacts across all worlds.
+            Defaults to ``naconmax``, MuJoCo Warp's own default. MJX creates the data with ``nworld=1``, so without
+            this the CCD budget is a single world's and hfield contacts overflow (and are dropped) once vmapped.
         **kwargs: Additional arguments to pass to the Mujoco base class.
 
     """
+
+    _KINEMATIC_FIELDS = ("xpos", "xquat", "xmat", "xipos", "ximat", "xanchor", "xaxis", "geom_xpos", "geom_xmat",
+                         "site_xpos", "site_xmat", "subtree_com", "cvel", "cdof", "cdof_dot")
 
     def __init__(self,
                  use_mjwarp=False,
                  nconmax=None,
                  naconmax=None,
                  njmax=None,
+                 refresh_kinematics=False,
+                 naccdmax=None,
                  **kwargs):
 
         # call base mujoco env
@@ -85,18 +110,22 @@ class Mjx(Mujoco):
 
         # time put model and data
         self._use_mjwarp = use_mjwarp
+        self._refresh_kinematics = refresh_kinematics
+        if self._use_mjwarp and self._terrain.is_dynamic:
+            # MjWarp shares hfield_data across all worlds: per-env heightfields written into the model are
+            # flattened by the FFI layer and every world collides with env 0's terrain.
+            raise ValueError(f"{self._terrain.get_name()} writes a per-env heightfield, which MjWarp does not "
+                             f"support (all worlds would use env 0's terrain). Use HeightmapTerrain "
+                             f"instead.")
         if self._use_mjwarp:
-            import warnings
-            import time
-            # todo: fix once mjwarp is stable
-            warnings.warn(
-                "mjwarp is experimental and may not work with all environments. "
-                "Resetting is error prone. Training might work, but will not be optimal.",
-                UserWarning
-            )
-            time.sleep(3)
             self.sys = mjx.put_model(self._model, impl='warp')
-            self._first_data = mjx.make_data(self._model, impl='warp', nconmax=nconmax, naconmax=naconmax, njmax=njmax)
+            # `nconmax` is the deprecated name of `naconmax`; MJX 4 no longer accepts it
+            naconmax = nconmax if naconmax is None else naconmax
+            self._first_data = mjx.make_data(self._model, impl='warp', naconmax=naconmax, njmax=njmax)
+            self._kin_sys, self._kin_data = self._make_kinematics_copy()
+            impl = self._first_data._impl
+            naccdmax = impl.naconmax if naccdmax is None else naccdmax
+            self._first_data = self._first_data.replace(_impl=impl.replace(naccdmax=naccdmax))
         else:
             self.sys = mjx.put_model(self._model)
             self._first_data = mjx.put_data(self._model, self._data)
@@ -162,10 +191,9 @@ class Mjx(Mujoco):
 
         # reset data
         if self._use_mjwarp:
-            # todo: this is not a good way of resetting the data, all other entities should be reset as well!
-            # there is an issue with the warp backend that does not allow to reset the data properly
-            data = state.data.replace(qpos=jnp.zeros_like(state.data.qpos),
-                                qvel=jnp.zeros_like(state.data.qvel))
+            # MjWarp keeps its contact and constraint buffers in one block shared by all worlds, which cannot
+            # be reset for a single world. They are rebuilt by the next step, so everything else is reset.
+            data = self._first_data.replace(_impl=state.data._impl)
         else:
             data = self._first_data
 
@@ -185,13 +213,29 @@ class Mjx(Mujoco):
 
         return state.replace(data=data, observation=obs, additional_carry=carry)
 
-    def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None) -> MjxState:
+    def mjx_step(self, state: MjxState, action: jax.Array, traj: Optional[Trajectory] = None,
+                 auto_reset: bool = True, physics_fn: Optional[Callable] = None,
+                 obs_ind: Optional[np.ndarray] = None, skip_reward: bool = False) -> MjxState:
         """
 
         Args:
             state (MjxState): Current state of the environment.
             action (jax.Array): Action to take in the environment.
             traj (Trajectory, optional): Trajectory to use. Falls back to self._traj if not provided.
+            auto_reset (bool): If True (default), a state that is done is reset before it is returned.
+                With False the terminal state itself is returned, so the caller can read its qpos/qvel
+                and reset it with ``_mjx_reset_in_step`` afterwards.
+            physics_fn (Callable, optional): Replaces the simulation (the control function and the
+                ``mjx.step`` substeps) with ``physics_fn(sys, data, carry, action) -> (data, carry)``,
+                where ``action`` is the action as passed to this function. Everything around the
+                simulation (pre/post step, observation, reward, absorbing) still runs, so a learned
+                dynamics model can reuse the environment's own observation and reward functions. The
+                returned data must have its kinematic quantities (xpos, site_xpos, cvel, ...) up to date.
+            obs_ind (np.ndarray, optional): Entries of the observation to compute, for callers that read only
+                these. The other entries of the returned observation are not computed and hold zero, plus
+                whatever the domain randomizer adds to them.
+            skip_reward (bool): If True, the reward, the absorbing flag and the done flag are not computed
+                (zero and False are returned), for callers that compute them afterwards for many states at once.
 
         Returns:
             MjxState: The next state of the environment.
@@ -232,13 +276,18 @@ class Mjx(Mujoco):
             return _data, _carry
 
         # run inner loop
-        data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
+        if physics_fn is None:
+            data, carry = jax.lax.fori_loop(0, self._n_intermediate_steps, _inner_loop, (data, carry))
+            if self._refresh_kinematics:
+                data = self._mjx_refresh_kinematics(sys, data)
+        else:
+            data, carry = physics_fn(sys, data, carry, action)
 
         # modify data *after* step if needed (does nothing by default)
         data, carry = self._mjx_simulation_post_step(self._model, data, carry, traj)
 
         # create the observation
-        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj)
+        cur_obs, carry = self._mjx_create_observation(sys, data, carry, traj, obs_ind, keep_layout=True)
 
         # modify the observation and the data if needed (does nothing by default)
         cur_obs, data, cur_info, carry = self._mjx_step_finalize(cur_obs, self._model, data, cur_info, carry, traj)
@@ -247,13 +296,18 @@ class Mjx(Mujoco):
         cur_info = self._mjx_update_info_dictionary(cur_info, cur_obs, data, carry)
 
         # check if the next obs is an absorbing state
-        absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry, traj)
+        if skip_reward:
+            absorbing = done = jnp.zeros((), dtype=bool)
+            reward = jnp.zeros_like(state.reward)
+        else:
+            absorbing, carry = self._mjx_is_absorbing(cur_obs, cur_info, data, carry, traj)
 
-        # calculate the reward
-        reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data, carry, traj)
+            # calculate the reward
+            reward, carry = self._mjx_reward(state.observation, action, cur_obs, absorbing, cur_info, self._model, data,
+                                             carry, traj)
 
-        # check if done
-        done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry, traj)
+            # check if done
+            done = self._mjx_is_done(cur_obs, absorbing, cur_info, data, carry, traj)
 
         done = jnp.logical_or(done, jnp.any(jnp.isnan(cur_obs)))
         cur_obs = jnp.nan_to_num(cur_obs, nan=0.0)
@@ -265,17 +319,49 @@ class Mjx(Mujoco):
                               absorbing=absorbing, done=done, info=cur_info, additional_carry=carry)
 
         # reset state if done (capture traj via closure so lax.cond operand stays as state only)
-        state = jax.lax.cond(state.done,
-                             lambda s: self._mjx_reset_in_step(s, traj),
-                             lambda s: s,
-                             state)
+        if auto_reset:
+            state = jax.lax.cond(state.done,
+                                 lambda s: self._mjx_reset_in_step(s, traj),
+                                 lambda s: s,
+                                 state)
 
         return state
+
+    def _mjx_refresh_kinematics(self, sys: Model, data: Data) -> Data:
+        """
+        Brings the kinematic quantities of data up to the current qpos and qvel. With MjWarp they are
+        computed on a JAX copy of the model, which skips the solver pass of a full forward call.
+
+        """
+        if not self._use_mjwarp:
+            return mjx.forward(sys, data)
+        kin = self._kin_data.replace(qpos=data.qpos, qvel=data.qvel)
+        kin = mjx.com_vel(self._kin_sys, mjx.com_pos(self._kin_sys, mjx.kinematics(self._kin_sys, kin)))
+        return data.replace(**{f: getattr(kin, f) for f in self._KINEMATIC_FIELDS})
+
+    def _make_kinematics_copy(self) -> Tuple[Model, Data]:
+        """
+        Builds the JAX copy of the model that the kinematics are computed on under MjWarp. MJX implements
+        com_pos and com_vel for the JAX backend only. The copy has no collisions, contact pairs or sensors:
+        the kinematics do not read them, and the JAX backend rejects some that MjWarp supports, such as
+        cylinder-mesh collisions.
+
+        """
+        spec = self._mjspec.copy()
+        for geom in spec.geoms:
+            geom.contype = 0
+            geom.conaffinity = 0
+        for element in spec.pairs + spec.sensors:
+            spec.delete(element)
+        model = spec.compile()
+        return mjx.put_model(model, impl='jax'), mjx.make_data(model, impl='jax')
 
     def _mjx_create_observation(self, model: Model,
                                 data: Data,
                                 carry: MjxAdditionalCarry,
-                                traj: Optional[Trajectory] = None) -> jax.Array:
+                                traj: Optional[Trajectory] = None,
+                                ind: Optional[np.ndarray] = None,
+                                keep_layout: bool = False) -> jax.Array:
         """
         Creates the observation for the environment.
 
@@ -284,12 +370,16 @@ class Mjx(Mujoco):
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.
             traj (Trajectory, optional): Trajectory to use.
+            ind (np.ndarray, optional): Entries of the observation to create. Only the observations that hold
+                one of them are computed. Defaults to all entries.
+            keep_layout (bool): With ``ind``: if True, the whole observation is returned with the other entries
+                at zero; if False, only the entries ``ind``, in this order.
 
         Returns:
             jax.Array: The observation of the environment.
 
         """
-        return self._create_observation_compat(model, data, carry, jnp, traj)
+        return self._create_observation_compat(model, data, carry, jnp, traj, ind, keep_layout)
 
     def _mjx_reset_info_dictionary(self, obs: jnp.ndarray,
                                    data: Data,
@@ -316,6 +406,7 @@ class Mjx(Mujoco):
         Updates the info dictionary.
 
         Args:
+            info (Dict): The info dictionary to update.
             obs (jnp.ndarray): Observation of the environment.
             data (Data): Mjx data structure.
             carry (MjxAdditionalCarry): Additional carry information.
@@ -375,6 +466,26 @@ class Mjx(Mujoco):
             bool: True if the state is absorbing, False otherwise.
         """
         return self._terminal_state_handler.mjx_is_absorbing(self, obs, info, data, carry, traj)
+
+    def _mjx_absorbing_prob(self, obs: jnp.ndarray,
+                            info: Dict,
+                            data: Data,
+                            carry: MjxAdditionalCarry,
+                            traj: Optional[Trajectory] = None) -> Optional[jnp.ndarray]:
+        """
+        Smooth probability that the current state is absorbing.
+
+        Args:
+            obs (jnp.ndarray): Current observation.
+            info (Dict): Information dictionary.
+            data (Data): Mujoco data structure.
+            carry (MjxAdditionalCarry): Additional carry information.
+            traj (Trajectory, optional): Trajectory to use.
+
+        Returns:
+            Optional[jnp.ndarray]: The probability, or None if the terminal state handler has no smooth version.
+        """
+        return self._terminal_state_handler.mjx_absorbing_prob(self, obs, info, data, carry, traj)
 
     def _mjx_is_done(self, obs: jnp.ndarray,
                      absorbing: bool,
@@ -499,6 +610,10 @@ class Mjx(Mujoco):
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, jnp, traj)
         data, carry = self._terrain.reset(self, model, data, carry, jnp, traj)
         data, carry = self._init_state_handler.reset(self, model, data, carry, jnp, traj)
+        if self._terrain.has_env_origins:
+            data = self._terrain.shift_to_env_origin(self, data, carry, jnp)
+        if self._terrain.grounds_robot:
+            data = self._terrain.ground_robot(self, data, jnp)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, jnp, traj)
         data, carry = self._reward_function.reset(self, model, data, carry, jnp, traj)
         data, carry = self._control_func.reset(self, model, data, carry, jnp, traj)
@@ -647,7 +762,7 @@ class Mjx(Mujoco):
     def mjx_render_usd(self, state, env_idx: int = 0, **exporter_params) -> None:
         """Append one environment from a batched MJX state to a USD stage.
 
-        USD is finalized by :meth:`stop_usd` (or :meth:`stop`). Only one
+        USD is finalized by ``stop_usd`` (or ``stop``). Only one
         selected environment is exported because MuJoCo's USD exporter owns a
         single model namespace; use ``env_idx`` to choose it.
 
@@ -724,11 +839,6 @@ class Mjx(Mujoco):
         return MjxAdditionalCarry(final_observation=backend.zeros(self.info.observation_space.shape),
                                   final_info={},
                                   **vars(carry))
-
-    @property
-    def n_envs(self) -> int:
-        """Returns the number of environments."""
-        return self._n_envs
 
     @property
     def mjx_env(self) -> bool:

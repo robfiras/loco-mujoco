@@ -7,7 +7,7 @@ network, which makes it usable over SSH and on machines without a display.
 
 Requires the optional dependencies:
 
-    pip install loco-mujoco[viser]
+    pip install -e ".[viser]"
 
 Open the URL printed on startup (http://localhost:8080 by default) to see the robot.
 """

@@ -1,3 +1,5 @@
+"""Visualization helpers for goals, drawing arrows into the user scene."""
+
 from typing import Any, Union, List, Tuple
 from types import ModuleType
 import numpy as np
@@ -12,6 +14,17 @@ from loco_mujoco.core.utils.math import quat_scalarfirst2scalarlast
 
 
 def extract_z_rotation(global_rotation, backend):
+    """
+    Extract the rotation about the z axis (yaw) from a rotation.
+
+    Args:
+        global_rotation (Rotation): SciPy or ``jax.scipy`` rotation object.
+        backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+
+    Returns:
+        Rotation: Rotation about the z axis by the yaw angle of the "xyz" Euler angles of the input.
+
+    """
     if backend == np:
         R = np_R
     else:

@@ -2,9 +2,8 @@
 
 These cover the finite-difference velocity computation, the ``!expr`` YAML
 loader, and the body/site name-and-id lookups -- none of which need a full
-environment build. The heavier replay callbacks (ExtendTrajData /
-CollisionExtender / optimize_for_collisions) are driven elsewhere via the
-retargeting pipeline.
+environment build. The ExtendTrajData replay callback is additionally
+driven via the retargeting pipeline.
 """
 from pathlib import Path
 
@@ -205,6 +204,34 @@ def test_add_mocap_bodies_with_robot_conf():
     # disable_collisions zeroed contype/conaffinity on all geoms
     assert not np.any(model.geom_contype)
     assert not np.any(model.geom_conaffinity)
+
+
+def test_add_mocap_bodies_joint_limit_solver_params():
+    mocap = ["target_mocap_body_" + s for s in _SITES]
+    solref, solimp = [0.01, 1.0], [0.99, 0.999, 0.001, 0.5, 2.0]
+
+    def compiled(optimization_params):
+        robot_conf = OmegaConf.create({
+            "optimization_params": {"disable_joint_limits": False, "disable_collisions": False,
+                                    **optimization_params},
+            "site_joint_matches": {s: {"equality_constraint_type": "mjEQ_WELD", "torque_scale": 1.0}
+                                   for s in _SITES},
+        })
+        return add_mocap_bodies(_fresh_spec(), _SITES, mocap, robot_conf=robot_conf).compile()
+
+    stock = _fresh_spec().compile()
+    n = stock.njnt
+
+    # both keys set: every joint of the robot gets them
+    model = compiled({"joint_limit_solref": solref, "joint_limit_solimp": solimp})
+    assert np.allclose(model.jnt_solref[:n], solref)
+    assert np.allclose(model.jnt_solimp[:n], solimp)
+
+    # null, or absent: the model's own values stay
+    for params in ({"joint_limit_solref": None, "joint_limit_solimp": None}, {}):
+        model = compiled(params)
+        assert np.allclose(model.jnt_solref[:n], stock.jnt_solref)
+        assert np.allclose(model.jnt_solimp[:n], stock.jnt_solimp)
 
 
 # --------------------------- ExtendTrajData as a replay callback ---------------------------

@@ -1,3 +1,15 @@
+"""
+History-aware PPO in JAX.
+
+A variant of :class:`~loco_mujoco.algorithms.ppo_jax.PPOJax` whose actor-critic network sees a fixed-length
+window of the last ``history_len`` observations (and optionally the preceding actions), encoded either by an
+MLP or by Transformer blocks. The history is carried by the algorithm itself instead of an observation
+wrapper, so that the rollout buffer only stores the raw observations.
+
+This algorithm is experimental. Example: ``examples/training_examples/jax_rl_mimic_history``.
+
+"""
+
 import ast
 from dataclasses import dataclass
 from typing import Sequence
@@ -24,11 +36,32 @@ from loco_mujoco.utils import MetricsHandler, ValidationSummary
 # ---------------------------------------------------------------------------
 
 class TransformerBlock(nn.Module):
+    """
+    Post-norm Transformer encoder block.
+
+    Multi-head self-attention and a two-layer feed-forward network (hidden width ``4 * d_model``, ReLU), each
+    followed by a residual connection and layer normalization.
+
+    Attributes:
+        d_model (int): Feature dimension of the tokens.
+        n_heads (int): Number of attention heads.
+
+    """
     d_model: int
     n_heads: int
 
     @nn.compact
     def __call__(self, x):
+        """
+        Apply the block.
+
+        Args:
+            x (jax.Array): Token sequence of shape ``(batch, seq_len, d_model)``.
+
+        Returns:
+            jax.Array: Encoded sequence of shape ``(batch, seq_len, d_model)``.
+
+        """
         attn_out = nn.MultiHeadDotProductAttention(num_heads=self.n_heads)(x, x)
         x = nn.LayerNorm()(x + attn_out)
         ff_out = nn.Dense(self.d_model)(nn.relu(nn.Dense(4 * self.d_model)(x)))
@@ -41,15 +74,39 @@ class TransformerBlock(nn.Module):
 
 class ActorCriticHistory(nn.Module):
     """
-    Policy network for History-PPO.
+    Actor-critic network for History-PPO.
 
-    Expects a flat (batch, N * entry_dim) input.
-    entry_dim = obs_dim + action_dim  if include_actions else obs_dim.
+    Expects a flat input of shape ``(batch, history_len * entry_dim)``, where the entries are ordered from the
+    oldest to the newest step and ``entry_dim = obs_dim + action_dim`` if ``include_actions`` is set (each entry
+    is an observation followed by the action that preceded it) and ``entry_dim = obs_dim`` otherwise.
 
-    All N observation steps are normalised with the *same* RunningMeanStd stats.
+    The observations of all steps are normalized with the *same*
+    :class:`~loco_mujoco.algorithms.common.networks.RunningMeanStd` statistics; actions are not normalized.
+    Two encoders are available:
 
-    Encoders: "mlp" (per-step projection → flatten → MLP) or
-              "transformer" (per-step projection → blocks → mean pool).
+    - ``"mlp"``: per-step dense projection to ``n_features``, flattening over the window, then an MLP with
+      ``hidden_layer_dims``.
+    - ``"transformer"``: per-step dense projection to ``d_model``, ``n_layers`` :class:`TransformerBlock`,
+      then mean pooling over the window.
+
+    Actor and critic share the encoder: the action mean and the value are linear heads on the encoded features.
+    The policy is a diagonal Gaussian with a state-independent standard deviation (parameter ``log_std``).
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        obs_dim (int): Dimension of a single (raw) observation.
+        history_len (int): Number of steps in the history window, including the current one.
+        include_actions (bool): Whether every history entry also contains an action.
+        encoder_type (str): ``"transformer"`` selects the Transformer encoder; any other value the MLP encoder.
+        hidden_layer_dims (Sequence[int]): Hidden layers of the MLP encoder.
+        n_features (int): Width of the per-step projection of the MLP encoder.
+        d_model (int): Token dimension of the Transformer encoder.
+        n_heads (int): Number of attention heads of the Transformer encoder.
+        n_layers (int): Number of Transformer blocks.
+        activation (str): Name of the activation function in ``flax.linen``.
+        init_std (float): Initial standard deviation of the policy.
+        learnable_std (bool): If False, the gradient with respect to ``log_std`` is stopped.
+
     """
 
     action_dim: int
@@ -67,10 +124,23 @@ class ActorCriticHistory(nn.Module):
     learnable_std: bool = True
 
     def setup(self):
+        """Resolve the activation function from its name."""
         self.activation_fn = get_activation_fn(self.activation)
 
     @nn.compact
     def __call__(self, x):
+        """
+        Compute the action distribution and the value estimate from a history window.
+
+        Args:
+            x (jax.Array): Flattened history windows of shape ``(batch, history_len * entry_dim)`` or
+                ``(history_len * entry_dim,)``.
+
+        Returns:
+            Tuple[distrax.MultivariateNormalDiag, jax.Array]: The action distribution and the value estimates of
+            shape ``(batch,)``.
+
+        """
         x = jnp.atleast_2d(x)                                   # (B, N*entry_dim)
         B = x.shape[0]
         entry_dim = self.obs_dim + (self.action_dim if self.include_actions else 0)
@@ -121,9 +191,28 @@ class ActorCriticHistory(nn.Module):
 
 @dataclass(frozen=True)
 class HistoryAgentConf(PPOAgentConf):
+    """
+    Static configuration of a History-PPO agent.
+
+    Same fields as :class:`~loco_mujoco.algorithms.ppo_jax.PPOAgentConf`, with an
+    :class:`ActorCriticHistory` as network.
+
+    """
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        The network definition is rebuilt from the ``experiment`` node of the stored configuration.
+
+        Args:
+            d (dict): Dictionary created by ``serialize``.
+
+        Returns:
+            HistoryAgentConf: The restored configuration with a newly built optimizer.
+
+        """
         config = OmegaConf.create(d["config"])
         tx = PPOJax._get_optimizer(config)
         exp = config.experiment
@@ -157,28 +246,28 @@ class HistoryAgentConf(PPOAgentConf):
 
 class HistoryPPOJax(PPOJax):
     """
-    PPO with a fixed N-step observation history, encoded by an MLP or Transformer.
+    PPO with a fixed N-step observation history, encoded by an MLP or a Transformer.
 
-    Memory design
-    -------------
-    Storing N*obs_dim per transition (as NStepWrapper does) inflates the rollout
-    buffer N-fold — a 10x increase for N=10.  Instead we store only raw obs_dim
-    observations in each Transition.
+    **Memory design.** Storing ``N * obs_dim`` values per transition (as an
+    :class:`~loco_mujoco.core.wrappers.mjx.NStepWrapper` does) inflates the rollout buffer N-fold. Instead, only
+    the raw observation is stored in each transition, and history windows are never materialized for the whole
+    batch:
 
-    History windows are never materialised for the whole batch.  Instead:
+    1. After the rollout, the history carried over from before the rollout is prepended to the collected
+       observations (and actions, if ``include_actions_in_history`` is set), giving buffers of shape
+       ``(N - 1 + T, num_envs, obs_dim)`` and ``(N + T, num_envs, action_dim)``.
+    2. In each minibatch, the N-step window of every sample is gathered on the fly from these buffers with
+       vectorized indexing, giving an array of shape ``(minibatch_size, N * entry_dim)``.
 
-      1. After the rollout we prepend the initial carry to get
-             full_obs  (N-1+T, envs, obs_dim)
-             full_acts (N+T,   envs, act_dim)   [only if include_actions]
-         These are small constant buffers kept as closure variables for the
-         epoch scan (~170 MB for typical settings vs ~1 GB for the full history).
+    This keeps the observation-related peak memory proportional to ``obs_dim`` instead of ``N * obs_dim``.
 
-      2. In each minibatch we gather the N-step window for each sample on-the-fly:
-             mb_hist (mb_size, N*entry_dim)    ← only ~30 MB peak
-         using vectorised advanced indexing — no loop.
+    The history starts with zeros. During training it is carried across episode boundaries and across updates
+    within one call of the training function.
 
-    This keeps peak obs-related memory proportional to obs_dim, not N*obs_dim,
-    regardless of how large N is.
+    The interface is that of :class:`~loco_mujoco.algorithms.ppo_jax.PPOJax`, and agent states are
+    :class:`~loco_mujoco.algorithms.ppo_jax.PPOAgentState`; see
+    ``examples/training_examples/jax_rl_mimic_history`` for a training script.
+
     """
 
     _agent_conf = HistoryAgentConf
@@ -189,6 +278,32 @@ class HistoryPPOJax(PPOJax):
 
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived hyperparameters, the network and the optimizer.
+
+        In addition to the PPO hyperparameters (see :meth:`PPOJax.init_agent_conf
+        <loco_mujoco.algorithms.ppo_jax.PPOJax.init_agent_conf>`), the following keys are read from
+        ``config.experiment``:
+
+        - ``history_len``: number of steps in the history window, including the current one.
+        - ``include_actions_in_history`` (optional, default False): whether the previous actions are part of the
+          window.
+        - ``encoder_type`` (optional, default ``"mlp"``): ``"mlp"`` or ``"transformer"``.
+        - ``n_features``: width of the per-step projection of the MLP encoder.
+        - ``d_model`` (optional, default ``n_features``), ``n_heads`` (optional, default 4), ``n_layers``
+          (optional, default 2): Transformer settings.
+
+        The keys ``num_updates``, ``minibatch_size``, ``validation_interval``, ``obs_dim``, ``action_dim`` and a
+        recomputed ``validation.num`` are written to ``config.experiment`` in place.
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            HistoryAgentConf: The agent configuration.
+
+        """
         with open_dict(config.experiment):
             config.experiment.num_updates = (
                 config.experiment.total_timesteps // config.experiment.num_steps
@@ -196,10 +311,8 @@ class HistoryPPOJax(PPOJax):
             config.experiment.minibatch_size = (
                 config.experiment.num_envs * config.experiment.num_steps
                 // config.experiment.num_minibatches)
-            config.experiment.validation_interval = (
-                config.experiment.num_updates // config.experiment.validation.num)
-            config.experiment.validation.num = int(
-                config.experiment.num_updates // config.experiment.validation_interval)
+            config.experiment.validation_interval, config.experiment.validation.num = cls._validation_schedule(
+                config.experiment.num_updates, config.experiment.validation.num)
             config.experiment.obs_dim = int(env.info.observation_space.shape[0])
             config.experiment.action_dim = int(env.info.action_space.shape[0])
 
@@ -227,6 +340,18 @@ class HistoryPPOJax(PPOJax):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf, rng):
+        """
+        Initialize the agent state (network parameters, running statistics and optimizer state).
+
+        Args:
+            env: The (unwrapped) environment; not used.
+            agent_conf (HistoryAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            PPOAgentState: The initial agent state.
+
+        """
         config = agent_conf.config.experiment
         N = int(config.history_len)
         obs_dim = int(config.obs_dim)
@@ -247,6 +372,21 @@ class HistoryPPOJax(PPOJax):
     # No NStepWrapper: history carry is threaded through the runner state
     @staticmethod
     def _wrap_env(env, config):
+        """
+        Wrap the environment for training.
+
+        Applies a :class:`~loco_mujoco.core.wrappers.mjx.LogWrapper` and a
+        :class:`~loco_mujoco.core.wrappers.mjx.VecEnv`. No ``NStepWrapper`` is used; the history is threaded through
+        the runner state of the training loop.
+
+        Args:
+            env: The (unwrapped) environment.
+            config (DictConfig): The ``experiment`` node of the configuration; not used.
+
+        Returns:
+            The wrapped, vectorized environment.
+
+        """
         env = LogWrapper(env)
         env = VecEnv(env)
         # reward normalization moved into _train_fn; stats live on the agent state
@@ -262,6 +402,32 @@ class HistoryPPOJax(PPOJax):
                     record=False, rng=None, deterministic=False,
                     use_mujoco=False, wrap_env=True,
                     train_state_seed=None, traj=None):
+        """
+        Roll out a trained history policy in a Python loop and render it.
+
+        The history window starts with zeros and is filled with the observations (and actions) of the rollout. By
+        default the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` the CPU MuJoCo
+        environment is stepped instead, and the history is cleared when an episode ends. The environment is stopped
+        at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (HistoryAgentConf): Agent configuration.
+            agent_state (PPOAgentState): Agent state holding the trained policy.
+            n_envs (int): Number of parallel environments.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Not used; the environment is rendered at every step.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action sampling. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If True, the standard deviation of the policy is set to zero so that the mean
+                action is applied. This overwrites ``log_std`` in the parameters of ``agent_state`` in place.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            train_state_seed (int): Index of the seed to play if the agent was trained with ``n_seeds > 1``.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
 
         import warnings, numpy as np
         from loco_mujoco.algorithms.common.policies import PPOPolicy
@@ -276,7 +442,9 @@ class HistoryPPOJax(PPOJax):
 
         train_state = agent_state.train_state
         if deterministic:
-            train_state.params["log_std"] = np.ones_like(train_state.params["log_std"]) * -np.inf
+            # replace log_std in a copy, so that the parameters of the given agent_state are not modified
+            train_state = train_state.replace(params={
+                **train_state.params, "log_std": np.ones_like(train_state.params["log_std"]) * -np.inf})
         if config.n_seeds > 1:
             assert train_state_seed is not None
             train_state = jax.tree.map(lambda x: x[train_state_seed], train_state)
@@ -353,6 +521,31 @@ class HistoryPPOJax(PPOJax):
                   agent_state: PPOAgentState = None,
                   traj=None,
                   mh: MetricsHandler = None):
+        """
+        Run History-PPO for ``num_updates`` updates.
+
+        Works like :meth:`PPOJax._train_fn <loco_mujoco.algorithms.ppo_jax.PPOJax._train_fn>` (rollout, optional
+        reward normalization, GAE, clipped PPO update with optional adaptive learning rate, periodic validation),
+        except that the network input is the history window assembled from the carried observations and actions, and
+        that the windows of a minibatch are gathered on the fly during the update. The history starts with zeros at
+        every call, also when the environment state is resumed from ``agent_state``.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (HistoryAgentConf): Static agent configuration.
+            agent_state (PPOAgentState): Agent state to start or resume from.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Optional metrics handler computing the validation metrics.
+
+        Returns:
+            dict: Dictionary with the keys ``"agent_state"``
+            (:class:`~loco_mujoco.algorithms.ppo_jax.PPOAgentState` after training), ``"training_metrics"``
+            (:class:`~loco_mujoco.algorithms.ppo_jax.PPOSummaryMetrics` with a leading axis of length
+            ``num_updates``) and ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`
+            with a leading axis of length ``num_updates``; entries of updates without validation are zero).
+
+        """
 
         config, network, tx = (
             agent_conf.config.experiment, agent_conf.network, agent_conf.tx
@@ -398,7 +591,7 @@ class HistoryPPOJax(PPOJax):
         else:
             rew_stats = None
 
-        ts_buf = TrainStateBuffer.create(train_state, config.validation.num)
+        ts_buf = TrainStateBuffer.create(train_state, max(config.validation.num, 1))
 
         # ---- initial history carries (zeros = no prior context) ----
         # obs_carry:  last (N-1) raw observations → (N-1, num_envs, obs_dim)

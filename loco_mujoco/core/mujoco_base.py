@@ -1,8 +1,19 @@
+"""
+CPU simulation base class.
+
+:class:`Mujoco` wraps a MuJoCo model and data in a Gymnasium-like environment and assembles it from the modular
+components of this package (observations, goal, reward, control function, terrain, domain randomizer, initial
+and terminal state handlers). The state of all components is kept in an :class:`AdditionalCarry`.
+
+"""
+
 import atexit
 from copy import deepcopy
 from typing import Union, List, Dict, Tuple, Optional
 from types import ModuleType
-import requests
+from html import escape
+from pathlib import Path
+import tempfile
 import webbrowser
 
 from functools import partial
@@ -25,7 +36,8 @@ from loco_mujoco.core.terminal_state_handler.base import TerminalStateHandler
 from loco_mujoco.core.visuals import MjvScene, MujocoViewer, UsdTrajectoryExporter, ViserViewer
 from loco_mujoco.core.visuals.usd_exporter import USD_EXPORTER_PARAMS
 from loco_mujoco.core.visuals.viser_viewer import VISER_ONLY_VIEWER_PARAMS
-from importlib.resources import files
+from loco_mujoco.core.utils.models import get_models_dir
+from loco_mujoco.core.utils.math import take_columns
 from loco_mujoco.core.utils.mujoco import mj_jntid2qposid, mj_jntid2qvelid
 from loco_mujoco.core.trajectory import TrajectoryModel, TrajectoryData, Trajectory
 
@@ -82,6 +94,32 @@ def current_world_index(backend: ModuleType):
 
 @struct.dataclass
 class AdditionalCarry:
+    """
+    State of an environment besides the simulation data.
+
+    The environments are functional: everything that changes from step to step and is not part of the MuJoCo data
+    lives in this dataclass, which is passed through all components and returned updated.
+
+    Attributes:
+        key (jax.Array): JAX random key.
+        cur_step_in_episode (int): Number of the current step in the episode, starting at 1 after a reset.
+        global_step (int): Number of steps taken since the carry was created, across episodes (only counted in the
+            MJX environment).
+        curriculum_cur_max (int): Counter reserved for curricula; initialized to 0.
+        env_id (Union[int, jax.Array]): Index of this environment's world, used to attribute entries in MjWarp's
+            shared contact buffer. 0 for the CPU environment.
+        last_action (Union[np.ndarray, jax.Array]): Action of the previous step, shape ``(action_dim,)``.
+        observation_states (struct.PyTreeNode): States of the stateful observations, one field per observation.
+        reward_state (struct.PyTreeNode): State of the reward function.
+        domain_randomizer_state (struct.PyTreeNode): State of the domain randomizer.
+        terrain_state (struct.PyTreeNode): State of the terrain.
+        init_state_handler_state (struct.PyTreeNode): State of the initial state handler.
+        terminal_state_handler_state (struct.PyTreeNode): State of the terminal state handler.
+        control_func_state (struct.PyTreeNode): State of the control function.
+        user_scene (MjvScene): Visual geoms the components draw for the viewer.
+
+    """
+
     key: jax.Array
     cur_step_in_episode: int
     global_step: int
@@ -117,6 +155,7 @@ class Mujoco:
         timestep (int, optional): Simulation timestep. If None, it's read from the model.
         n_substeps (int, optional): Number of substeps per simulation step. Defaults to 1.
         model_option_conf (Dict, optional): Changes to apply to the Mujoco option config.
+        model_contact_conf (Dict, optional): Changes to the contact setup of the robot geoms, see _modify_contact_spec.
         reward_type (str, optional): The type of reward function. Defaults to "NoReward".
         reward_params (Dict, optional): Parameters for the reward function. Defaults to None.
         goal_type (str, optional): The type of goal specification. Defaults to "NoGoal".
@@ -125,12 +164,15 @@ class Mujoco:
         terminal_state_params (Dict, optional): Parameters for the terminal state handler. Defaults to None.
         domain_randomization_type (str, optional): Type of domain randomization. Defaults to "NoDomainRandomization".
         domain_randomization_params (Dict, optional): Parameters for domain randomization. Defaults to None.
-        terrain_type (str, optional): The type of terrain used. Defaults to "StaticTerrain".
+        terrain_type (str, optional): The type of terrain used. Defaults to "FlatTerrain", a flat floor.
         terrain_params (Dict, optional): Parameters for the terrain configuration. Defaults to None.
         init_state_type (str, optional): Initial state handler type. Defaults to "DefaultInitialStateHandler".
         init_state_params (Dict, optional): Parameters for the initial state handler. Defaults to None.
         control_type (str, optional): Type of control function. Defaults to "DefaultControl".
         control_params (Dict, optional): Parameters for the control function. Defaults to None.
+        max_num_samples_traj (int, optional): Stored on the environment; not used by this class. Defaults to 10000.
+        print_obs_summary (bool, optional): If True, a summary of the observation space is printed when the
+            environment is created. Defaults to True.
         **viewer_params: Additional parameters for the Mujoco viewer.
 
         """
@@ -140,9 +182,18 @@ class Mujoco:
     @staticmethod
     def get_model_path(*relative_parts: str) -> str:
         """
-        Return absolute path to a model file inside loco-mujoco-models.
+        Return absolute path to a robot model file, e.g. ``get_model_path("unitree_h1", "h1.xml")``.
+
+        The model files are downloaded on first use; see ``loco_mujoco.core.utils.models``.
+
+        Args:
+            *relative_parts (str): Path components relative to the directory of the robot models.
+
+        Returns:
+            str: The absolute path.
+
         """
-        return str(files("loco_mujoco_models").joinpath(*relative_parts))
+        return str(get_models_dir().joinpath(*relative_parts))
 
     def __init__(self,
                  spec: Union[MjSpec, str],
@@ -153,6 +204,7 @@ class Mujoco:
                  timestep: int = None,
                  n_substeps: int = 1,
                  model_option_conf: Dict = None,
+                 model_contact_conf: Dict = None,
                  reward_type: str = "NoReward",
                  reward_params: Dict = None,
                  goal_type: str = "NoGoal",
@@ -161,13 +213,14 @@ class Mujoco:
                  terminal_state_params: Dict = None,
                  domain_randomization_type: str = "NoDomainRandomization",
                  domain_randomization_params: Dict = None,
-                 terrain_type: str = "StaticTerrain",
+                 terrain_type: str = "FlatTerrain",
                  terrain_params: Dict = None,
                  init_state_type: str = "DefaultInitialStateHandler",
                  init_state_params: Dict = None,
                  control_type: str = "DefaultControl",
                  control_params: Dict = None,
                  max_num_samples_traj: int = 10_000,
+                 print_obs_summary: bool = True,
                  **viewer_params):
 
         # set the timestep if provided, else read it from model
@@ -176,6 +229,10 @@ class Mujoco:
                 model_option_conf = {"timestep": timestep}
             else:
                 model_option_conf["timestep"] = timestep
+
+        if model_contact_conf is not None:
+            spec = mujoco.MjSpec.from_file(spec) if isinstance(spec, str) else spec
+            spec = self._modify_contact_spec(spec, model_contact_conf)
 
         # load the model, spec and data
         self._init_model, self._model, self._data, self._mjspec = self.load_mujoco(spec, model_option_conf)
@@ -262,6 +319,10 @@ class Mujoco:
         self._max_num_samples_traj = max_num_samples_traj
         self._traj = None
         self._strict_traj = False  # when True, traj must be passed explicitly (no self._traj fallback)
+
+        # print the observation space to the terminal (disable with print_obs_summary=False)
+        if print_obs_summary:
+            self.print_observation_summary()
 
     def reset(self, key=None, traj: Optional[Trajectory] = None) -> np.ndarray:
         """
@@ -484,6 +545,12 @@ class Mujoco:
             ...
             env.render_usd()
             usd_path = env.stop_usd()
+
+        Args:
+            **exporter_params: Parameters of
+                :class:`~loco_mujoco.core.visuals.usd_exporter.UsdTrajectoryExporter`, which override the defaults
+                of the environment. Only used on the first call.
+
         """
         if self._terrain.is_dynamic:
             terrain_state = self._additional_carry.terrain_state
@@ -501,7 +568,13 @@ class Mujoco:
         self._usd_exporter.render(self._data, self._additional_carry)
 
     def stop_usd(self) -> Optional[str]:
-        """Finalize the offline USD export and return its path."""
+        """
+        Finalize the offline USD export and return its path.
+
+        Returns:
+            Optional[str]: Path of the written USD file, or None if nothing was exported.
+
+        """
         if self._usd_exporter is None:
             return self._usd_output_path
         self._usd_output_path = self._usd_exporter.stop()
@@ -602,6 +675,10 @@ class Mujoco:
         data, carry = self._terminal_state_handler.reset(self, model, data, carry, np, traj)
         data, carry = self._terrain.reset(self, model, data, carry, np, traj)
         data, carry = self._init_state_handler.reset(self, model, data, carry, np, traj)
+        if self._terrain.has_env_origins:
+            data = self._terrain.shift_to_env_origin(self, data, carry, np)
+        if self._terrain.grounds_robot:
+            data = self._terrain.ground_robot(self, data, np)
         data, carry = self._domain_randomizer.reset(self, model, data, carry, np, traj)
         data, carry = self._reward_function.reset(self, model, data, carry, np, traj)
         data, carry = self._control_func.reset(self, model, data, carry, np, traj)
@@ -913,7 +990,9 @@ class Mujoco:
                                    data: MjData,
                                    carry: AdditionalCarry,
                                    backend: ModuleType,
-                                   traj: Optional[Trajectory] = None) -> Tuple[np.ndarray, AdditionalCarry]:
+                                   traj: Optional[Trajectory] = None,
+                                   ind: Optional[np.ndarray] = None,
+                                   keep_layout: bool = False) -> Tuple[np.ndarray, AdditionalCarry]:
         """
         Creates the observation array by concatenating extracted observations from all types.
 
@@ -923,38 +1002,42 @@ class Mujoco:
             carry (AdditionalCarry): Additional carry information.
             backend (ModuleType): The numerical backend to use (NumPy or JAX NumPy).
             traj (Trajectory, optional): Trajectory to use.
+            ind (np.ndarray, optional): Entries of the observation to create. Only the observations that hold
+                one of them are computed. Defaults to all entries.
+            keep_layout (bool): With ``ind``: if True, the whole observation is returned with the other entries
+                at zero; if False, only the entries ``ind``, in this order.
 
         Returns:
             Tuple[np.ndarray, AdditionalCarry]: The observation array and updated carry.
         """
-        obs_not_stateful = backend.concatenate([
-            obs_type.get_all_obs_of_type(self, model, data, self._data_indices, backend)
-            for obs_type in ObservationType.list_all_non_stateful()
-        ])
+        n_obs = len(self._obs_indices.concatenated_indices) + len(self.obs_container.get_all_stateful_indices())
+        ind = np.arange(n_obs) if ind is None else np.asarray(ind)
 
-        obs_not_stateful = obs_not_stateful[self._obs_indices.concatenated_indices]
-
-        obs_stateful = []
+        # the observation vectors that hold a requested entry, and the entries they hold
+        vectors, entries = [], []
+        for obs_type in ObservationType.list_all_non_stateful():
+            type_entries = getattr(self._obs_indices, obs_type.__name__)
+            if np.isin(type_entries, ind).any():
+                vectors.append(obs_type.get_all_obs_of_type(self, model, data, self._data_indices, backend))
+                entries.append(type_entries)
         for obs in self.obs_container.list_all_stateful():
-            obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
-            obs_stateful.append(obs_s)
+            if np.isin(obs.obs_ind, ind).any():
+                obs_s, carry = obs.get_obs_and_update_state(self, model, data, carry, backend, traj)
+                vectors.append(obs_s)
+                entries.append(obs.obs_ind)
 
-        obs_stateful = backend.concatenate(obs_stateful)
-        stateful_obs_ind = self.obs_container.get_all_stateful_indices()
-
-        # merge the non-stateful and stateful observations and bring them in the order of the observation spec
-        merged = backend.empty(len(obs_not_stateful) + len(stateful_obs_ind), dtype=float)
-        mask = backend.ones(len(merged), dtype=bool)
+        # where each requested entry is in the concatenated vectors (-1: nowhere, a zero)
+        position = np.full(n_obs, -1)
+        position[np.concatenate(entries)] = np.arange(sum(len(e) for e in entries))
+        if keep_layout:
+            position[np.setdiff1d(np.arange(n_obs), ind)] = -1
+        else:
+            position = position[ind]
 
         if backend == np:
-            mask[stateful_obs_ind] = False
-            merged[mask] = obs_not_stateful
-            merged[stateful_obs_ind] = obs_stateful
+            merged = np.concatenate(vectors + [np.zeros(1)])[position].astype(float)
         elif backend == jnp:
-            mask = mask.at[stateful_obs_ind].set(False)
-            indices = jnp.where(mask, size=len(obs_not_stateful))[0]  # Convert boolean mask to indices
-            merged = merged.at[indices].set(obs_not_stateful)
-            merged = merged.at[stateful_obs_ind].set(obs_stateful)
+            merged = take_columns(vectors, position)
 
         return merged, carry
 
@@ -1135,6 +1218,33 @@ class Mujoco:
         return spec
 
     @staticmethod
+    def _modify_contact_spec(spec: MjSpec, contact_config: Dict) -> MjSpec:
+        """
+        Modifies the contact setup of all colliding geoms outside the world body.
+
+        Args:
+            spec (MjSpec): The Mujoco specification.
+            contact_config (Dict): "self_collisions" (bool, default True): if False, these geoms only collide
+                with the world body. "condim" (int, optional): contact dimensionality to set on them.
+
+        Returns:
+            MjSpec: The modified Mujoco specification.
+        """
+        self_collisions = contact_config.get("self_collisions", True)
+        condim = contact_config.get("condim")
+        for body in spec.bodies:
+            if body.name == spec.worldbody.name:
+                continue
+            for geom in body.geoms:
+                if geom.contype == 0 and geom.conaffinity == 0:
+                    continue
+                if not self_collisions:
+                    geom.contype, geom.conaffinity = 0, 1
+                if condim is not None:
+                    geom.condim = condim
+        return spec
+
+    @staticmethod
     def get_action_indices(model: MjModel, data: MjData, actuation_spec: List[str]) -> List[int]:
         """
         Returns the action indices given the MuJoCo model, data, and actuation specification.
@@ -1171,41 +1281,21 @@ class Mujoco:
                 info_props[attr_name] = deepcopy(getattr(self, attr_name))
         return info_props
 
-    def create_observation_summary(
-            self,
-            filename: Optional[str] = None,
-            open_in_browser: bool = True
-    ) -> str:
-        """Generates and uploads an HTML summary of a LocoMuJoCo environment's observations.
+    def _observation_summary_tables(self) -> List[Tuple[str, List[str], List[List[str]]]]:
+        """Builds the tables shown by the observation summaries.
 
-        This function creates a main table with all observations and additional group-specific
-        tables. Each table shows observation indices, names, types, min/max values, group membership,
-        and randomizability flags. Arrays longer than 6 elements are summarized by showing the
-        first 3 elements, an ellipsis (`...`), and the last 3 elements.
-        Observation indices and filtered indices are shown as `range(...)` if longer than 1.
-
-        The generated HTML is uploaded to https://0x0.st for easy sharing. If `filename` is provided,
-        it is also saved locally.
-
-        Args:
-            filename (str | None, optional): The filename to save the HTML locally. If None, nothing is saved.
-                Defaults to "obs_table.html".
-            open_in_browser (bool, optional): Whether to open the uploaded URL in the default browser.
-                Defaults to True.
+        The first table lists all observations, followed by one table per observation group. Arrays
+        longer than 6 elements are shortened to their first and last 3 elements, and index arrays
+        are shown as ``range(...)``.
 
         Returns:
-            str: A public URL to the uploaded HTML summary hosted on 0x0.st.
-
-        Raises:
-            Exception: If the upload to 0x0.st fails.
+            List[Tuple[str, List[str], List[List[str]]]]: One (title, column names, rows) tuple per table.
         """
-        obs_container = self.obs_container
-        env_name = self.__class__.__name__
 
         def summarize_array(arr, max_len=6, force_range: bool = False):
             if arr is None:
                 return "None"
-            arr_list = list(arr) if isinstance(arr, (np.ndarray, list)) else [arr]
+            arr_list = list(arr) if isinstance(arr, (np.ndarray, list, range)) else [arr]
             n = len(arr_list)
 
             if force_range and n > 1:
@@ -1217,143 +1307,135 @@ class Mujoco:
                 return f"{first_part}, ..., {last_part}"
             return ", ".join(map(str, arr_list))
 
-        html = f"""
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>LocoMuJoCo Observation Summary - {env_name}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; background: #f8f9fa; padding: 2rem; }}
-                table {{ border-collapse: collapse; width: 90%; margin: auto; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-                th, td {{ padding: 12px 18px; border: 1px solid #ddd; text-align: left; }}
-                th {{ background-color: rgb(9, 16, 61); color: white; }}
-                tr:hover {{ background-color: #f1f1f1; }}
-                h2 {{ text-align: center; }}
-            </style>
-        </head>
-        <body>
-            <h2>LocoMuJoCo Observation Summary – {env_name}</h2>
-            <table>
-                <tr>
-                    <th>Obs Indices</th>
-                    <th>Obs Name</th>
-                    <th>Obs Type</th>
-                    <th>Min / Max</th>
-                    <th>Group(s)</th>
-                    <th>Randomizable</th>
-                </tr>
-        """
-
-        for obs in obs_container.values():
-            obs_ind = summarize_array(obs.obs_ind, force_range=True)
-            name = obs.name
-            obs_type = obs.__class__.__name__
-
+        def describe(obs):
             if obs.min is not None and obs.max is not None:
-                min_vals = summarize_array(np.round(obs.min, 3))
-                max_vals = summarize_array(np.round(obs.max, 3))
-                minmax = f"{min_vals} / {max_vals}"
+                minmax = (f"{summarize_array(np.round(obs.min, 3))} / "
+                          f"{summarize_array(np.round(obs.max, 3))}")
             else:
                 minmax = "None"
+            groups = [g for g in (obs.group or []) if g is not None]
+            return [obs.name, obs.__class__.__name__, minmax,
+                    ", ".join(groups) if groups else "None", str(obs.allow_randomization)]
 
-            groups = "None"
-            if obs.group:
-                filtered = [g for g in obs.group if g is not None]
-                groups = ", ".join(filtered) if filtered else "None"
+        all_obs = list(self.obs_container.values())
+        common = ["Obs Name", "Obs Type", "Min / Max", "Group(s)", "Randomizable"]
 
-            rand = str(obs.allow_randomization)
+        tables = [("All observations", ["Obs Indices"] + common,
+                   [[summarize_array(obs.obs_ind, force_range=True)] + describe(obs) for obs in all_obs])]
 
-            html += f"""
-                <tr>
-                    <td>{obs_ind}</td>
-                    <td>{name}</td>
-                    <td>{obs_type}</td>
-                    <td>{minmax}</td>
-                    <td>{groups}</td>
-                    <td>{rand}</td>
-                </tr>
-            """
-
-        html += "</table>"
-
-        # Additional tables per group
-        all_groups = {g for obs in obs_container.values() if obs.group for g in obs.group if g is not None}
-
+        all_groups = {g for obs in all_obs for g in (obs.group or []) if g is not None}
         for group in sorted(all_groups):
-            filtered_obs = [obs for obs in obs_container.values() if group in (obs.group or [])]
-
-            html += f"""
-                <h2 style="text-align:center;">Group: {group}</h2>
-                <table>
-                    <tr>
-                        <th>Obs Indices</th>
-                        <th>Filtered Obs Indices</th>
-                        <th>Obs Name</th>
-                        <th>Obs Type</th>
-                        <th>Min / Max</th>
-                        <th>Group(s)</th>
-                        <th>Randomizable</th>
-                    </tr>
-            """
-
-            offset = 0
-            for obs in filtered_obs:
-                obs_ind = summarize_array(obs.obs_ind, force_range=True)
-                name = obs.name
-                obs_type = obs.__class__.__name__
-
-                if obs.min is not None and obs.max is not None:
-                    min_vals = summarize_array(np.round(obs.min, 3))
-                    max_vals = summarize_array(np.round(obs.max, 3))
-                    minmax = f"{min_vals} / {max_vals}"
-                else:
-                    minmax = "None"
-
-                groups = "None"
-                if obs.group:
-                    filtered_group = [g for g in obs.group if g is not None]
-                    groups = ", ".join(filtered_group) if filtered_group else "None"
-
-                rand = str(obs.allow_randomization)
-
+            rows, offset = [], 0
+            for obs in all_obs:
+                if group not in (obs.group or []):
+                    continue
                 dim = len(obs.obs_ind) if obs.obs_ind is not None else 0
-                filtered_indices = summarize_array(range(offset, offset + dim), force_range=True)
+                rows.append([summarize_array(obs.obs_ind, force_range=True),
+                             summarize_array(range(offset, offset + dim), force_range=True)]
+                            + describe(obs))
                 offset += dim
+            tables.append((f"Group: {group}", ["Obs Indices", "Filtered Obs Indices"] + common, rows))
 
-                html += f"""
-                    <tr>
-                        <td>{obs_ind}</td>
-                        <td>{filtered_indices}</td>
-                        <td>{name}</td>
-                        <td>{obs_type}</td>
-                        <td>{minmax}</td>
-                        <td>{groups}</td>
-                        <td>{rand}</td>
-                    </tr>
-                """
+        return tables
 
-            html += "</table>"
+    def print_observation_summary(self) -> None:
+        """Prints a summary of the environment's observations to the terminal.
 
-        html += "</body></html>"
+        Shows the same tables as :meth:`create_observation_summary`: one with all observations and
+        one per observation group, listing indices, names, types, min/max values, group membership
+        and randomizability flags.
+        """
+        from rich import box
+        from rich.console import Console
+        from rich.table import Table
+        from rich.text import Text
 
-        # Save to file if specified
-        if filename:
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(html)
+        console = Console()
+        env_name = self.__class__.__name__
+        obs_dim = sum(len(obs.obs_ind) for obs in self.obs_container.values() if obs.obs_ind is not None)
+        console.print(f"\n[bold]LocoMuJoCo Observation Summary – {env_name}[/bold] "
+                      f"[dim](observation dim: {obs_dim})[/dim]")
+        for title, columns, rows in self._observation_summary_tables():
+            table = Table(title=title, title_justify="left", title_style="bold cyan",
+                          box=box.SIMPLE_HEAD, header_style="bold")
+            for column in columns:
+                table.add_column(column, overflow="fold")
+            for row in rows:
+                table.add_row(*(Text(cell) for cell in row))
+            console.print(table)
 
-        # Upload HTML
-        files = {"file": ("file.html", html, "text/html")}
-        headers = {"User-Agent": "curl/7.68.0"}
-        res = requests.post("https://0x0.st", files=files, headers=headers)
+    def create_observation_summary(
+            self,
+            filename: Optional[str] = None,
+            open_in_browser: bool = True
+    ) -> str:
+        """Generates an HTML summary of a LocoMuJoCo environment's observations and opens it locally.
 
-        if res.status_code == 200:
-            url = res.text.strip()
-            print(f"✅ Uploaded Observation summary to: {url}")
-            if open_in_browser:
-                webbrowser.open(url)
-            return url
+        This function creates a main table with all observations and additional group-specific
+        tables. Each table shows observation indices, names, types, min/max values, group membership,
+        and randomizability flags. Arrays longer than 6 elements are summarized by showing the
+        first 3 elements, an ellipsis (`...`), and the last 3 elements.
+        Observation indices and filtered indices are shown as `range(...)` if longer than 1.
+
+        The HTML is written to a local file and opened from there, so no internet connection is
+        needed. If no browser is available (e.g., on a headless machine), the summary is printed
+        to the terminal instead. Use :meth:`print_observation_summary` to always print it.
+
+        Args:
+            filename (str | None, optional): Where to save the HTML. If None, it is written to the
+                system's temporary directory.
+            open_in_browser (bool, optional): Whether to open the file in the default browser.
+                Defaults to True.
+
+        Returns:
+            str: Path to the generated HTML file.
+        """
+        env_name = self.__class__.__name__
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>LocoMuJoCo Observation Summary - {escape(env_name)}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; background: #f8f9fa; padding: 2rem; }}
+        table {{ border-collapse: collapse; width: 90%; margin: auto; background: white;
+                 box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+        th, td {{ padding: 12px 18px; border: 1px solid #ddd; text-align: left; }}
+        th {{ background-color: rgb(9, 16, 61); color: white; }}
+        tr:hover {{ background-color: #f1f1f1; }}
+        h2 {{ text-align: center; }}
+    </style>
+</head>
+<body>
+"""
+        for i, (title, columns, rows) in enumerate(self._observation_summary_tables()):
+            heading = f"LocoMuJoCo Observation Summary – {env_name}" if i == 0 else title
+            html += f"    <h2>{escape(heading)}</h2>\n    <table>\n"
+            html += "        <tr>" + "".join(f"<th>{escape(c)}</th>" for c in columns) + "</tr>\n"
+            for row in rows:
+                html += "        <tr>" + "".join(f"<td>{escape(c)}</td>" for c in row) + "</tr>\n"
+            html += "    </table>\n"
+        html += "</body>\n</html>\n"
+
+        if filename is None:
+            path = Path(tempfile.gettempdir()) / f"loco_mujoco_obs_summary_{env_name}.html"
         else:
-            raise Exception(f"❌ Upload failed: {res.status_code} - {res.text}")
+            path = Path(filename).expanduser()
+        path = path.resolve()
+        path.write_text(html, encoding="utf-8")
+        print(f"Observation summary saved to: {path}")
+
+        if open_in_browser:
+            try:
+                opened = webbrowser.open(path.as_uri())
+            except webbrowser.Error:
+                opened = False
+            if not opened:
+                print("Could not open a browser, printing the observation summary instead.")
+                self.print_observation_summary()
+
+        return str(path)
 
     @staticmethod
     def parse_observation_spec(obs_spec: List[Dict]) -> List[ObservationType]:

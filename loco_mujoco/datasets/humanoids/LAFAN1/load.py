@@ -1,3 +1,10 @@
+"""
+Loading of LAFAN1 trajectories for an environment.
+
+The trajectories are taken from the local cache, downloaded from LocoMuJoCo's HuggingFace dataset repository or,
+for environments that have no dataset there, retargeted from another environment.
+"""
+
 import os
 from pathlib import Path
 from dataclasses import replace
@@ -16,7 +23,7 @@ import requests
 
 import loco_mujoco
 from loco_mujoco.core.utils.math import quat_scalarlast2scalarfirst
-from loco_mujoco.datasets.data_generation import ExtendTrajData, optimize_for_collisions, calculate_qvel_with_finite_difference
+from loco_mujoco.datasets.data_generation import ExtendTrajData, calculate_qvel_with_finite_difference
 from loco_mujoco.smpl.retargeting import load_robot_conf_file, retarget_traj_from_robot_to_robot
 from loco_mujoco.environments import LocoEnv
 from loco_mujoco.core.trajectory import (
@@ -43,10 +50,16 @@ def extend_motion(
     Extend a motion trajectory to include more model-specific entities
     like body xpos, site positions, etc. and to match the environment's frequency.
 
+    A helper environment is created, the trajectory is interpolated to its control frequency and replayed, and the
+    quantities computed by Mujoco's kinematics are recorded with
+    :class:`~loco_mujoco.datasets.data_generation.utils.ExtendTrajData`.
+
     Args:
         env_name (str): Name of the environment.
-        robot_conf (DictConfig): Configuration of the robot.
-        traj (Trajectory): The original trajectory data.
+        robot_conf (DictConfig): Configuration of the robot; its ``env_params`` are used to create the helper
+            environment.
+        traj (Trajectory): The original trajectory. It has to contain exactly one trajectory.
+        replace_qvel_with_finite_diff (bool): Currently not used.
 
     Returns:
         Trajectory: The extended trajectory.
@@ -56,7 +69,8 @@ def extend_motion(
     assert traj.data.n_trajectories == 1
 
     env_cls = LocoEnv.registered_envs[env_name]
-    env = env_cls(**robot_conf.env_params, th_params=dict(random_start=False, fixed_start_conf=(0, 0)))
+    env = env_cls(**robot_conf.env_params, th_params=dict(name="FixedStartTrajectoryHandler", start_conf=(0, 0)),
+                  print_obs_summary=False)   # internal helper environment
 
     traj_data, traj_info = interpolate_trajectories(traj.data, traj.info, 1.0 / env.dt)
     traj = Trajectory(info=traj_info, data=traj_data)
@@ -86,13 +100,21 @@ def load_lafan1_trajectory(
         source_env: str = _LAFAN1_RETARGET_SOURCE_ENV,
 ) -> Trajectory:
     """
-    Load a trajectory from the LAFAN1 dataset.
+    Load one or several LAFAN1 trajectories for an environment.
+
+    For each dataset, the trajectory is taken from the local cache (``LOCOMUJOCO_CONVERTED_LAFAN1_PATH``) if it
+    exists there. Otherwise it is downloaded from LocoMuJoCo's HuggingFace dataset repository or, if it is not
+    available there for this environment, loaded for ``source_env`` and retargeted to the environment. Trajectories
+    that are not complete are extended with :func:`extend_motion`, and the result is written to the cache if the
+    cache path is set. Several datasets are concatenated into one trajectory.
 
     Args:
-        env_name (str): The name of the environment.
-        dataset_name (Union[str, List[str]]): The name of the dataset(s) to load.
-        max_steps (int, optional): The maximum number of steps to optimize for collisions. Defaults to 100.
-        source_env (str, optional): Source env used when `env_name`'s LAFAN1 dataset
+        env_name (str): The name of the environment. A prefix ``Mjx`` is ignored.
+        dataset_name (Union[str, List[str]]): The name of the dataset(s) to load, with or without the extension
+            ``.npz`` (a ``.csv`` extension is removed as well).
+        max_steps (int, optional): Only passed on when the trajectory of the source environment is loaded;
+            otherwise not used. Defaults to 100.
+        source_env (str, optional): Source env used when the LAFAN1 dataset of ``env_name``
             is not on HuggingFace and retargeting on-the-fly is needed.
 
     Returns:
@@ -124,8 +146,10 @@ def load_lafan1_trajectory(
 
         # Strip the .npz suffix once up-front so it's consistent throughout
         # the loop (and for the recursive retargeting call).
-        if d_name.endswith(".npz"):
-            d_name = d_name[:-len(".npz")]
+        # (also accept the .csv suffix of the original Unitree-retargeted files)
+        for suffix in (".npz", ".csv"):
+            if d_name.endswith(suffix):
+                d_name = d_name[:-len(suffix)]
 
         if path_to_convert_lafan1_datasets:
             target_path_dataset = os.path.join(path_to_convert_lafan1_datasets, env_name, f"{d_name}.npz")

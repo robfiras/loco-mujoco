@@ -1,12 +1,27 @@
-"""TD3 (Twin Delayed Deep Deterministic policy gradient) on top of OffPolicyBase.
+"""
+Twin Delayed Deep Deterministic policy gradient (TD3) in JAX, built on
+:class:`~loco_mujoco.algorithms.experimental.offpolicy_base.OffPolicyBase`.
 
-Differences from SAC (everything else is shared via OffPolicyBase):
-  - Deterministic actor: actor(s) -> a in (-1, 1)  (tanh-squashed Dense head)
-  - Exploration noise added at env-collect time:  a = clip( a + N(0, σ_act), -1, 1 )
-  - Target policy smoothing: a' = clip( target_actor(s') + clip(N(0, σ_tgt), -c, c), -1, 1 )
-  - No entropy bonus in Q-target (next_q_bonus = 0)
-  - Actor loss = -E[ Q1(s, actor(s)) ]   (no min, just Q1)
-  - Delayed actor + target updates: every `policy_delay` critic steps
+Implements the off-policy deterministic actor-critic algorithm of Fujimoto et al. (2018). Differences from
+SAC (the replay buffer, the critic ensemble and the outline of the training loop are shared):
+
+- Deterministic actor (:class:`TD3ActorNet`). By default its output is unbounded and kept inside ``[-1, 1]``
+  by an out-of-bounds penalty in the actor loss; ``output_squash: tanh`` bounds it with a tanh instead.
+- Gaussian exploration noise is added at collection time: ``a = actor(s) + N(0, exploration_noise)``.
+- Target policy smoothing: ``a' = clip(target_actor(s') + clip(N(0, target_noise), -c, c), -1, 1)``.
+- No entropy bonus in the Q-target.
+- Actor loss ``-E[Q1(s, actor(s))]`` (the first critic only, no minimum) plus the out-of-bounds penalty and
+  an optional action-smoothness penalty.
+- Delayed updates of the actor and the target actor, every ``policy_delay`` critic steps. The target critic
+  is updated after every critic step.
+
+On top of plain TD3, the training function supports optional critic variants that are selected in the
+configuration: batch normalization (``use_batch_norm``), weight normalization (``use_weight_norm``), a
+categorical C51-style critic (``critic_loss: categorical``), more than two critics (``num_critics``) and a
+tunable pessimism of the ensemble target (``pessimism_penalty``).
+
+Example: ``examples/training_examples/jax_rl_mimic_td3``.
+
 """
 
 import ast
@@ -38,17 +53,29 @@ from loco_mujoco.algorithms.experimental.offpolicy_base import (
 # ---------------------------------------------------------------------------
 
 class TD3ActorNet(nn.Module):
-    """Deterministic actor.
+    """
+    Deterministic actor.
 
-    Default (output_squash="none") emits RAW (unbounded) logits — the env / actor
-    loss clips and penalises OOB. Bounding via tanh saturates gradients when
-    logits drift large, so unconstrained outputs preserve useful gradient inside
-    [-1, 1] at the cost of needing the OOB penalty to keep them there.
+    With the default ``output_squash="none"`` the network emits raw (unbounded) actions; the environment and the
+    actor loss clip and penalize out-of-bounds values. Bounding via tanh saturates the gradients when the
+    pre-activations drift to large values, so unconstrained outputs preserve a useful gradient inside ``[-1, 1]``
+    at the cost of needing the out-of-bounds penalty to keep them there.
 
-    output_squash="tanh" applies jnp.tanh to the final Dense output, bounding the
-    mean to (-1, 1) before exploration / target-policy noise is added. Use this
-    when the actor is drifting OOB enough that the critic extrapolation is
-    destabilising training (raw-actor failure mode on the kin G1 env).
+    ``output_squash="tanh"`` applies a tanh to the output of the last layer, bounding the action to ``(-1, 1)``
+    before exploration or target-policy noise is added. Use this when the actor drifts out of bounds far enough
+    that the extrapolation of the critic destabilizes training.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        hidden_layer_dims (tuple): Number of units of each hidden layer.
+        activation (str): Name of the activation function in ``flax.linen``.
+        use_obs_norm (bool): If True, the observation is normalized by a
+            :class:`~loco_mujoco.algorithms.common.networks.RunningMeanStd` layer.
+        output_squash (str): ``"none"`` or ``"tanh"``.
+        obs_ind (jax.Array): Indices of the observation entries the actor sees; ``None`` means all.
+        compute_dtype (str): Data type of the computation inside the Dense layers; the output is cast to
+            ``float32``.
+
     """
     action_dim: int
     hidden_layer_dims: tuple = (256, 256)
@@ -56,9 +83,23 @@ class TD3ActorNet(nn.Module):
     use_obs_norm: bool = True
     output_squash: str = "none"
     obs_ind: jnp.ndarray = None
+    compute_dtype: str = "float32"  # matmul dtype; the parameters and the output stay float32
 
     @nn.compact
     def __call__(self, x):
+        """
+        Compute the deterministic action.
+
+        Args:
+            x (jax.Array): Observations, shape ``(batch, obs_dim)``.
+
+        Returns:
+            jax.Array: Actions, shape ``(batch, action_dim)``.
+
+        Raises:
+            ValueError: If ``output_squash`` is neither ``"none"`` nor ``"tanh"``.
+
+        """
         activation_fn = get_activation_fn(self.activation)
         if self.obs_ind is not None:
             x = x[..., self.obs_ind]
@@ -66,10 +107,10 @@ class TD3ActorNet(nn.Module):
             x = RunningMeanStd()(x)
         for dim in self.hidden_layer_dims:
             x = nn.Dense(dim, kernel_init=orthogonal(jnp.sqrt(2)),
-                         bias_init=constant(0.0))(x)
+                         bias_init=constant(0.0), dtype=self.compute_dtype)(x)
             x = activation_fn(x)
         a = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01),
-                     bias_init=constant(0.0))(x)
+                     bias_init=constant(0.0), dtype=self.compute_dtype)(x).astype(jnp.float32)
         if self.output_squash == "tanh":
             a = jnp.tanh(a)
         elif self.output_squash != "none":
@@ -84,6 +125,29 @@ class TD3ActorNet(nn.Module):
 
 @struct.dataclass
 class TD3SummaryMetrics(SummaryMetrics):
+    """
+    Training metrics logged by TD3.
+
+    Extends :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics`. Every entry is an average over ``log_every``
+    training iterations (``buffer_size`` and ``max_timestep`` are taken at the end of that window); within an
+    iteration the values are averaged over the gradient steps.
+
+    Attributes:
+        mean_critic_loss (float): Mean critic loss, summed over the critics.
+        mean_actor_loss (float): Mean actor loss.
+        mean_action_norm (float): Mean L2 norm of the actor output on the training batches.
+        mean_oob_penalty (float): Mean squared amount by which the actor output leaves ``[-1, 1]``.
+        mean_critic_grad_norm (float): Mean global norm of the critic gradient before clipping.
+        mean_actor_grad_norm (float): Mean global norm of the actor gradient before clipping, over the gradient
+            steps in which the actor was updated.
+        mean_action_smoothness (float): Mean squared difference between the actions on consecutive observations;
+            zero unless ``lambda_action_smooth > 0``.
+        mean_curriculum_cur_max (float): Mean of ``curriculum_cur_max`` in the additional carry of the
+            environment states.
+        mean_global_step (float): Mean of ``global_step`` in the additional carry of the environment states.
+        buffer_size (int): Number of transitions in the replay buffer.
+
+    """
     mean_critic_loss: float = 0.0
     mean_actor_loss: float = 0.0
     mean_action_norm: float = 0.0
@@ -102,6 +166,17 @@ class TD3SummaryMetrics(SummaryMetrics):
 
 @dataclass(frozen=True)
 class TD3AgentConf(AgentConfBase):
+    """
+    Static configuration of a TD3 agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        actor_net (TD3ActorNet): The actor network definition.
+        critic_net (OffPolicyCriticNet): The critic network definition.
+        actor_tx: The Optax optimizer of the actor.
+        critic_tx: The Optax optimizer of the critic.
+
+    """
     config: DictConfig
     actor_net: TD3ActorNet
     critic_net: OffPolicyCriticNet
@@ -109,6 +184,15 @@ class TD3AgentConf(AgentConfBase):
     critic_tx: Any
 
     def serialize(self):
+        """
+        Serialize the agent configuration and the network definitions.
+
+        The optimizers are not serialized; they are rebuilt from the configuration in :meth:`from_dict`.
+
+        Returns:
+            dict: Dictionary with the keys ``"config"``, ``"actor_net"`` and ``"critic_net"``.
+
+        """
         conf_dict = OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True)
         return {
             "config": conf_dict,
@@ -118,6 +202,16 @@ class TD3AgentConf(AgentConfBase):
 
     @classmethod
     def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            TD3AgentConf: The restored configuration with newly built optimizers.
+
+        """
         config = OmegaConf.create(d["config"])
         exp = config.experiment
         actor_net = flax.serialization.from_state_dict(TD3ActorNet, d["actor_net"])
@@ -142,16 +236,44 @@ class TD3AgentConf(AgentConfBase):
 
 @struct.dataclass
 class _TD3Extra:
+    """
+    Extra state of TD3: the target actor.
+
+    Attributes:
+        target_actor_params: Parameters of the target actor.
+        target_actor_run_stats: Running statistics of the target actor.
+
+    """
     target_actor_params: Any
     target_actor_run_stats: Any
 
 
 @struct.dataclass
 class TD3AgentState(OffPolicyAgentState):
-    """TD3 agent state — extra_state carries `_TD3Extra` (target actor)."""
+    """
+    Dynamic state of a TD3 agent.
+
+    Same fields as :class:`~loco_mujoco.algorithms.experimental.offpolicy_base.OffPolicyAgentState`;
+    ``extra_state`` carries the parameters and running statistics of the target actor.
+
+    """
 
     @classmethod
     def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Actor, critic, target critic and target actor are restored; the replay buffer is created empty and
+        ``env_state`` and ``last_obs`` are ``None``.
+
+        Args:
+            d (dict): Dictionary created by ``serialize``.
+            agent_conf (TD3AgentConf): Agent configuration providing the networks and the optimizers.
+
+        Returns:
+            TD3AgentState: The restored agent state.
+
+        """
         exp = agent_conf.config.experiment
         obs_dim = int(exp.obs_dim)
         action_dim = int(exp.action_dim)
@@ -214,12 +336,60 @@ class TD3AgentState(OffPolicyAgentState):
 # ---------------------------------------------------------------------------
 
 class TD3Jax(OffPolicyBase):
+    """
+    Twin Delayed Deep Deterministic policy gradient (Fujimoto et al., 2018).
+
+    Off-policy actor-critic with a deterministic policy, an ensemble of Q-networks (two by default), target-policy
+    smoothing and delayed policy updates. See the docstring of this module for the differences from the original
+    algorithm and the optional critic variants. The usage follows
+    :class:`~loco_mujoco.algorithms.common.base_algorithm.JaxRLAlgorithmBase` (``init_agent_conf``,
+    ``init_agent_state``, ``build_train_fn``, ``save_agent``, ``play_policy``). A complete script is in
+    ``examples/training_examples/jax_rl_mimic_td3``.
+
+    """
     _agent_conf = TD3AgentConf
     _agent_state = TD3AgentState
 
     # ---------- Conf init -----------------------------------------------
     @classmethod
     def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived hyperparameters, the networks and the optimizers.
+
+        The hyperparameters are read from ``config.experiment``:
+
+        - ``num_envs``, ``total_timesteps``: number of parallel environments and total number of environment steps.
+        - ``buffer_size``, ``batch_size``, ``learning_starts``, ``gradient_steps``: replay buffer capacity, minibatch
+          size, number of stored transitions before learning starts (default ``batch_size``) and gradient steps per
+          environment step (default 1).
+        - ``gamma``, ``tau``: discount factor and Polyak rate of the target networks (default 0.005).
+        - ``lr_actor``, ``lr_critic``, ``max_grad_norm``: optimizer settings.
+        - ``exploration_noise``, ``target_noise``, ``noise_clip``, ``policy_delay``: the TD3 noise scales and the
+          policy delay.
+        - ``lambda_oob``, ``lambda_action_smooth``, ``stochastic_actor_loss``: weights of the out-of-bounds and the
+          action-smoothness penalty of the actor loss, and whether the actor loss queries the critic at a noisy
+          action.
+        - ``hidden_layers``, ``activation``, ``use_obs_norm``, ``output_squash``: network settings.
+        - ``actor_obs_group``, ``critic_obs_group`` (optional): observation groups seen by the actor and the critic;
+          by default both see the full observation.
+        - ``use_batch_norm``, ``pre_activation_bn``, ``use_weight_norm``, ``normalize_last_layer``, ``critic_loss``,
+          ``num_atoms``, ``min_v``, ``max_v``, ``num_critics``, ``pessimism_penalty`` (optional): critic variants.
+        - ``log_every``: number of training iterations aggregated into one row of the logged metrics.
+
+        The keys ``obs_dim``, ``action_dim`` and ``num_updates`` (``total_timesteps // num_envs``) are written to
+        ``config.experiment`` (the configuration is modified in place).
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            TD3AgentConf: The agent configuration.
+
+        Raises:
+            ValueError: If ``actor_obs_group`` or ``critic_obs_group`` selects no observation.
+
+        """
         obs_dim = int(env.info.observation_space.shape[0])
         action_dim = int(env.info.action_space.shape[0])
 
@@ -278,6 +448,19 @@ class TD3Jax(OffPolicyBase):
 
     @classmethod
     def init_agent_state(cls, env, agent_conf, rng):
+        """
+        Initialize the TD3 agent state (actor, critic, target networks and an empty replay buffer).
+
+        Args:
+            env: The environment (unused; the dimensions are taken from the configuration).
+            agent_conf (TD3AgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            TD3AgentState: The initial agent state; ``env_state`` and ``last_obs`` are ``None`` and get initialized
+            by the training function.
+
+        """
         exp = agent_conf.config.experiment
         obs_dim = int(exp.obs_dim)
         action_dim = int(exp.action_dim)
@@ -332,6 +515,7 @@ class TD3Jax(OffPolicyBase):
     # ---------- OffPolicyBase hooks -------------------------------------
     @classmethod
     def _init_extra_state(cls, rng, exp):
+        """Return an empty placeholder; the target actor is created in :meth:`init_agent_state`."""
         # Used only when called from base class; init_agent_state above does it
         # explicitly with proper shapes. This path is the "new run" path in
         # OffPolicyBase._train_fn. Init zeros — base class uses it only to
@@ -342,6 +526,11 @@ class TD3Jax(OffPolicyBase):
     @classmethod
     def _select_action(cls, actor_state, obs, rng, exp,
                        extra_state, deterministic=False):
+        """
+        Return the actor output, plus unclipped Gaussian exploration noise unless ``deterministic``; see the base
+        class.
+
+        """
         action, updates = actor_state.apply_fn(
             {"params": actor_state.params, "run_stats": actor_state.run_stats},
             obs, mutable=["run_stats"],
@@ -361,6 +550,11 @@ class TD3Jax(OffPolicyBase):
 
     @classmethod
     def _next_action_and_q_bonus(cls, actor_state, next_obs, rng, exp, extra_state):
+        """
+        Return the target actor's action with clipped smoothing noise, clipped to ``[-1, 1]``, and a zero bonus; see
+        the base class.
+
+        """
         # Target policy smoothing using TARGET actor (extra_state.target_actor_*)
         sigma_tgt = float(getattr(exp, 'target_noise', 0.2))
         noise_clip = float(getattr(exp, 'noise_clip', 0.5))
@@ -378,6 +572,32 @@ class TD3Jax(OffPolicyBase):
     def _actor_loss(cls, actor_params, actor_apply_fn, actor_run_stats,
                     critic_st, critic_apply_fn,
                     obs_b, rng, exp, extra_state, nobs_b=None):
+        """
+        Compute the TD3 actor loss.
+
+        The loss is ``-mean(Q1(s, a))`` plus ``lambda_oob * mean(|Q1|) * mean(max(|a| - 1, 0)^2)`` on the raw actor
+        output and, if ``lambda_action_smooth > 0`` and ``nobs_b`` is given, ``lambda_action_smooth`` times the mean
+        squared difference between the actions on ``obs_b`` and ``nobs_b``. The critic is queried at the clipped
+        action, at the raw action if ``lambda_oob == 0``, or at a noisy clipped action if ``stochastic_actor_loss``
+        is set.
+
+        Args:
+            actor_params: Actor parameters the loss is differentiated with respect to.
+            actor_apply_fn (Callable): ``apply`` function of the actor network.
+            actor_run_stats: Running statistics of the actor.
+            critic_st (TrainState): Train state of the critic.
+            critic_apply_fn (Callable): ``apply`` function of the critic network.
+            obs_b (jax.Array): Batch of observations, shape ``(batch, obs_dim)``.
+            rng (jax.Array): PRNG key.
+            exp (DictConfig): The ``experiment`` node of the configuration.
+            extra_state: Extra state (unused).
+            nobs_b (jax.Array): Batch of next observations for the smoothness penalty, shape ``(batch, obs_dim)``.
+
+        Returns:
+            Tuple[jax.Array, dict]: The scalar loss and a dictionary with the keys ``"run_stats"``,
+            ``"action_norm"``, ``"oob_penalty"``, ``"q_scale"`` and ``"action_smoothness"``.
+
+        """
         action_raw, updates = actor_apply_fn(
             {"params": actor_params, "run_stats": actor_run_stats},
             obs_b, mutable=["run_stats"],
@@ -462,6 +682,7 @@ class TD3Jax(OffPolicyBase):
 
     @classmethod
     def _update_extra(cls, extra_state, actor_aux, rng, exp):
+        """Return the extra state unchanged; the target actor is updated in :meth:`_train_fn`."""
         # Soft-update the target actor (Polyak) when actor was updated
         # We need the *online* actor params. The base class doesn't pass them
         # here, so we cannot soft-update target actor in this hook.
@@ -477,15 +698,18 @@ class TD3Jax(OffPolicyBase):
 
     @classmethod
     def _should_update_actor(cls, step_count, exp):
+        """Return True in every ``policy_delay``-th gradient step (default 2) of an iteration."""
         policy_delay = int(getattr(exp, 'policy_delay', 2))
         return jnp.equal(jnp.mod(step_count, policy_delay), 0)
 
     @classmethod
     def _extra_metrics(cls, actor_state, obs, rng, extra_state, exp):
+        """Return no extra metrics; the TD3 metrics are assembled in :meth:`_train_fn`."""
         return {}
 
     @classmethod
     def _build_summary_metric(cls, base_kwargs, extra):
+        """Assemble a :class:`TD3SummaryMetrics` from the base and the extra metrics."""
         return TD3SummaryMetrics(
             mean_action_norm=extra.get("action_norm", 0.0),
             **base_kwargs,
@@ -498,6 +722,36 @@ class TD3Jax(OffPolicyBase):
     @classmethod
     def _train_fn(cls, rng, env, agent_conf, agent_state=None, traj=None,
                   mh=None):
+        """
+        Run the TD3 training loop.
+
+        Overrides the loop of the base class to add the target actor, the optional critic variants and the TD3
+        metrics. ``num_updates`` iterations are performed. Each one steps all ``num_envs`` environments once with the
+        noisy actor, adds the transitions to the replay buffer (the ``absorbing`` flag is stored as the done flag)
+        and, if the buffer holds at least ``learning_starts`` transitions, runs ``gradient_steps`` gradient steps. A
+        gradient step updates the critics (mean squared error to the Q-target, or cross-entropy to the projected
+        target distribution with ``critic_loss: categorical``), optionally renormalizes the critic weights, updates
+        the actor and Polyak-averages the target actor in every ``policy_delay``-th step, and Polyak-averages the
+        target critic.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The (unwrapped) environment.
+            agent_conf (TD3AgentConf): Static agent configuration.
+            agent_state (TD3AgentState): Agent state to start or resume from. If ``None``, a new one is initialized.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step``; ``None`` if the task has no trajectory.
+            mh (MetricsHandler): Unused; no validation is run during training.
+
+        Returns:
+            dict: Dictionary with the keys
+
+            - ``"agent_state"`` (:class:`TD3AgentState`): the agent state after training, including replay buffer,
+              last environment state and last observation.
+            - ``"training_metrics"`` (:class:`TD3SummaryMetrics`): metrics with a leading axis of length
+              ``max(1, num_updates // log_every)``; each entry aggregates ``log_every`` (default 100) iterations.
+            - ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`): always empty.
+
+        """
         from loco_mujoco.algorithms.experimental.offpolicy_base import (
             OffPolicyAgentState as _S,
         )
@@ -953,6 +1207,30 @@ class TD3Jax(OffPolicyBase):
                     record=False, rng=None, deterministic=True,
                     use_mujoco=False, wrap_env=True,
                     train_state_seed=None, traj=None):
+        """
+        Roll out a trained policy in a Python loop and render it.
+
+        By default the policy runs in ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU
+        MuJoCo environment instead. The environment is stopped at the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (TD3AgentConf): Agent configuration.
+            agent_state (TD3AgentState): Agent state holding the trained actor.
+            n_envs (int): Number of parallel environments; use 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Unused; the environment is rendered at every step.
+            record (bool): Whether to record a video of the MJX rollout. The MuJoCo rollout is always recorded.
+            rng (jax.Array): PRNG key for environment resets and action noise. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If False, Gaussian exploration noise is added to the action, which is then clipped to
+                ``[-1, 1]``.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            wrap_env (bool): If True (and not ``use_mujoco``), the environment is wrapped as during training.
+                Pass False if ``env`` is already wrapped.
+            train_state_seed (int): Unused; agents trained with several seeds are not supported here.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
         import numpy as np
 
         exp = agent_conf.config.experiment

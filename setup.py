@@ -10,7 +10,8 @@ def glob_data_files(data_package, data_type=None):
     directories = glob.glob(data_dir+'/**/', recursive=True)
     for directory in directories:
         subdir = directory[len(data_dir)+1:]
-        if subdir != "":
+        # bytecode caches of a working copy are not data; without this check they end up in the wheel
+        if subdir != "" and "__pycache__" not in subdir:
             files = subdir + data_type
             data_files.append(files)
     return data_files

@@ -1,3 +1,5 @@
+"""Base class of the initial state handlers."""
+
 from typing import Any, Union, Dict, List, Tuple
 from types import ModuleType
 
@@ -9,7 +11,16 @@ from loco_mujoco.core.utils import assert_backend_is_supported
 
 
 class InitialStateHandler(StatefulObject):
-    """ Base class for initial state handlers. """
+    """
+    Base class for initial state handlers.
+
+    An initial state handler sets the state of the simulation (``qpos`` and ``qvel``) in its ``reset`` method at
+    the beginning of every episode.
+
+    Attributes:
+        registered (Dict[str, type]): Registry of initial state handler classes by name.
+
+    """
     registered: Dict[str, type] = dict()
 
     def __init__(self, env: any, **kwargs: Dict):
@@ -37,6 +48,7 @@ class InitialStateHandler(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.

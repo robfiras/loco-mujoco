@@ -3,7 +3,7 @@ defaults:
   - override hydra/launcher: basic
 
 wandb:
-  project: "deepmimic-SAC"
+  project: "deepmimic-TD3"
 
 experiment:
   task_factory:
@@ -16,6 +16,7 @@ experiment:
     env_name: MjxUnitreeG1
     headless: True
     horizon: 1000
+    use_mjwarp: False
     goal_type: GoalTrajMimic
     goal_params:
       visualize_goal: true
@@ -35,29 +36,36 @@ experiment:
         - right_hand_mimic
         - right_foot_mimic
   hidden_layers: [256, 256]
-  activation: tanh
-  init_std: 0.1
-  learnable_std: true
-  state_dependent_std: false
+  activation: relu
   lr_actor: 3e-4
   lr_critic: 3e-4
-  lr_alpha: 3e-4
-  init_alpha: 0.01
-  learnable_alpha: true
-  target_entropy: -43.7  # 19 * log(0.1) for UnitreeG1 (19 actuators)
+  exploration_noise: 0.1
+  target_noise: 0.1
+  noise_clip: 0.3
+  policy_delay: 1
+  lambda_oob: 0.1  # out-of-bounds penalty scale (actor loss adds lambda*mean(|Q|)*mean(oob^2))
+  # NOTE: off-policy learning is incompatible with running-stat normalization
+  # (stale buffer entries were normalized under old stats while current
+  # critic/target see new stats). Keep obs+reward norm off.
+  use_obs_norm: false  # disables RunningMeanStd inside actor/critic nets
   gamma: 0.99
   tau: 0.005
   buffer_size: 1000000
   batch_size: 256
-  learning_starts: 10000
+  learning_starts: 1000000
   gradient_steps: 20
   max_grad_norm: 0.5
   num_envs: 2048
-  total_timesteps: 20e6
+  total_timesteps: 10e6
+  # experiment_resume.py trains in chunks of this many environment steps and carries the agent state
+  # (networks, optimizers, replay buffer) from one chunk to the next
   timesteps_per_chunk: 1e6
-  normalize_env: true
-  log_std_min: -20.0
-  log_std_max: 2.0
+  # Aggregate metrics over `log_every` outer-loop iterations before emitting
+  # one wandb row. Each iteration = one vmapped env step (`num_envs` frames
+  # collected in parallel) + `gradient_steps` updates. So with num_envs=2048
+  # and log_every=100, a row is emitted every 100 * 2048 = 204_800 env frames.
+  log_every: 100
+  normalize_env: false  # disables NormalizeVecReward wrapper
   n_seeds: 1
   vmap_across_seeds: true
   debug: false

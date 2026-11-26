@@ -19,10 +19,11 @@ swap_seed: 0
 traj_swap:
   dataset_type: mocap
   pairs:
-    # expert_walk: covers three walking styles
-    - expert_ckpt:  /home/moore/PycharmProjects/loco-mujoco/outputs/2026-04-21/16-42-08/PPOJax_saved.pkl
+    # Replace the placeholders with the checkpoints of your own teachers (PPOJax checkpoints, e.g. trained
+    # with examples/training_examples/jax_rl_mimic on the task named under `traj`).
+    - expert_ckpt: /path/to/teacher_squat/PPOJax_saved.pkl
       traj: squat
-    - expert_ckpt: /home/moore/PycharmProjects/loco-mujoco/outputs/2026-04-21/17-01-20/PPOJax_saved.pkl
+    - expert_ckpt: /path/to/teacher_stepinplace1/PPOJax_saved.pkl
       traj: stepinplace1
 
 

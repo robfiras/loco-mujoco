@@ -1,3 +1,7 @@
+"""
+Mjx (GPU-parallel) version of the Unitree H1 environment.
+"""
+
 import mujoco
 from mujoco import MjSpec
 
@@ -5,10 +9,35 @@ from .unitreeH1 import UnitreeH1
 
 
 class MjxUnitreeH1(UnitreeH1):
+    """
+    Mjx version of the Unitree H1 environment.
+
+    Same robot, observation space and action space as
+    :class:`~loco_mujoco.environments.humanoids.unitreeH1.UnitreeH1`, but with ``mjx_enabled = True``, so that the
+    environment can be simulated in parallel on the GPU through the functional JAX interface
+    (``mjx_reset``/``mjx_step``). Mjx handles many complex contacts poorly. The foot meshes are by default replaced by
+    two capsules per foot, and collisions are reduced to these capsules against the floor and against the capsules of
+    the other foot (see :meth:`_modify_spec_for_mjx`), and a cheaper solver configuration is used by default.
+
+    Pass ``mjx_reduced_contacts=False`` to keep the collision geometry of the original model instead.
+
+    """
 
     mjx_enabled = True
     
     def __init__(self, timestep=0.002, n_substeps=5, **kwargs):
+        """
+        Constructor.
+
+        Args:
+            timestep (float): Simulation timestep in seconds.
+            n_substeps (int): Number of simulation steps per environment step. With the defaults, one environment
+                step takes 0.01 s.
+            **kwargs: Additional arguments passed to
+                :class:`~loco_mujoco.environments.humanoids.unitreeH1.UnitreeH1`. If ``model_option_conf`` is not
+                given, the MuJoCo options are set to ``iterations=2``, ``ls_iterations=4`` and Euler damping disabled.
+
+        """
         if "model_option_conf" not in kwargs.keys():
             model_option_conf = dict(iterations=2, ls_iterations=4, disableflags=mujoco.mjtDisableBit.mjDSBL_EULERDAMP)
         else:
@@ -18,17 +47,22 @@ class MjxUnitreeH1(UnitreeH1):
 
     def _modify_spec_for_mjx(self, spec: MjSpec):
         """
-        Mjx is bad in handling many complex contacts. To speed-up simulation significantly we apply
-        some changes to the XML:
-            1. Replace the complex foot meshes with primitive shapes. Here, one foot mesh is replaced with
-               two capsules.
-            2. Disable all contacts except the ones between feet and the floor.
+        Simplifies the contacts of the model to speed up the simulation in Mjx.
+
+        The following changes are applied:
+
+        1. The foot mesh geoms (``right_foot`` and ``left_foot``) are deleted.
+        2. All remaining geoms are excluded from collision detection (``contype`` and ``conaffinity`` set to 0).
+        3. Each foot is replaced by two capsules (``right_foot1``, ``right_foot2``, ``left_foot1``, ``left_foot2``)
+           attached to the ankle links.
+        4. Explicit contact pairs are added between the floor and each capsule, and between each capsule of the
+           right foot and each capsule of the left foot.
 
         Args:
-            spec (MjSpec): Mujoco specification.
+            spec (MjSpec): MuJoCo specification of the model. It is modified in place.
 
         Returns:
-            Modified Mujoco specification.
+            MjSpec: The modified MuJoCo specification.
 
         """
 

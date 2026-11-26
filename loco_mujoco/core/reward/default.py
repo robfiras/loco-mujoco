@@ -1,3 +1,5 @@
+"""Reward functions that do not need a reference trajectory: no reward, velocity tracking and a locomotion reward."""
+
 from types import ModuleType
 from typing import Any, Dict, Tuple, Union
 
@@ -48,6 +50,7 @@ class NoReward(Reward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.
@@ -103,6 +106,7 @@ class TargetXVelocityReward(Reward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.
@@ -130,6 +134,8 @@ class TargetVelocityGoalReward(Reward):
             env (Any): The environment instance.
             tracking_w_exp_xy (float, optional): The exponential weight for xy-tracking reward.
             tracking_w_exp_yaw (float, optional): The exponential weight for yaw-tracking reward.
+            tracking_w_sum_xy (float, optional): The weight of the xy-tracking reward in the total reward.
+            tracking_w_sum_yaw (float, optional): The weight of the yaw-tracking reward in the total reward.
             **kwargs (Any): Additional keyword arguments.
 
         """
@@ -145,9 +151,7 @@ class TargetVelocityGoalReward(Reward):
 
         # find the goal velocity observation
         assert "GoalRandomRootVelocity" in env.obs_container, \
-            f"GoalRandomRootVelocity is the required goal for the reward for{self.__class__.__name__}"
-
-        super().__init__(env, **kwargs)
+            f"GoalRandomRootVelocity is the required goal for the reward {self.__class__.__name__}"
 
     def __call__(self,
                  state: Union[np.ndarray, jnp.ndarray],
@@ -176,6 +180,7 @@ class TargetVelocityGoalReward(Reward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.
@@ -294,6 +299,7 @@ class LocomotionReward(TargetVelocityGoalReward):
             model (Union[MjModel, Model]): The simulation model.
             data (Union[MjData, Data]): The simulation data.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             LocomotionRewardState: The initialized reward state.
@@ -318,6 +324,7 @@ class LocomotionReward(TargetVelocityGoalReward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated data and carry.
@@ -354,6 +361,7 @@ class LocomotionReward(TargetVelocityGoalReward):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Additional carry.
             backend (ModuleType): Backend module used for computation (either numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[float, Any]: The reward for the current transition and the updated carry.

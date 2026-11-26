@@ -5,8 +5,6 @@
 * ``loco_mujoco.utils.running_stats`` -- the working parts of the running-stat
   utilities (Welford standardization + window reset/mean).
 
-NOTE: ``RunningAveragedWindow.update_state`` is left uncovered on purpose -- it is
-currently broken (see comment in the window test) and is dead code besides.
 """
 import mujoco
 import numpy as np
@@ -142,10 +140,36 @@ def test_running_average_window_reset_and_mean():
     assert state.storage.shape == (3,)
     assert int(state.index) == 0 and int(state.curr_size) == 0
 
-    # mean() is a pure staticmethod over the stored window; build a filled state
-    # directly (update_state is currently broken -- it atleast_2d's the value to
-    # (1,1) which cannot scatter into the scalar storage slot, and reset() only
-    # supports scalar shape, so it is effectively dead).
+    # mean() is a pure staticmethod over the stored window
     filled = RunningAverageWindowState(storage=jnp.array([2.0, 4.0, 6.0]),
                                        index=0, curr_size=3)
     assert float(RunningAveragedWindow.mean(filled)) == pytest.approx(4.0)
+
+
+def test_running_average_window_update():
+    # scalar values: the window wraps around after window_size updates
+    raw = RunningAveragedWindow(shape=(), window_size=3)
+    state = raw.reset()
+    for v in (1.0, 2.0, 3.0, 10.0):
+        state = raw.update_state(jnp.array(v), state)
+    assert int(state.curr_size) == 3 and int(state.index) == 1
+    np.testing.assert_allclose(np.asarray(state.storage), [10.0, 2.0, 3.0])
+    assert float(RunningAveragedWindow.mean(state)) == pytest.approx(5.0)
+
+    # vector values
+    raw = RunningAveragedWindow(shape=(2,), window_size=4)
+    state = raw.reset()
+    assert state.storage.shape == (4, 2)
+    state = raw.update_state(jnp.array([1.0, 3.0]), state)
+    state = raw.update_state(jnp.array([3.0, 5.0]), state)
+    np.testing.assert_allclose(np.asarray(RunningAveragedWindow.mean(state)), [2.0, 4.0])
+
+
+def test_running_standardization_non_scalar_shape():
+    # reset() used to pass the shape as dtype, which failed for every shape but ()
+    rs = RunningStandardization(shape=(3,), alpha=1e-3)
+    state = rs.reset()
+    assert state.mean.shape == (1, 3) and state.std.shape == (1, 3)
+    state = rs.update_state(jnp.ones((5, 3)), state)
+    assert int(state.count) == 6
+    assert state.mean.shape == (1, 3) and bool(jnp.isfinite(state.mean).all())

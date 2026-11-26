@@ -1,3 +1,5 @@
+"""OpenGL viewer for MuJoCo and MJX environments, with a GLFW window or headless (offscreen) rendering."""
+
 import os
 import warnings
 
@@ -12,18 +14,21 @@ from loco_mujoco.core.visuals.video_recorder import VideoRecorder
 
 
 def _import_egl(width, height):
+    """Create an EGL OpenGL context of the given size."""
     from mujoco.egl import GLContext
 
     return GLContext(width, height)
 
 
 def _import_glfw(width, height):
+    """Create a GLFW OpenGL context of the given size."""
     from mujoco.glfw import GLContext
 
     return GLContext(width, height)
 
 
 def _import_osmesa(width, height):
+    """Create an OSMesa OpenGL context of the given size."""
     from mujoco.osmesa import GLContext
 
     return GLContext(width, height)
@@ -38,9 +43,40 @@ _ALL_RENDERERS = collections.OrderedDict(
 )
 
 
+
+def move_camera(model, action, reldx, reldy, scene, camera):
+    """
+    Move the camera with the mouse.
+
+    Wraps ``mujoco.mjv_moveCamera``, which takes no scene argument from MuJoCo 4 on.
+
+    Args:
+        model (MjModel): Mujoco model.
+        action (mujoco.mjtMouse): Mouse action (rotate, move or zoom).
+        reldx (float): Relative mouse displacement in x.
+        reldy (float): Relative mouse displacement in y.
+        scene (mujoco.MjvScene): Scene; only passed to MuJoCo versions that expect it.
+        camera (mujoco.MjvCamera): Camera to move.
+
+    """
+    try:
+        mujoco.mjv_moveCamera(model, action, reldx, reldy, scene, camera)
+    except TypeError:
+        mujoco.mjv_moveCamera(model, action, reldx, reldy, camera)
+
+
 class MujocoViewer:
     """
     Class that creates a viewer for mujoco environments.
+
+    The viewer either opens a GLFW window or renders offscreen (headless), and can record the rendered frames
+    to a video. Besides the simulation, it draws the visual geoms that stateful objects store in the user scene
+    of the carry. For MJX environments, :meth:`parallel_render` shows several environments side by side.
+
+    In the window, the following keys are available: SPACE pauses, TAB switches between the camera modes
+    ("static", "follow", "top_static"), S and F slow down and speed up the playback, H hides the menu, T makes
+    the model transparent, E toggles reference frames, C toggles the contact force visualization, M toggles the
+    mimic sites and 0-5 toggle the geom groups. The mouse rotates, moves and zooms the camera.
 
     """
 
@@ -54,22 +90,25 @@ class MujocoViewer:
         Constructor.
 
         Args:
-            model: Mujoco model.
+            model (MjModel): Mujoco model.
             dt (float): Timestep of the environment, (not the simulation).
             viewer_size (tuple): Tuple of width and height of the viewer window.
             start_paused (bool): If True, the rendering is paused in the beginning of the simulation.
             custom_render_callback (func): Custom render callback function, which is supposed to be called
-                during rendering.
-            record (bool): If true, frames are returned during rendering.
+                during rendering. It is called with the viewport and the rendering context.
+            record (bool): If True, the rendered frames are written to a video and the window size is fixed.
             camera_params (dict): Dictionary of dictionaries including custom parameterization of the three cameras.
-                Checkout the function get_default_camera_params() to know what parameters are expected. Is some camera
+                Checkout the function get_default_camera_params() to know what parameters are expected. If some camera
                 type specification or parameter is missing, the default one is used.
-            hide_menu_on_startup (bool): If True, the menu is hidden on startup.
+            default_camera_mode (str): Camera mode on startup, one of "static", "follow" and "top_static".
+            hide_menu_on_startup (bool): If True, the menu is hidden on startup. Defaults to True in headless mode
+                and to False otherwise.
             geom_group_visualization_on_startup (int/list): int or list defining which geom group_ids should be
                 visualized on startup. If None, all are visualized.
             mimic_site_visualization_on_startup (bool): If True, mimic sites are visualized on startup.
             headless (bool): If True, render will be done in headless mode.
-            recorder_params (dict): Dictionary of parameters for the video recorder.
+            recorder_params (dict): Dictionary of parameters for the video recorder. The frame rate defaults to
+                ``1 / dt``.
 
         """
 
@@ -182,7 +221,7 @@ class MujocoViewer:
         This is used in MultiMujoco environments.
 
         Args:
-            model: Mujoco model.
+            model (MjModel): Mujoco model.
 
         """
 
@@ -239,7 +278,7 @@ class MujocoViewer:
         else:
             action = mujoco.mjtMouse.mjMOUSE_ZOOM
 
-        mujoco.mjv_moveCamera(self._model, action, dx / width, dy / height, self._scene, self._camera)
+        move_camera(self._model, action, dx / width, dy / height, self._scene, self._camera)
 
     def keyboard(self, window, key, scancode, act, mods):
         """
@@ -323,9 +362,10 @@ class MujocoViewer:
 
         """
 
-        mujoco.mjv_moveCamera(self._model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self._scene, self._camera)
+        move_camera(self._model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0, 0.05 * y_offset, self._scene, self._camera)
 
     def _set_mujoco_buffers(self):
+        """Create the rendering context and select the offscreen (headless) or the window framebuffer."""
         self._context = mujoco.MjrContext(self._model, mujoco.mjtFontScale(self._font_scale))
         if self._headless:
             mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self._context)
@@ -337,6 +377,20 @@ class MujocoViewer:
                 raise RuntimeError("Window rendering not supported")
 
     def update_headless_size(self, width, height):
+        """
+        Make sure that the offscreen framebuffer of the model is large enough for the requested image size.
+
+        If the requested size exceeds the offscreen buffer, ``model.vis.global_.offwidth`` and ``offheight`` are
+        enlarged in place.
+
+        Args:
+            width (int): Requested image width in pixels.
+            height (int): Requested image height in pixels.
+
+        Returns:
+            Tuple[int, int]: Width and height to render with.
+
+        """
         _context = mujoco.MjrContext(self._model, mujoco.mjtFontScale(self._font_scale))
         if width > _context.offWidth or height > _context.offHeight:
             width = max(width, self._model.vis.global_.offwidth)
@@ -349,8 +403,13 @@ class MujocoViewer:
         return width, height
 
     def _add_user_scene_geoms(self):
+        """Append the geoms of the viewer's own user scene to the scene that is rendered."""
         for i in range(self._user_scene.ngeom):
             j = self._scene.ngeom
+            if j >= self._scene.maxgeom:
+                raise RuntimeError(
+                    'Ran out of geoms. maxgeom: %d' %
+                    self._scene.maxgeom)
             # Copy all attributes from obj1 to obj2
             mujoco.mjv_initGeom(self._scene.geoms[j],
                                 self._user_scene.geoms[i].type,
@@ -359,22 +418,23 @@ class MujocoViewer:
                                 self._user_scene.geoms[i].mat.reshape(-1),
                                 self._user_scene.geoms[i].rgba)
             self._scene.ngeom += 1
-            if self._scene.ngeom >= self._scene.maxgeom:
-                raise RuntimeError(
-                    'Ran out of geoms. maxgeom: %d' %
-                    self._scene.ngeom.maxgeom)
 
     def render(self, data, carry, record):
         """
         Main rendering function.
 
+        Renders the scene, including the visual geoms in ``carry.user_scene``. Without recording, as many frames
+        are drawn as needed to play the simulation at the selected speed; while the viewer is paused, the function
+        blocks and keeps redrawing. If the viewer was created with ``record=True``, the frame is also added to the
+        video.
+
         Args:
-            data: Mujoco data structure.
-            carry: Carry object.
-            record (bool): If true, frames are returned during rendering.
+            data (MjData): Mujoco data structure.
+            carry (AdditionalCarry): Additional carry holding the user scene.
+            record (bool): If True, exactly one frame is rendered per call.
 
         Returns:
-            If record is True, frames are returned during rendering, else None.
+            np.ndarray: The rendered RGB image, shape ``(height, width, 3)``.
 
         """
 
@@ -392,10 +452,10 @@ class MujocoViewer:
             # add visual geoms
             carry_visual_start_idx = self._scene.ngeom
             for j in range(carry.user_scene.ngeoms):
-                if self._scene.ngeom > self._scene.maxgeom:
+                if self._scene.ngeom >= self._scene.maxgeom:
                     raise RuntimeError(
                         'Ran out of geoms. maxgeom: %d' %
-                        self._scene.ngeom.maxgeom)
+                        self._scene.maxgeom)
                 mujoco.mjv_initGeom(self._scene.geoms[carry_visual_start_idx + j],
                                     carry.user_scene.geoms.type[j],
                                     carry.user_scene.geoms.size[j],
@@ -464,14 +524,18 @@ class MujocoViewer:
 
     def parallel_render(self, mjx_state, record, offset=2.0):
         """
-        Main rendering function.
+        Render several MJX environments side by side in one scene.
+
+        The environments are arranged on a square grid by shifting the x-y position of the root and of the mocap
+        bodies; this assumes that the first two entries of ``qpos`` are the x-y position of the root.
 
         Args:
-            datas: List of Mjx state.
-            record (bool): If true, frames are returned during rendering.
+            mjx_state (MjxState): Batched Mjx state with a leading dimension over the environments.
+            record (bool): If True, exactly one frame is rendered per call.
+            offset (float): Distance between neighbouring environments on the grid in meters.
 
         Returns:
-            If record is True, frames are returned during rendering, else None.
+            np.ndarray: The rendered RGB image, shape ``(height, width, 3)``.
 
         """
 
@@ -555,10 +619,10 @@ class MujocoViewer:
                 # add visual geoms
                 carry_visual_start_idx = self._scene.ngeom
                 for j in range(n_visual_geoms):
-                    if self._scene.ngeom > self._scene.maxgeom:
+                    if self._scene.ngeom >= self._scene.maxgeom:
                         raise RuntimeError(
                             'Ran out of geoms. maxgeom: %d' %
-                            self._scene.ngeom.maxgeom)
+                            self._scene.maxgeom)
                     mujoco.mjv_initGeom(
                         self._scene.geoms[carry_visual_start_idx + j],
                         int(np.asarray(visual_geoms_type[i, j]).item()),
@@ -631,14 +695,14 @@ class MujocoViewer:
 
     def read_pixels(self, depth=False):
         """
-        Reads the pixels from the glfw viewer.
+        Reads the pixels of the last rendered frame.
 
         Args:
             depth (bool): If True, depth map is also returned.
 
         Returns:
-            If depth is True, tuple of np.arrays (rgb and depth), else just a single
-            np.array for the rgb image.
+            Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: If depth is True, tuple of np.arrays (rgb and depth),
+            else just a single np.array for the rgb image.
 
         """
 
@@ -659,14 +723,17 @@ class MujocoViewer:
 
     def stop(self):
         """
-        Destroys the glfw image.
+        Destroys the glfw window and stops the video recording.
 
         Returns:
-            If record was True, the video is saved and the path is returned.
+            str: If the viewer records, the video is saved and its path is returned; otherwise None.
 
         """
-        if not self._headless:
+        # stop() runs twice when the user closes the window: once from the render loop and once more
+        # at interpreter exit. Destroying a window a second time crashes, so it is done only once.
+        if not self._headless and self._window is not None:
             glfw.destroy_window(self._window)
+            self._window = None
         if self._recorder:
             return self._recorder.stop()
         else:
@@ -828,10 +895,11 @@ class MujocoViewer:
     @staticmethod
     def get_default_camera_params():
         """
-        Getter for default camera paramterization.
+        Getter for default camera parameterization.
 
         Returns:
-            Dictionary of dictionaries with default parameters for each camera type.
+            dict: Dictionary of dictionaries with default parameters ("distance", "elevation", "azimuth" and, for the
+            static cameras, "lookat") for each camera type.
 
         """
 
@@ -840,6 +908,23 @@ class MujocoViewer:
                     top_static=dict(distance=5.0, elevation=-90.0, azimuth=90.0, lookat=np.array([0.0, 0.0, 0.0])))
 
     def setup_opengl_backend_headless(self, width, height):
+        """
+        Create an OpenGL context for headless rendering.
+
+        The backend is taken from the environment variable ``MUJOCO_GL`` ("glfw", "egl" or "osmesa"). If it is not
+        set, the backends are tried in that order and the first one that works is used.
+
+        Args:
+            width (int): Width of the context in pixels.
+            height (int): Height of the context in pixels.
+
+        Returns:
+            Any: The OpenGL context (``GLContext`` of the chosen MuJoCo backend).
+
+        Raises:
+            RuntimeError: If ``MUJOCO_GL`` names an unknown backend or no backend is available.
+
+        """
 
         backend = os.environ.get("MUJOCO_GL")
         if backend is not None:
@@ -874,18 +959,32 @@ class MujocoViewer:
         Uploads the height field to the GPU.
 
         Args:
-            model: Mujoco model.
-            hfield_id: Height field id.
+            model (MjModel): Mujoco model.
+            hfield_id (int): Height field id.
 
         """
         mujoco.mjr_uploadHField(model, self._context, hfield_id)
 
     @property
     def user_scene(self):
+        """
+        Scene for user-defined geoms that are drawn on top of the simulation in every frame.
+
+        Returns:
+            mujoco.MjvScene: The user scene of the viewer.
+
+        """
         return self._user_scene
 
     @property
     def video_file_path(self):
+        """
+        Path of the video file of the recorder.
+
+        Returns:
+            str: The path, or None if the viewer does not record.
+
+        """
         if self._recorder is not None:
             return self._recorder.file_path
         else:

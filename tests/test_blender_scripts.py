@@ -7,8 +7,9 @@ from types import SimpleNamespace
 import mujoco
 import numpy as np
 import pytest
-from PIL import Image
-from pxr import Usd
+
+Image = pytest.importorskip("PIL.Image", reason="install the blender extra to test the Blender scripts")
+Usd = pytest.importorskip("pxr.Usd", reason="install the blender extra to test the Blender scripts")
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "blender" / "render_locomujoco.py"

@@ -1,3 +1,7 @@
+"""
+Environment of the Atlas humanoid robot (CPU MuJoCo backend).
+"""
+
 from typing import Union, List, Tuple
 import mujoco
 from mujoco import MjSpec
@@ -14,11 +18,21 @@ class Atlas(BaseRobotHumanoid):
     Description
     ------------
 
-    Mujoco environment of the Atlas robot.
+    Mujoco environment of the Atlas robot, a humanoid robot developed by Boston Dynamics. The environment is
+    adapted from the Atlas environment of LS-IQ (Al-Hafez et al., 2023).
+
+    The robot has a floating base and 27 actuated joints: 3 back joints, 6 joints per arm and 6 joints per
+    leg. By default, the observation consists of the pose of the floating base without its x-y position
+    (height and orientation quaternion), all joint positions, the linear and angular velocity of the floating
+    base, and all joint velocities. The action contains one target per actuated joint, which is tracked by a
+    PD controller, unless another ``control_type`` is passed.
+
+    The arms and the back joints can be removed with the constructor arguments ``disable_arms`` and
+    ``disable_back_joint``, which also removes the respective entries from the observation and action space.
 
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================== ================ ==================================== ============================== ===
     Index in Obs Name               ObservationType  Min                                  Max                            Dim
@@ -137,7 +151,7 @@ class Atlas(BaseRobotHumanoid):
     ============ ================== ================ ==================================== ============================== ===
 
     Default Action Space
-    -----------------
+    --------------------
 
     Control function type: **PDControl**
 
@@ -215,12 +229,23 @@ class Atlas(BaseRobotHumanoid):
         Constructor.
 
         Args:
-            disable_arms (bool): If True, all arm joints are removed and the respective actuators are removed from the action specification.
-            disable_back_joint (bool): If True, the back joint is removed and the respective actuators are removed from the action specification.
-            spec (Union[str, MjSpec]): Specification of the environment. It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            observation_spec (List[ObservationType]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments.
+            disable_arms (bool): If True, all arm joints are removed from the model, and the respective
+                observations and actuators are removed from the observation and action specification.
+            disable_back_joint (bool): If True, the three back joints are removed from the model, and the
+                respective observations and actuators are removed from the observation and action specification.
+            spec (Union[str, MjSpec]): Model to simulate, either a path to a MuJoCo XML file or an ``MjSpec``
+                object. If None, the default model of this environment is used.
+            observation_spec (List[ObservationType]): Observations that make up the observation vector, given as
+                observation objects or as dictionaries with a ``type`` key naming the observation type and its
+                parameters as the remaining keys. If None, the default observation space is used.
+            actuation_spec (List[str]): Names of the actuators in the model that are controlled by the action.
+                If None, the default action space is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. If no
+                ``control_type`` is given, ``PDControl`` with the gains :attr:`p_gains` and :attr:`d_gains` is
+                used. The extra key ``mjx_reduced_contacts`` (bool, default True) only affects the Mjx variant:
+                if True, the contacts are reduced by ``_modify_spec_for_mjx``; if False, the collision
+                geometries of the model are kept.
+
         """
 
         self._disable_arms = disable_arms
@@ -248,7 +273,9 @@ class Atlas(BaseRobotHumanoid):
             kwargs["control_params"] = dict(p_gain=self.p_gains, d_gain=self.d_gains, scale_action_to_jnt_limits=False)
 
         # modify the specification if needed
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             spec = self._modify_spec_for_mjx(spec)
         if disable_arms or disable_back_joint:
 
@@ -262,10 +289,12 @@ class Atlas(BaseRobotHumanoid):
 
     def _get_spec_modifications(self) -> Tuple[List[str], List[str], List[str]]:
         """
-        Function that specifies which joints, motors, and equality constraints should be removed from the Mujoco xml.
+        Specifies which joints, motors, and equality constraints should be removed from the Mujoco specification.
 
         Returns:
-            A tuple of lists consisting of names of joints to remove, names of motors to remove, and names of equality constraints to remove.
+            Tuple[List[str], List[str], List[str]]: Names of the joints to remove, names of the motors to
+            remove, and names of the equality constraints to remove.
+
         """
 
         joints_to_remove = []
@@ -294,7 +323,8 @@ class Atlas(BaseRobotHumanoid):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of observation types.
+            List[ObservationType]: List of observations.
+
         """
         observation_spec = [# ------------- JOINT POS -------------
                             ObservationType.FreeJointPosNoXY("q_root", xml_name="root"),
@@ -362,6 +392,10 @@ class Atlas(BaseRobotHumanoid):
     def p_gains(self) -> Union[float, List[float]]:
         """
         Returns the proportional gains for the default PD controller.
+
+        Returns:
+            Union[float, List[float]]: Proportional gain, here a single value used for all joints.
+
         """
         return 100.0
 
@@ -369,6 +403,10 @@ class Atlas(BaseRobotHumanoid):
     def d_gains(self) -> Union[float, List[float]]:
         """
         Returns the derivative gains for the default PD controller.
+
+        Returns:
+            Union[float, List[float]]: Derivative gain, here a single value used for all joints.
+
         """
         return 1.0
 
@@ -381,7 +419,8 @@ class Atlas(BaseRobotHumanoid):
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of actuator names.
+            List[str]: List of actuator names.
+
         """
 
         action_spec = ["back_bkz_actuator", "back_bky_actuator", "back_bkx_actuator", "l_arm_shz_actuator",
@@ -399,20 +438,42 @@ class Atlas(BaseRobotHumanoid):
     def get_default_xml_file_path(cls) -> str:
         """
         Returns the default path to the xml file of the environment.
+
+        Returns:
+            str: Path to the default xml file.
+
         """
         return cls.get_model_path("atlas", "atlas.xml")
 
     @info_property
     def upper_body_xml_name(self) -> str:
+        """
+        Returns the name of the upper body in the Mujoco xml.
+
+        Returns:
+            str: Name of the upper body.
+
+        """
         return "utorso"
 
     @info_property
     def root_free_joint_xml_name(self) -> str:
+        """
+        Returns the name of the free joint of the root in the Mujoco xml.
+
+        Returns:
+            str: Name of the free joint.
+
+        """
         return "root"
 
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
         Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
+
         """
         return (0.0, 1.0)

@@ -1,0 +1,2635 @@
+"""
+SuperMimic: whole-body tracking with one differentiable world model.
+
+Follows Liao et al., "SuperMimic: Scaling Humanoid Whole-Body Control with One Differentiable World
+Model" (2026, arXiv:2610.28480), Algorithm A.1:
+
+1. collect one vectorised env step with the deterministic policy plus Gaussian action noise,
+2. fit a world model on k-step windows of the replay buffer (autoregressive loss, Eq. 1),
+3. improve the policy by backpropagating through H-step imagined rollouts of the frozen
+   world model (Eq. 2), with a TD(lambda) critic bootstrapping the tail (Eq. 3).
+
+The paper's world model predicts the simulator state and computes observations and rewards
+*analytically* from it through a differentiable forward kinematics of the G1. Here the same
+role is played by the environment itself: an imagined step is an ordinary ``mjx_step`` in
+which the simulation is replaced by the learned dynamics (``physics_fn``) followed by
+``mjx.kinematics`` / ``com_pos`` / ``com_vel``. Observations (including observation history
+and domain-randomisation noise), rewards, trajectory bookkeeping and absorbing checks are the
+environment's own JAX functions, so the algorithm is agnostic to the robot, the observation
+and the reward. Only kinematic quantities are recomputed: terms that read contacts
+(``data.contact``) or actuator forces (``data.qfrc_actuator``) see the values of the
+imagination start state for the whole horizon (with MjWarp: none at all) and pass no gradient.
+
+World-model state: MuJoCo's own ``(qpos, qvel)``. The model must have a free root joint
+followed by hinge/slide joints only (true for all floating-base robots in LocoMuJoCo). The
+network sees heading-invariant features and predicts velocity increments plus position
+corrections on top of explicit integration; its last layer is zero-initialised, so at init it
+extrapolates at constant velocity.
+
+Termination: the terminal state handler's ``mjx_absorbing_prob`` if it has one, else a learned
+head on (a group of) the next observation, trained on the env's ``absorbing`` label. The
+probability gives the soft survival weight of the imagined rewards, so the policy also gets a
+gradient away from termination.
+
+Domain randomisation: when the env randomises (any randomizer other than
+``NoDomainRandomization``), the per-episode randomizer and control-function states are
+flattened into a context vector ``xi`` that the dynamics and the critic receive. Otherwise
+``xi`` is empty.
+
+Backends: the environment steps can run on MJX or on MjWarp (``use_mjwarp=True``). The gradients of the
+imagined rollouts run through the kinematics, which the warp kernels cannot differentiate, so with MjWarp
+only the real steps use warp and imagination gets a JAX copy of the model.
+
+Example: ``examples/training_examples/jax_rl_mimic_supermimic``.
+
+"""
+
+import ast
+import functools
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any, NamedTuple
+
+import numpy as np
+import jax
+import jax.numpy as jnp
+import flax
+import flax.linen as nn
+from flax import struct, traverse_util
+from flax.linen.initializers import constant, orthogonal, variance_scaling, zeros
+import mujoco
+from mujoco import mjx
+import optax
+from omegaconf import DictConfig, OmegaConf, ListConfig, open_dict
+
+from loco_mujoco.algorithms import JaxRLAlgorithmBase, AgentConfBase, AgentStateBase, TrainState
+from loco_mujoco.algorithms.common.networks import get_activation_fn
+from loco_mujoco.algorithms.experimental.td3_jax import TD3ActorNet
+from loco_mujoco.core import MjxState
+from loco_mujoco.core.domain_randomizer import NoDomainRandomization
+from loco_mujoco.core.utils.flat_kinematics import FlatKinematics
+from loco_mujoco.core.utils.math import take_columns
+from loco_mujoco.core.utils.math import (eps_norm as _safe_norm, quat_mul as _quat_mul, quat_conj as _quat_conj,
+                                         quat_rotate as _quat_rotate, quat_rotate_inv as _quat_rotate_inv,
+                                         quat_normalize as _quat_normalize, heading_quat as _heading_quat,
+                                         quat_from_rotvec as _quat_from_rotvec,
+                                         rotvec_from_quat as _rotvec_from_quat, rot6d_from_quat as _rot6d_from_quat)
+from loco_mujoco.core.wrappers import SummaryMetrics
+from loco_mujoco.core.wrappers.mjx import BaseWrapper, VECENV_AXIS_NAME
+from loco_mujoco.utils import ValidationSummary
+
+
+# ---------------------------------------------------------------------------
+# World-model state representation
+# ---------------------------------------------------------------------------
+
+class WorldModelSpec:
+    """
+    Feature map, integration step and error metric of the world model on ``(qpos, qvel)``.
+
+    The state uses the MuJoCo free-joint layout::
+
+        qpos = [root_pos (3), root_quat (4), joint_pos (nj)]
+        qvel = [root_lin_vel_w (3), root_ang_vel_b (3), joint_vel (nj)]
+
+    Features (heading-invariant), divided by ``in_scale``::
+
+        [root_z, rot6d(heading^-1 * root_quat), lin_vel in heading frame, ang_vel_b, joint_pos, joint_vel]
+
+    The network output, multiplied by ``out_scale``, is
+    ``delta = [dv_h (3), dw_b (3), dqd (nj), dp_h (3), dth_b (3), dq (nj)]`` and is integrated as (for
+    ``drift = 1``; ``R_h`` rotates from the heading frame to the world frame)::
+
+        v' = v + R_h dv_h,   w' = w + dw_b,   qd' = qd + dqd
+        p' = p + dt v' + R_h dp_h,   q' = q * exp(dt w' + dth_b),   qj' = qj + dt qd' + dq
+
+    With ``drift < 1`` the positions are advanced with ``(1 - drift) * old + drift * new`` velocities.
+
+    """
+
+    def __init__(self, nj, dt, in_scale, out_scale, err_scale, drift=1.0):
+        """
+        Initialize the specification.
+
+        Args:
+            nj (int): Number of hinge/slide joints (``nq - 7``).
+            dt (float): Time step of one environment step in seconds.
+            in_scale (Sequence[float]): Six scales, one per feature group ``[root_z, rot6d, lin_vel, ang_vel,
+                joint_pos, joint_vel]``; the features are divided by them.
+            out_scale (Sequence[float]): Six scales, one per output group ``[dv_h, dw_b, dqd, dp_h, dth_b, dq]``; the
+                network output is multiplied by them.
+            err_scale (Sequence[float]): Six scales, one per error group ``[root pos, root rotation vector, root
+                linear velocity, root angular velocity, joint pos, joint vel]``; the errors are divided by them.
+            drift (float): Weight of the new velocity in the position update; the old velocity gets ``1 - drift``.
+
+        """
+        self.nj = int(nj)
+        self.dt = float(dt)
+        self.drift = float(drift)  # weight of the new velocity in the position update
+        rep = lambda scales, sizes: jnp.concatenate(  # noqa: E731
+            [jnp.full((n,), float(s)) for s, n in zip(scales, sizes)])
+        self.in_scale = rep(in_scale, (1, 6, 3, 3, self.nj, self.nj))
+        self.out_scale = rep(out_scale, (3, 3, self.nj, 3, 3, self.nj))
+        self.err_scale = rep(err_scale, (3, 3, 3, 3, self.nj, self.nj))
+
+    @property
+    def feat_dim(self):
+        """int: Dimension of the feature vector, ``13 + 2 * nj``."""
+        return 13 + 2 * self.nj
+
+    @property
+    def delta_dim(self):
+        """int: Dimension of the network output, ``12 + 2 * nj``."""
+        return 12 + 2 * self.nj
+
+    @staticmethod
+    def _split(qpos, qvel):
+        """Split ``qpos`` and ``qvel`` into their root and joint parts (root quaternion normalized)."""
+        return qpos[..., 0:3], _quat_normalize(qpos[..., 3:7]), qpos[..., 7:], \
+            qvel[..., 0:3], qvel[..., 3:6], qvel[..., 6:]
+
+    def features(self, qpos, qvel):
+        """
+        Compute the heading-invariant, scaled input features of the world model.
+
+        Args:
+            qpos (jax.Array): Generalized positions, shape ``(..., 7 + nj)``.
+            qvel (jax.Array): Generalized velocities, shape ``(..., 6 + nj)``.
+
+        Returns:
+            jax.Array: Features of shape ``(..., feat_dim)``.
+
+        """
+        p, q, qj, v, w, qd = self._split(qpos, qvel)
+        hq = _heading_quat(q)
+        q_local = _quat_mul(_quat_conj(hq), q)
+        feat = jnp.concatenate([p[..., 2:3], _rot6d_from_quat(q_local), _quat_rotate_inv(hq, v),
+                                w, qj, qd], axis=-1)
+        return feat / self.in_scale
+
+    def integrate(self, qpos, qvel, delta):
+        """
+        Advance a state by one step with the output of the world model.
+
+        Args:
+            qpos (jax.Array): Generalized positions, shape ``(..., 7 + nj)``.
+            qvel (jax.Array): Generalized velocities, shape ``(..., 6 + nj)``.
+            delta (jax.Array): Network output (not yet multiplied by ``out_scale``), shape ``(..., delta_dim)``.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: The next ``qpos`` (with a normalized root quaternion) and the next ``qvel``.
+
+        """
+        nj = self.nj
+        d = delta * self.out_scale
+        dv_h, dw_b, dqd = d[..., 0:3], d[..., 3:6], d[..., 6:6 + nj]
+        dp_h, dth_b, dq = d[..., 6 + nj:9 + nj], d[..., 9 + nj:12 + nj], d[..., 12 + nj:]
+        p, q, qj, v, w, qd = self._split(qpos, qvel)
+        hq = _heading_quat(q)
+        v_new = v + _quat_rotate(hq, dv_h)
+        w_new = w + dw_b
+        qd_new = qd + dqd
+        c_old, c_new = self.dt * (1.0 - self.drift), self.dt * self.drift
+        p_new = p + c_old * v + c_new * v_new + _quat_rotate(hq, dp_h)
+        q_new = _quat_normalize(_quat_mul(q, _quat_from_rotvec(c_old * w + c_new * w_new + dth_b)))
+        qj_new = qj + c_old * qd + c_new * qd_new + dq
+        return (jnp.concatenate([p_new, q_new, qj_new], axis=-1),
+                jnp.concatenate([v_new, w_new, qd_new], axis=-1))
+
+    def targets(self, qpos, qvel, qpos_next, qvel_next):
+        """
+        Compute the network output that makes :meth:`integrate` go from one state to the next.
+
+        Args:
+            qpos (jax.Array): Generalized positions, shape ``(..., 7 + nj)``.
+            qvel (jax.Array): Generalized velocities, shape ``(..., 6 + nj)``.
+            qpos_next (jax.Array): Generalized positions of the next state.
+            qvel_next (jax.Array): Generalized velocities of the next state.
+
+        Returns:
+            jax.Array: Target output (already divided by ``out_scale``), shape ``(..., delta_dim)``.
+
+        """
+        p, q, qj, v, w, qd = self._split(qpos, qvel)
+        p1, q1, qj1, v1, w1, qd1 = self._split(qpos_next, qvel_next)
+        hq = _heading_quat(q)
+        c_old, c_new = self.dt * (1.0 - self.drift), self.dt * self.drift
+        delta = jnp.concatenate([_quat_rotate_inv(hq, v1 - v), w1 - w, qd1 - qd,
+                                 _quat_rotate_inv(hq, p1 - p - c_old * v - c_new * v1),
+                                 _rotvec_from_quat(_quat_mul(_quat_conj(q), q1)) - c_old * w - c_new * w1,
+                                 qj1 - qj - c_old * qd - c_new * qd1], axis=-1)
+        return delta / self.out_scale
+
+    def error(self, qpos_pred, qvel_pred, qpos_true, qvel_true):
+        """
+        Compute the normalized error vector between a predicted and a true state.
+
+        Args:
+            qpos_pred (jax.Array): Predicted generalized positions, shape ``(..., 7 + nj)``.
+            qvel_pred (jax.Array): Predicted generalized velocities, shape ``(..., 6 + nj)``.
+            qpos_true (jax.Array): True generalized positions.
+            qvel_true (jax.Array): True generalized velocities.
+
+        Returns:
+            jax.Array: ``[dp, rotvec, dv, dw, dqj, dqd] / err_scale``, shape ``(..., 12 + 2 * nj)``, where ``rotvec``
+            is the rotation vector between the two root orientations.
+
+        """
+        p1, q1, qj1, v1, w1, qd1 = self._split(qpos_pred, qvel_pred)
+        p2, q2, qj2, v2, w2, qd2 = self._split(qpos_true, qvel_true)
+        rot = _rotvec_from_quat(_quat_mul(_quat_conj(q2), q1))
+        err = jnp.concatenate([p1 - p2, rot, v1 - v2, w1 - w2, qj1 - qj2, qd1 - qd2], axis=-1)
+        return err / self.err_scale
+
+
+def check_floating_base(model):
+    """
+    Check that the model has the joint layout SuperMimic supports.
+
+    ``qpos`` and ``qvel`` must be laid out as a free root joint followed by hinge/slide joints only.
+
+    Args:
+        model (mujoco.MjModel): The MuJoCo model.
+
+    Returns:
+        int: Number of hinge/slide joints.
+
+    Raises:
+        ValueError: If the first joint is not a free joint or if there are other joint types than hinge and slide.
+
+    """
+    if model.njnt == 0 or model.jnt_type[0] != mujoco.mjtJoint.mjJNT_FREE or model.jnt_qposadr[0] != 0:
+        raise ValueError("SuperMimic needs a free root joint as the first joint of the model.")
+    others = model.jnt_type[1:]
+    ok = np.isin(others, (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE))
+    if not np.all(ok):
+        raise ValueError("SuperMimic supports only hinge/slide joints besides the free root joint.")
+    if model.nq - 7 != model.nv - 6:
+        raise ValueError(f"Unexpected joint layout: nq={model.nq}, nv={model.nv}.")
+    return model.nq - 7
+
+
+# ---------------------------------------------------------------------------
+# Domain-randomisation context
+# ---------------------------------------------------------------------------
+
+def uses_domain_randomization(env):
+    """
+    Check whether the environment randomizes its domain.
+
+    Args:
+        env: The (unwrapped) environment.
+
+    Returns:
+        bool: False if the domain randomizer of the environment is ``NoDomainRandomization``, True otherwise.
+
+    """
+    return not isinstance(env._domain_randomizer, NoDomainRandomization)
+
+
+def context_from_carry(carry, enabled, index=None):
+    """
+    Flatten the per-episode randomizer and control-function states into one context vector.
+
+    Only floating-point leaves of the two states are used.
+
+    Args:
+        carry: Additional carry of a single (unbatched) environment state.
+        enabled (bool): If False, an empty context is returned.
+        index (Sequence[int]): Entries of the flattened vector to return; ``None`` returns all.
+
+    Returns:
+        jax.Array: The context ``xi`` as a 1D ``float32`` array (of length zero if not enabled).
+
+    """
+    if not enabled:
+        return jnp.zeros((0,))
+    leaves = jax.tree.leaves((carry.domain_randomizer_state, carry.control_func_state))
+    leaves = [jnp.ravel(jnp.asarray(x)) for x in leaves]
+    leaves = [x.astype(jnp.float32) for x in leaves if jnp.issubdtype(x.dtype, jnp.floating)]
+    xi = jnp.concatenate(leaves) if leaves else jnp.zeros((0,))
+    return xi if index is None else xi[jnp.array(index, dtype=int)]
+
+
+def context_index(env, n_samples=32):
+    """
+    Find the entries of the context that differ between episodes.
+
+    The environment is reset ``n_samples`` times and the entries of the context whose standard deviation
+    exceeds ``1e-6`` are kept; the others tell the networks nothing.
+
+    Args:
+        env: The (unwrapped) environment.
+        n_samples (int): Number of resets used to detect the varying entries.
+
+    Returns:
+        List[int]: Indices into the full context vector (empty without domain randomization).
+
+    """
+    if not uses_domain_randomization(env):
+        return []
+    @jax.jit  # compiled: op by op, every primitive of the reset is its own compilation
+    def contexts(keys):
+        states = jax.vmap(env.mjx_reset, axis_name=VECENV_AXIS_NAME)(keys)
+        return jax.vmap(lambda c: context_from_carry(c, True))(states.additional_carry)
+
+    xi = contexts(jax.random.split(jax.random.PRNGKey(0), n_samples))
+    return np.flatnonzero(np.asarray(jnp.std(xi, axis=0)) > 1e-6).tolist()
+
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+
+class _MLP(nn.Module):
+    """MLP with optional layer normalization, zero-initialized last layer and PyTorch-like initialization."""
+    hidden_layer_dims: tuple
+    out_dim: int
+    activation: str = "silu"
+    zero_last: bool = False
+    compute_dtype: str = "float32"  # matmul dtype; the parameters and the output stay float32
+    layer_norm: bool = False
+    last_gain: float = 1.0
+    torch_init: bool = False  # torch.nn.Linear's init: a third of the default variance, uniform biases
+
+    @nn.compact
+    def __call__(self, x):
+        act = get_activation_fn(self.activation)
+
+        def init(fan_in):
+            if not self.torch_init:
+                return {}
+            bound = fan_in ** -0.5
+            return dict(kernel_init=variance_scaling(1 / 3, "fan_in", "uniform"),
+                        bias_init=lambda key, shape, dtype=jnp.float32: jax.random.uniform(key, shape, dtype, -bound, bound))
+
+        for dim in self.hidden_layer_dims:
+            x = nn.Dense(dim, dtype=self.compute_dtype, **init(x.shape[-1]))(x)
+            if self.layer_norm:
+                x = nn.LayerNorm(dtype=jnp.float32)(x)
+            x = act(x)
+        last = dict(kernel_init=zeros if self.zero_last else orthogonal(self.last_gain), bias_init=constant(0.0))
+        if self.torch_init and not self.zero_last:
+            kernel = variance_scaling(self.last_gain ** 2 / 3, "fan_in", "uniform")
+            last = {**init(x.shape[-1]), "kernel_init": kernel}
+            if self.last_gain != 1.0:
+                last["bias_init"] = constant(0.0)
+        x = nn.Dense(self.out_dim, dtype=self.compute_dtype, **last)(x)
+        return x.astype(jnp.float32)
+
+
+class SuperMimicWorldModelNet(nn.Module):
+    """
+    World-model network: a dynamics MLP with zero-initialized output and a termination head.
+
+    Attributes:
+        delta_dim (int): Output dimension of the dynamics MLP (see :class:`WorldModelSpec`).
+        hidden_layer_dims (tuple): Hidden layers of the dynamics MLP.
+        term_hidden_layer_dims (tuple): Hidden layers of the termination head.
+        activation (str): Name of the activation function in ``flax.linen``.
+        compute_dtype (str): Data type of the matrix multiplications; parameters and outputs stay ``float32``.
+        layer_norm (bool): Whether the hidden layers of the dynamics MLP use layer normalization.
+        torch_init (bool): Whether the dynamics MLP uses the initialization of ``torch.nn.Linear``.
+
+    """
+    delta_dim: int
+    hidden_layer_dims: tuple = (2048, 2048, 2048)
+    term_hidden_layer_dims: tuple = (64, 64)
+    activation: str = "silu"
+    compute_dtype: str = "float32"
+    layer_norm: bool = False
+    torch_init: bool = False
+
+    def setup(self):
+        """Create the dynamics MLP and the termination head."""
+        self.dynamics_net = _MLP(self.hidden_layer_dims, self.delta_dim, self.activation, zero_last=True,
+                                 compute_dtype=self.compute_dtype, layer_norm=self.layer_norm,
+                                 torch_init=self.torch_init)
+        self.termination_net = _MLP(self.term_hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype)
+
+    def __call__(self, feat, action, xi, term_obs):
+        """
+        Apply both heads (used to initialize the parameters).
+
+        Args:
+            feat (jax.Array): State features, shape ``(..., feat_dim)``.
+            action (jax.Array): Actions, shape ``(..., action_dim)``.
+            xi (jax.Array): Normalized domain-randomization context, shape ``(..., xi_dim)``.
+            term_obs (jax.Array): Input of the termination head, shape ``(..., term_obs_dim)``.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: The outputs of :meth:`dynamics` and :meth:`termination`.
+
+        """
+        return self.dynamics(feat, action, xi), self.termination(term_obs)
+
+    def dynamics(self, feat, action, xi, norm=None):
+        """
+        Predict the state increment for a state-action pair.
+
+        Args:
+            feat (jax.Array): State features, shape ``(..., feat_dim)``.
+            action (jax.Array): Actions, shape ``(..., action_dim)``.
+            xi (jax.Array): Normalized domain-randomization context, shape ``(..., xi_dim)``.
+            norm (Callable): Optional normalizer applied to the concatenated input.
+
+        Returns:
+            jax.Array: Network output ``delta`` of shape ``(..., delta_dim)``, to be passed to
+            :meth:`WorldModelSpec.integrate`.
+
+        """
+        x = jnp.concatenate([feat, action, xi], axis=-1)
+        return self.dynamics_net(x if norm is None else norm(x))
+
+    def termination(self, term_obs):
+        """
+        Predict the termination logit of a state.
+
+        Args:
+            term_obs (jax.Array): Termination observation of the state, shape ``(..., term_obs_dim)``.
+
+        Returns:
+            jax.Array: Logits of the probability that the state is absorbing, shape ``(...,)``.
+
+        """
+        return self.termination_net(term_obs)[..., 0]
+
+
+class SuperMimicPolicyNet(nn.Module):
+    """
+    Policy with a goal encoder and a history decoder: ``a = dec(tanh(enc(goal)), history)``.
+
+    The encoder sees the reference only, the decoder the latent and the recent observations.
+
+    Attributes:
+        action_dim (int): Dimension of the action space.
+        enc_hidden_dims (tuple): Hidden layers of the encoder.
+        dec_hidden_dims (tuple): Hidden layers of the decoder.
+        latent_dim (int): Dimension of the encoder output.
+        activation (str): Name of the activation function in ``flax.linen``.
+        compute_dtype (str): Data type of the matrix multiplications; parameters and outputs stay ``float32``.
+        torch_init (bool): Whether the layers use the initialization of ``torch.nn.Linear``.
+
+    """
+    action_dim: int
+    enc_hidden_dims: tuple = (2048, 1024, 512, 256)
+    dec_hidden_dims: tuple = (2048, 1024, 512, 256)
+    latent_dim: int = 32
+    activation: str = "elu"
+    compute_dtype: str = "float32"
+    torch_init: bool = False
+
+    @nn.compact
+    def __call__(self, goal, history):
+        """
+        Compute the deterministic action.
+
+        Args:
+            goal (jax.Array): Goal entries of the observation, shape ``(..., goal_dim)``.
+            history (jax.Array): Flattened observation history, shape ``(..., history_len * history_dim)``.
+
+        Returns:
+            jax.Array: Actions of shape ``(..., action_dim)``.
+
+        """
+        z = _MLP(self.enc_hidden_dims, self.latent_dim, self.activation, compute_dtype=self.compute_dtype,
+                 torch_init=self.torch_init, name="enc")(goal)
+        dec = _MLP(self.dec_hidden_dims, self.action_dim, self.activation, compute_dtype=self.compute_dtype,
+                   last_gain=0.01, torch_init=self.torch_init, name="dec")
+        return dec(jnp.concatenate([jnp.tanh(z), history], axis=-1))
+
+
+@functools.lru_cache(maxsize=None)
+def _slim_layer(activation, dtype, layer_norm):
+    """
+    Dense (+ LayerNorm) + activation of ``_MLP`` with a hand-written backward pass that keeps one array per layer
+    (the output, or the normalized pre-activation) instead of every intermediate of the activation and the norm.
+
+    """
+    assert (activation, layer_norm) in (("elu", False), ("relu", False), ("tanh", False), ("silu", True)), \
+        f"imag_compact has no backward pass for {activation} with layer_norm={layer_norm}"
+    act = get_activation_fn(activation)
+
+    def pre_activation(x, dense):
+        kernel = dense["kernel"].astype(dtype)
+        return x @ kernel + dense["bias"].astype(dtype), kernel
+
+    def dense_bwd(x, kernel, d_pre):
+        return d_pre @ kernel.T, {"kernel": (x.T @ d_pre).astype(jnp.float32),
+                                  "bias": jnp.sum(d_pre.astype(jnp.float32), axis=0)}
+
+    def fwd(x, dense, norm):
+        pre, kernel = pre_activation(x, dense)
+        if not layer_norm:
+            y = act(pre)
+            return y, (x, kernel, y)
+        pre = pre.astype(jnp.float32)
+        mean = jnp.mean(pre, axis=-1, keepdims=True)
+        var = jnp.maximum(jnp.mean(pre * pre, axis=-1, keepdims=True) - mean * mean, 0.0)
+        inv_std = jax.lax.rsqrt(var + 1e-6)
+        unit = (pre - mean) * inv_std
+        return act(unit * norm["scale"] + norm["bias"]), (x, kernel, unit, inv_std, norm["scale"], norm["bias"])
+
+    def bwd(res, ct):
+        if not layer_norm:
+            x, kernel, y = res
+            slope = {"elu": lambda: jnp.where(y > 0, 1.0, y + 1.0), "relu": lambda: y > 0,
+                     "tanh": lambda: 1.0 - y * y}[activation]()
+            dx, d_dense = dense_bwd(x, kernel, ct * slope.astype(ct.dtype))
+            return dx, d_dense, None
+        x, kernel, unit, inv_std, scale, bias = res
+        z = unit * scale + bias
+        sig = jax.nn.sigmoid(z)
+        dz = ct * (sig * (1.0 + z * (1.0 - sig)))
+        d_unit = dz * scale
+        d_pre = inv_std * (d_unit - jnp.mean(d_unit, axis=-1, keepdims=True)
+                           - unit * jnp.mean(d_unit * unit, axis=-1, keepdims=True))
+        dx, d_dense = dense_bwd(x, kernel, d_pre.astype(dtype))
+        return dx, d_dense, {"scale": jnp.sum(dz * unit, axis=0), "bias": jnp.sum(dz, axis=0)}
+
+    layer = jax.custom_vjp(lambda x, dense, norm: fwd(x, dense, norm)[0])
+    layer.defvjp(fwd, bwd)
+    return layer
+
+
+def slim_mlp_apply(layers, x, activation, dtype):
+    """
+    Apply an ``_MLP`` to a batch from its parameters, with a memory-saving backward pass.
+
+    The hidden layers use ``_slim_layer``, whose hand-written backward pass keeps one array per layer.
+
+    Args:
+        layers (dict): Parameters of the ``_MLP`` (entries ``Dense_i`` and optionally ``LayerNorm_i``).
+        x (jax.Array): Inputs of shape ``(B, D)``.
+        activation (str): Activation function of the MLP.
+        dtype (str): Data type of the matrix multiplications.
+
+    Returns:
+        jax.Array: Outputs of shape ``(B, out_dim)`` in ``float32``.
+
+    """
+    n = sum(k.startswith("Dense_") for k in layers)
+    for i in range(n - 1):
+        norm = layers.get(f"LayerNorm_{i}")
+        x = _slim_layer(activation, dtype, norm is not None)(x.astype(dtype), layers[f"Dense_{i}"], norm)
+    last = layers[f"Dense_{n - 1}"]
+    return (x.astype(dtype) @ last["kernel"].astype(dtype) + last["bias"].astype(dtype)).astype(jnp.float32)
+
+
+# smallest error scale of the world-model loss, per entry of WorldModelSpec.error: [p, rot, v, w] then [qj, qd]
+WM_ERR_FLOOR = ((3e-3, 5e-3, 2e-2, 5e-2), (3e-3, 5e-2))
+
+
+@struct.dataclass
+class RunningNorm:
+    """
+    Running mean and variance of the columns of an array, frozen after ``max_count`` rows.
+
+    Calling the object normalizes an array with the current statistics.
+
+    Attributes:
+        mean (jax.Array): Running mean, shape ``(dim,)``.
+        var (jax.Array): Running variance, shape ``(dim,)``.
+        count (jax.Array): Number of rows seen so far, scalar.
+
+    """
+    mean: jnp.ndarray
+    var: jnp.ndarray
+    count: jnp.ndarray
+
+    @classmethod
+    def create(cls, dim):
+        """
+        Create statistics with zero mean, unit variance and zero count.
+
+        Args:
+            dim (int): Number of columns.
+
+        Returns:
+            RunningNorm: The initial statistics.
+
+        """
+        return cls(mean=jnp.zeros(dim), var=jnp.ones(dim), count=jnp.zeros(()))
+
+    def update(self, x, max_count=2e8):
+        """
+        Update the statistics with new data.
+
+        Args:
+            x (jax.Array): Data of shape ``(..., dim)``; all leading axes are treated as rows.
+            max_count (float): Once ``count`` has reached this value, the statistics are no longer updated.
+
+        Returns:
+            RunningNorm: The updated statistics.
+
+        """
+        # centred on the running mean: both moments come from one pass over x
+        x = x.reshape(-1, x.shape[-1]) - self.mean
+        n = x.shape[0]
+        delta = jnp.mean(x, axis=0)
+        v = jnp.maximum(jnp.mean(x * x, axis=0) - delta ** 2, 0.0)
+        total = self.count + n
+        live = self.count < max_count
+        return RunningNorm(mean=jnp.where(live, self.mean + delta * n / total, self.mean),
+                           var=jnp.where(live, (self.var * self.count + v * n + delta ** 2 * self.count * n / total) / total,
+                                         self.var),
+                           count=jnp.where(live, total, self.count))
+
+    def std(self, eps=1e-4):
+        """
+        Return the running standard deviation.
+
+        Args:
+            eps (float): Lower bound of the standard deviation.
+
+        Returns:
+            jax.Array: ``sqrt(var + eps**2)``, shape ``(dim,)``.
+
+        """
+        return jnp.sqrt(self.var + eps ** 2)
+
+    def __call__(self, x, index=None, eps=1e-2):
+        """
+        Normalize an array with the running statistics.
+
+        Args:
+            x (jax.Array): Data of shape ``(..., dim)``, or ``(..., len(index))`` if ``index`` is given.
+            index (jax.Array): Columns of the statistics that ``x`` holds; ``None`` means all.
+            eps (float): Lower bound of the standard deviation.
+
+        Returns:
+            jax.Array: ``(x - mean) / sqrt(var + eps**2)``.
+
+        """
+        mean, var = (self.mean, self.var) if index is None else (self.mean[index], self.var[index])
+        return (x - mean) / jnp.sqrt(var + eps ** 2)
+
+
+class SuperMimicValueNet(nn.Module):
+    """
+    State-value function ``V(obs[obs_ind], xi)``.
+
+    Attributes:
+        hidden_layer_dims (tuple): Hidden layers of the MLP.
+        activation (str): Name of the activation function in ``flax.linen``.
+        obs_ind (jax.Array): Indices of the observation entries the critic sees; ``None`` means all.
+        compute_dtype (str): Data type of the matrix multiplications; parameters and outputs stay ``float32``.
+        torch_init (bool): Whether the layers use the initialization of ``torch.nn.Linear``.
+
+    """
+    hidden_layer_dims: tuple = (256, 128)
+    activation: str = "silu"
+    obs_ind: jnp.ndarray = None
+    compute_dtype: str = "float32"
+    torch_init: bool = False
+
+    @nn.compact
+    def __call__(self, obs, xi):
+        """
+        Compute the value estimate.
+
+        Args:
+            obs (jax.Array): Observations, shape ``(..., obs_dim)``.
+            xi (jax.Array): Normalized domain-randomization context, shape ``(..., xi_dim)``.
+
+        Returns:
+            jax.Array: Values of shape ``(...,)``.
+
+        """
+        if self.obs_ind is not None:
+            obs = obs[..., self.obs_ind]
+        net = _MLP(self.hidden_layer_dims, 1, self.activation, compute_dtype=self.compute_dtype,
+                   torch_init=self.torch_init)
+        return net(jnp.concatenate([obs, xi], axis=-1))[..., 0]
+
+
+# ---------------------------------------------------------------------------
+# Buffers
+# ---------------------------------------------------------------------------
+
+def state_is_valid(qpos, qvel, max_abs_qvel):
+    """
+    Check that simulator states have not diverged.
+
+    MJX occasionally blows up an environment before its episode ends; such states must not reach the world model
+    or seed imagined rollouts.
+
+    Args:
+        qpos (jax.Array): Generalized positions, shape ``(..., nq)``.
+        qvel (jax.Array): Generalized velocities, shape ``(..., nv)``.
+        max_abs_qvel (float): Largest absolute velocity that still counts as a physical motion.
+
+    Returns:
+        jax.Array: Boolean array of shape ``(...,)``; False for states with non-finite entries or with a velocity
+        of at least ``max_abs_qvel``.
+
+    """
+    return (jnp.all(jnp.isfinite(qpos), axis=-1) & jnp.all(jnp.isfinite(qvel), axis=-1)
+            & (jnp.max(jnp.abs(jnp.nan_to_num(qvel, nan=jnp.inf)), axis=-1) < max_abs_qvel))
+
+
+def _zero_where_invalid(valid, x):
+    """Zero the entries of ``x`` whose leading axes are flagged invalid."""
+    return jnp.where(valid.reshape(valid.shape + (1,) * (x.ndim - valid.ndim)), x, jnp.zeros_like(x))
+
+
+@struct.dataclass
+class WindowBuffer:
+    """
+    Time-major ``[T, E]`` ring buffer of transitions for world-model fitting.
+
+    All environments step together, so one write pointer serves every environment. ``next_qpos`` and
+    ``next_qvel`` hold the true successor state also when the episode ended there (before the auto-reset).
+    Invalid transitions (see :func:`state_is_valid`) are stored zeroed with ``valid=False``.
+
+    Attributes:
+        qpos (jax.Array): Generalized positions, shape ``(T, E, nq)``.
+        qvel (jax.Array): Generalized velocities, shape ``(T, E, nv)``.
+        next_qpos (jax.Array): Generalized positions of the successor states, shape ``(T, E, nq)``.
+        next_qvel (jax.Array): Generalized velocities of the successor states, shape ``(T, E, nv)``.
+        action (jax.Array): Actions, shape ``(T, E, action_dim)``.
+        xi (jax.Array): Domain-randomization contexts (not normalized), shape ``(T, E, xi_dim)``.
+        next_term_obs (jax.Array): Termination observations of the successor states, shape
+            ``(T, E, term_obs_dim)``.
+        absorbing (jax.Array): Absorbing flags of the successor states as floats, shape ``(T, E)``.
+        done (jax.Array): Boolean flags of transitions that ended an episode, shape ``(T, E)``.
+        valid (jax.Array): Boolean validity flags, shape ``(T, E)``.
+        ptr (jax.Array): Row that is written next, scalar ``int32``.
+        count (jax.Array): Number of rows written so far, at most ``T``; scalar ``int32``.
+
+    """
+    qpos: jnp.ndarray
+    qvel: jnp.ndarray
+    next_qpos: jnp.ndarray
+    next_qvel: jnp.ndarray
+    action: jnp.ndarray
+    xi: jnp.ndarray
+    next_term_obs: jnp.ndarray
+    absorbing: jnp.ndarray
+    done: jnp.ndarray
+    valid: jnp.ndarray
+    ptr: jnp.ndarray
+    count: jnp.ndarray
+
+    @classmethod
+    def create(cls, length, n_envs, nq, nv, action_dim, xi_dim, term_obs_dim):
+        """
+        Create an empty buffer.
+
+        Args:
+            length (int): Number of time steps ``T`` the buffer holds.
+            n_envs (int): Number of environments ``E``.
+            nq (int): Dimension of ``qpos``.
+            nv (int): Dimension of ``qvel``.
+            action_dim (int): Dimension of the actions.
+            xi_dim (int): Dimension of the domain-randomization context.
+            term_obs_dim (int): Dimension of the termination observation.
+
+        Returns:
+            WindowBuffer: The empty buffer.
+
+        """
+        f = lambda *shape: jnp.zeros((length, n_envs) + shape)  # noqa: E731
+        return cls(qpos=f(nq), qvel=f(nv), next_qpos=f(nq), next_qvel=f(nv), action=f(action_dim),
+                   xi=f(xi_dim), next_term_obs=f(term_obs_dim), absorbing=f(),
+                   done=jnp.zeros((length, n_envs), dtype=bool), valid=jnp.zeros((length, n_envs), dtype=bool),
+                   ptr=jnp.array(0, dtype=jnp.int32), count=jnp.array(0, dtype=jnp.int32))
+
+    def add(self, valid, **rows):
+        """
+        Write one time step for all environments and advance the write pointer.
+
+        Args:
+            valid (jax.Array): Boolean validity flags, shape ``(E,)``; the rows of invalid environments are zeroed.
+            **rows: The fields to write (``qpos``, ``qvel``, ``next_qpos``, ``next_qvel``, ``action``, ``xi``,
+                ``next_term_obs``, ``absorbing``, ``done``), each with a leading axis of length ``E``.
+
+        Returns:
+            WindowBuffer: The updated buffer.
+
+        """
+        new = {k: getattr(self, k).at[self.ptr].set(_zero_where_invalid(valid, v)) for k, v in rows.items()}
+        length = self.qpos.shape[0]
+        return self.replace(**new, valid=self.valid.at[self.ptr].set(valid), ptr=(self.ptr + 1) % length,
+                            count=jnp.minimum(self.count + 1, length))
+
+    def sample_windows(self, rng, n, k):
+        """
+        Sample windows of consecutive transitions of one environment each.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            n (int): Number of windows.
+            k (int): Number of consecutive transitions per window.
+
+        Returns:
+            Tuple[dict, jax.Array]: A dictionary with the entries ``qpos``, ``qvel``, ``next_qpos``, ``next_qvel``,
+            ``action``, ``next_term_obs`` and ``absorbing`` of shape ``(k, n, ...)`` and ``xi`` of shape
+            ``(n, xi_dim)`` (the context of the first transition), and a boolean mask of shape ``(n,)``. The mask is
+            False for windows with an episode boundary before their last transition or with an invalid transition;
+            their entries are zeroed.
+
+        """
+        length, n_envs = self.qpos.shape[:2]
+        rng_t, rng_e = jax.random.split(rng)
+        # age 0 is the newest row; a window starting at age a covers ages a .. a-k+1
+        age = jax.random.randint(rng_t, (n,), k - 1, jnp.maximum(self.count, k))
+        t0 = (self.ptr - 1 - age) % length
+        e = jax.random.randint(rng_e, (n,), 0, n_envs)
+        tt = (t0[None, :] + jnp.arange(k)[:, None]) % length
+        ee = jnp.broadcast_to(e[None, :], (k, n))
+        mask = jnp.all(~self.done[tt[:-1], ee[:-1]], axis=0) & jnp.all(self.valid[tt, ee], axis=0)
+        get = lambda x: _zero_where_invalid(jnp.broadcast_to(mask, (k, n)), x[tt, ee])  # noqa: E731
+        return dict(qpos=get(self.qpos), qvel=get(self.qvel), next_qpos=get(self.next_qpos),
+                    next_qvel=get(self.next_qvel), action=get(self.action),
+                    xi=_zero_where_invalid(mask, self.xi[t0, e]),
+                    next_term_obs=get(self.next_term_obs), absorbing=get(self.absorbing)), mask
+
+
+@struct.dataclass
+class StartState:
+    """
+    What an imagined rollout needs from a real state (``data`` is rebuilt from ``qpos`` and ``qvel``).
+
+    Attributes:
+        qpos (jax.Array): Generalized positions.
+        qvel (jax.Array): Generalized velocities.
+        observation (jax.Array): Observation of the state.
+        info: Info of the environment state.
+        carry: Additional carry of the environment state.
+        history (jax.Array): Observation history of the policy, shape ``(history_len, history_dim)`` per state;
+            ``None`` for policies without history.
+
+    """
+    qpos: jnp.ndarray
+    qvel: jnp.ndarray
+    observation: jnp.ndarray
+    info: Any
+    carry: Any
+    history: Any = None
+
+
+@struct.dataclass
+class StartBuffer:
+    """
+    ``[S, E]`` ring buffer of the most recent full environment states, the start states of imagination.
+
+    Only valid states (see :func:`state_is_valid`) are sampled.
+
+    Attributes:
+        states (StartState): Stored states; every leaf has the leading axes ``(S, E)``.
+        valid (jax.Array): Boolean validity flags, shape ``(S, E)``.
+        ptr (jax.Array): Row that is written next, scalar ``int32``.
+        count (jax.Array): Number of rows the pointer has advanced over, at most ``S``; scalar ``int32``.
+
+    """
+    states: StartState
+    valid: jnp.ndarray
+    ptr: jnp.ndarray
+    count: jnp.ndarray
+
+    @classmethod
+    def create(cls, length, env_state, history=None):
+        """
+        Create an empty buffer shaped after an environment state.
+
+        Args:
+            length (int): Number of rows ``S``.
+            env_state (MjxState): Batched environment state of ``E`` environments, used as template.
+            history (jax.Array): Observation history used as template, shape ``(E, history_len, history_dim)``, or
+                ``None``.
+
+        Returns:
+            StartBuffer: The empty buffer (no valid entries).
+
+        """
+        start = _start_state(env_state).replace(history=history)
+        states = jax.tree.map(lambda x: jnp.zeros((length,) + x.shape, x.dtype), start)
+        valid = jnp.zeros((length, start.qpos.shape[0]), dtype=bool)
+        return cls(states=states, valid=valid, ptr=jnp.array(0, dtype=jnp.int32), count=jnp.array(0, dtype=jnp.int32))
+
+    def add(self, env_state, valid, advance=True, history=None):
+        """
+        Write the current row.
+
+        With ``advance`` False the next call overwrites the row, so a ring of ``S`` rows advanced every ``n`` steps
+        spans ``S * n`` steps.
+
+        Args:
+            env_state (MjxState): Batched environment state of ``E`` environments.
+            valid (jax.Array): Boolean flags of the states that may start an imagined rollout, shape ``(E,)``.
+            advance (Union[bool, jax.Array]): Whether to advance the write pointer.
+            history (jax.Array): Observation history of the policy, shape ``(E, history_len, history_dim)``, or
+                ``None``.
+
+        Returns:
+            StartBuffer: The updated buffer.
+
+        """
+        start = _start_state(env_state).replace(history=history)
+        states = jax.tree.map(lambda b, x: b.at[self.ptr].set(x), self.states, start)
+        length = self.states.qpos.shape[0]
+        step = jnp.asarray(advance, dtype=jnp.int32)
+        return self.replace(states=states, valid=self.valid.at[self.ptr].set(valid),
+                            ptr=(self.ptr + step) % length, count=jnp.minimum(self.count + step, length))
+
+    def sample(self, rng, n):
+        """
+        Sample start states uniformly from the valid entries.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            n (int): Number of states.
+
+        Returns:
+            StartState: Batch of start states; every leaf has a leading axis of length ``n``.
+
+        """
+        # uniform over the valid entries; categorical would draw n noise values per buffer entry
+        rank = jnp.cumsum(self.valid.reshape(-1))
+        idx = jnp.searchsorted(rank, jax.random.randint(rng, (n,), 0, jnp.maximum(rank[-1], 1)), side="right")
+        idx = jnp.minimum(idx, rank.shape[0] - 1)
+        n_envs = self.valid.shape[1]
+        return jax.tree.map(lambda x: x[idx // n_envs, idx % n_envs], self.states)
+
+
+def _start_state(env_state):
+    """Extract the :class:`StartState` (without history) from an environment state."""
+    return StartState(qpos=env_state.data.qpos, qvel=env_state.data.qvel,
+                      observation=env_state.observation, info=env_state.info,
+                      carry=env_state.additional_carry)
+
+
+# ---------------------------------------------------------------------------
+# Summary metrics / conf / state
+# ---------------------------------------------------------------------------
+
+@struct.dataclass
+class SuperMimicSummaryMetrics(SummaryMetrics):
+    """
+    Training metrics logged by SuperMimic.
+
+    Extends :class:`~loco_mujoco.core.wrappers.mjx.SummaryMetrics`. Every environment step records the metrics
+    of the most recent update; the training function returns their mean over each logging interval of
+    ``log_every`` environment steps (``max_timestep`` and ``num_updates`` are the last values of the interval).
+    ``mean_episode_return`` and ``mean_episode_length`` are averages over the environments of their last
+    finished episode.
+
+    Attributes:
+        mean_wm_loss (float): World-model loss (state loss plus weighted termination loss).
+        mean_wm_nse_1step (float): Normalized squared state error per dimension after the first step of the
+            training windows.
+        mean_wm_nse_kstep (float): The same error after the last step of the training windows.
+        mean_term_bce (float): Binary cross entropy of the termination head (zero without the head).
+        mean_term_acc (float): Classification accuracy of the termination head (zero without the head).
+        mean_imag_return (float): Mean undiscounted, survival-weighted sum of rewards of the imagined rollouts.
+        mean_imag_survival (float): Mean survival weight at the last step of the imagined rollouts.
+        mean_imag_alive (float): Mean share of imagined rollouts that were not cut off before their last step.
+        mean_critic_loss (float): Critic loss of the last minibatch of the update.
+        mean_actor_grad_norm (float): Global norm of the policy gradient before clipping.
+        mean_action_norm (float): Mean Euclidean norm of the imagined actions.
+        num_updates (int): Total number of updates performed so far.
+
+    """
+    mean_wm_loss: float = 0.0
+    mean_wm_nse_1step: float = 0.0
+    mean_wm_nse_kstep: float = 0.0
+    mean_term_bce: float = 0.0
+    mean_term_acc: float = 0.0
+    mean_imag_return: float = 0.0
+    mean_imag_survival: float = 0.0
+    mean_imag_alive: float = 0.0
+    mean_critic_loss: float = 0.0
+    mean_actor_grad_norm: float = 0.0
+    mean_action_norm: float = 0.0
+    num_updates: int = 0
+
+
+class _Packed:
+    """Packs the leaves of a pytree into one flat array per dtype, and back.
+
+    A scan whose carry and outputs are packed writes one or two arrays per step instead of one per leaf. XLA cannot
+    put these per-step writes into CUDA graphs, so each of them is a separate kernel launch.
+    """
+
+    def __init__(self, tree):
+        leaves, self.treedef = jax.tree.flatten(tree)
+        self.shapes = [tuple(l.shape) for l in leaves]
+        self.groups, self.rest = {}, []
+        for i, l in enumerate(leaves):
+            if jax.dtypes.issubdtype(l.dtype, jax.dtypes.extended):  # typed PRNG keys cannot be concatenated
+                self.rest.append(i)
+            else:
+                self.groups.setdefault(jnp.dtype(l.dtype), []).append(i)
+
+    def pack(self, tree):
+        """Pack the leaves of ``tree`` into one flat array per dtype; typed PRNG keys are passed through."""
+        leaves = jax.tree.leaves(tree)
+        flat = tuple(jnp.concatenate([leaves[i].reshape(-1) for i in idx]) for idx in self.groups.values())
+        return flat, tuple(leaves[i] for i in self.rest)
+
+    def unpack(self, packed, lead=()):
+        """``lead``: the leading axes a scan stacked onto the packed arrays."""
+        flat, rest = packed
+        leaves = [None] * len(self.shapes)
+        for f, idx in zip(flat, self.groups.values()):
+            off = 0
+            for i in idx:
+                size = int(np.prod(self.shapes[i], dtype=np.int64))
+                leaves[i] = f[..., off:off + size].reshape(tuple(lead) + self.shapes[i])
+                off += size
+        for l, i in zip(rest, self.rest):
+            leaves[i] = l
+        return jax.tree.unflatten(self.treedef, leaves)
+
+
+def _tuple(x):
+    """Convert a list-like configuration value or its string representation to a tuple."""
+    return tuple(x if isinstance(x, (list, tuple, ListConfig)) else ast.literal_eval(x))
+
+
+def scale_by_muon(momentum=0.95, ns_steps=5, eps=1e-7):
+    """
+    Muon optimizer step as an Optax gradient transformation.
+
+    Muon (Jordan et al. 2024) on 2D parameters, scaled to Adam's update RMS (Liu et al. 2025), so the Adam
+    learning rate carries over. Uses Nesterov momentum and runs the Newton-Schulz iteration in ``bfloat16``.
+
+    Args:
+        momentum (float): Momentum coefficient.
+        ns_steps (int): Number of Newton-Schulz iterations used to orthogonalize the update.
+        eps (float): Added to the norm the update is divided by.
+
+    Returns:
+        optax.GradientTransformation: The transformation; all parameters it is applied to must be matrices.
+
+    """
+    a, b, c = 3.4445, -4.775, 2.0315
+
+    def orthogonalize(g):
+        x = g.astype(jnp.bfloat16)
+        wide = g.shape[0] > g.shape[1]
+        x = x.T if wide else x
+        x = x / (jnp.linalg.norm(x.astype(jnp.float32)).astype(jnp.bfloat16) + eps)
+        for _ in range(ns_steps):
+            gram = x @ x.T
+            x = a * x + (b * gram + c * gram @ gram) @ x
+        x = x.T if wide else x
+        return x.astype(g.dtype) * (0.2 * max(g.shape) ** 0.5)
+
+    def init_fn(params):
+        return jax.tree.map(jnp.zeros_like, params)
+
+    def update_fn(updates, state, params=None):
+        del params
+        state = jax.tree.map(lambda m, g: momentum * m + (1 - momentum) * g, state, updates)
+        return jax.tree.map(lambda m, g: orthogonalize((1 - momentum) * g + momentum * m), state, updates), state
+
+    return optax.GradientTransformation(init_fn, update_fn)
+
+
+def muon_labels(params, root=None):
+    """
+    Label the parameters for ``optax.multi_transform`` with Muon on the hidden kernels.
+
+    Args:
+        params (dict): Parameter dictionary of a network.
+        root (str): If given, only MLPs below a module of this name get Muon.
+
+    Returns:
+        dict: Dictionary of the same structure with the label ``"muon"`` for the hidden kernels of each MLP and
+        ``"adam"`` for the first and last layers and all vectors.
+
+    """
+    flat = traverse_util.flatten_dict(params)
+    dense = {}
+    for path in flat:
+        if path[-1] == "kernel" and path[-2].startswith("Dense_") and (root is None or root in path):
+            dense.setdefault(path[:-2], []).append(int(path[-2].split("_")[1]))
+    labels = {path: "muon" if path[-1] == "kernel" and path[:-2] in dense
+              and min(dense[path[:-2]]) < int(path[-2].split("_")[1]) < max(dense[path[:-2]]) else "adam"
+              for path in flat}
+    return traverse_util.unflatten_dict(labels)
+
+
+def _build_nets(env, config):
+    """Networks and optimisers from the config. Needs ``config.experiment`` to hold the dims."""
+    exp = config.experiment
+    compute_dtype = str(getattr(exp, "net_dtype", "float32"))
+    torch_init = bool(getattr(exp, "torch_init", False))
+    if int(getattr(exp, "history_len", 0)) > 0:
+        actor_net = SuperMimicPolicyNet(
+            action_dim=int(exp.action_dim),
+            enc_hidden_dims=_tuple(exp.hidden_layers),
+            dec_hidden_dims=_tuple(exp.hidden_layers),
+            activation=str(exp.activation),
+            compute_dtype=compute_dtype,
+            torch_init=torch_init,
+        )
+    else:
+        actor_net = TD3ActorNet(
+            action_dim=int(exp.action_dim),
+            hidden_layer_dims=_tuple(exp.hidden_layers),
+            activation=str(exp.activation),
+            use_obs_norm=False,
+            output_squash="none",
+            obs_ind=_obs_ind(env, getattr(exp, "actor_obs_group", None), "actor_obs_group"),
+            compute_dtype=compute_dtype,
+        )
+    critic_net = SuperMimicValueNet(
+        hidden_layer_dims=_tuple(exp.critic_hidden_layers),
+        activation=str(exp.activation),
+        obs_ind=_obs_ind(env, getattr(exp, "critic_obs_group", None), "critic_obs_group"),
+        compute_dtype=compute_dtype,
+        torch_init=torch_init,
+    )
+    wm_net = SuperMimicWorldModelNet(
+        delta_dim=12 + 2 * int(exp.n_joints),
+        hidden_layer_dims=_tuple(exp.wm_hidden_layers),
+        term_hidden_layer_dims=_tuple(exp.wm_term_hidden_layers),
+        activation=str(exp.wm_activation),
+        compute_dtype=compute_dtype,
+        layer_norm=bool(getattr(exp, "wm_layer_norm", False)),
+        torch_init=torch_init,
+    )
+
+    # Cosine decay to lr_final_ratio * lr over the first lr_decay_fraction of training (paper A.5).
+    n_updates = max(1, int(exp.num_iterations * float(exp.updates_per_env_step)))
+    frac = float(exp.lr_decay_fraction)
+    alpha = float(exp.lr_final_ratio)
+    sched = lambda lr, steps: optax.cosine_decay_schedule(float(lr), max(1, int(frac * steps)), alpha)  # noqa: E731
+    # A non-finite gradient skips its step rather than turning the parameters into NaN for good.
+    guard = lambda tx: apply_if_finite_select(tx, max_consecutive_errors=10 ** 9)  # noqa: E731
+
+    def optimiser(name, lr, labels, **adam):
+        if name == "adam":
+            return optax.adam(lr, **adam)
+        muon = optax.chain(scale_by_muon(), optax.scale_by_learning_rate(lr))
+        return optax.multi_transform({"muon": muon, "adam": optax.adam(lr, **adam)}, labels)
+
+    actor_tx = optax.chain(optax.clip_by_global_norm(float(exp.actor_max_grad_norm)),
+                           optax.clip(float(exp.actor_max_grad_value)),
+                           optimiser(str(getattr(exp, "actor_optimizer", "adam")), sched(exp.lr_actor, n_updates),
+                                     muon_labels, b1=0.9, b2=0.95))
+    spike_factor = float(getattr(exp, "actor_grad_spike_factor", 0.0) or 0.0)
+    if spike_factor > 0.0:
+        actor_tx = skip_gradient_spikes(actor_tx, spike_factor)
+    actor_tx = guard(actor_tx)
+    n_critic = n_updates * int(exp.critic_epochs) * int(exp.critic_minibatches)
+    critic_tx = guard(optax.chain(optax.clip_by_global_norm(float(exp.critic_max_grad_norm)),
+                                  optax.adam(sched(exp.lr_critic, n_critic))))
+    n_wm = n_updates * int(exp.wm_batches_per_update)
+    wm_tx = guard(optax.chain(optax.clip_by_global_norm(float(exp.wm_max_grad_norm)),
+                              optimiser(str(getattr(exp, "wm_optimizer", "adam")), sched(exp.lr_wm, n_wm),
+                                        lambda p: muon_labels(p, "dynamics_net"))))
+    return actor_net, critic_net, wm_net, actor_tx, critic_tx, wm_tx
+
+
+def apply_if_finite_select(inner, max_consecutive_errors):
+    """
+    ``optax.apply_if_finite`` with a select instead of ``lax.cond``.
+
+    On the GPU, XLA runs a ``lax.cond`` from the host: the host waits for the predicate, so every optimizer step
+    drains the GPU's queue of launched kernels. Here the inner update always runs and the rejected result is
+    discarded, which gives the same updates and the same state (``optax.ApplyIfFiniteState``).
+
+    Args:
+        inner (optax.GradientTransformation): The wrapped transformation.
+        max_consecutive_errors (int): Number of consecutive non-finite updates after which they are applied
+            anyway.
+
+    Returns:
+        optax.GradientTransformationExtraArgs: The wrapped transformation.
+
+    """
+    inner = optax.with_extra_args_support(inner)
+    increment = lambda x: x + (x < jnp.iinfo(jnp.int32).max).astype(jnp.int32)  # noqa: E731
+
+    def init_fn(params):
+        return optax.ApplyIfFiniteState(notfinite_count=jnp.zeros([], jnp.int32), last_finite=jnp.array(True),
+                                        total_notfinite=jnp.zeros([], jnp.int32), inner_state=inner.init(params))
+
+    def update_fn(updates, state, params=None, **extra_args):
+        isfinite = jnp.all(jnp.array([jnp.all(jnp.isfinite(u)) for u in jax.tree.leaves(updates)]))
+        notfinite_count = jnp.where(isfinite, jnp.zeros([], jnp.int32), increment(state.notfinite_count))
+        apply = isfinite | (notfinite_count > max_consecutive_errors)
+        new_updates, new_inner = inner.update(updates, state.inner_state, params, **extra_args)
+        new_updates = jax.tree.map(lambda u: jnp.where(apply, u, jnp.zeros_like(u)), new_updates)
+        new_inner = jax.tree.map(lambda n, o: jnp.where(apply, n, o), new_inner, state.inner_state)
+        return new_updates, optax.ApplyIfFiniteState(
+            notfinite_count=notfinite_count, last_finite=isfinite,
+            total_notfinite=jnp.where(isfinite, state.total_notfinite, increment(state.total_notfinite)),
+            inner_state=new_inner)
+
+    return optax.GradientTransformationExtraArgs(init_fn, update_fn)
+
+
+class SpikeGuardState(NamedTuple):
+    """
+    State of :func:`skip_gradient_spikes`.
+
+    Attributes:
+        inner_state: State of the wrapped transformation.
+        mean_norm (jax.Array): Running mean of the global gradient norm.
+        count (jax.Array): Number of updates seen.
+        skipped (jax.Array): Number of updates skipped.
+
+    """
+    inner_state: Any
+    mean_norm: jnp.ndarray
+    count: jnp.ndarray
+    skipped: jnp.ndarray
+
+
+def skip_gradient_spikes(inner, factor, warmup=200, decay=0.99):
+    """
+    Skip updates whose gradient norm exceeds ``factor`` times its running mean.
+
+    Backpropagating through a long rollout occasionally explodes. Clipping bounds the size of such a step but not
+    its direction, and a run of them can destroy a good policy. The running mean takes skipped gradients in at
+    their limit, so a real rise of the norm is followed rather than blocked.
+
+    Args:
+        inner (optax.GradientTransformation): The wrapped transformation.
+        factor (float): Updates with a gradient norm above ``factor`` times the running mean are skipped.
+        warmup (int): Number of initial updates during which nothing is skipped.
+        decay (float): Decay of the running mean of the gradient norm.
+
+    Returns:
+        optax.GradientTransformation: The wrapped transformation with a :class:`SpikeGuardState`.
+
+    """
+
+    def init_fn(params):
+        return SpikeGuardState(inner.init(params), jnp.zeros((), jnp.float32), jnp.zeros((), jnp.int32),
+                               jnp.zeros((), jnp.int32))
+
+    def update_fn(grads, state, params=None):
+        norm = optax.global_norm(grads)
+        spike = (state.count >= warmup) & (norm > factor * state.mean_norm)
+        updates, inner_state = inner.update(grads, state.inner_state, params)
+        updates = jax.tree.map(lambda u: jnp.where(spike, jnp.zeros_like(u), u), updates)
+        inner_state = jax.tree.map(lambda old, new: jnp.where(spike, old, new), state.inner_state, inner_state)
+        seen = jnp.where(state.count >= warmup, jnp.minimum(norm, factor * state.mean_norm), norm)
+        rate = jnp.maximum(1.0 - decay, 1.0 / (state.count + 1.0))
+        mean_norm = state.mean_norm + rate * (seen - state.mean_norm)
+        return updates, SpikeGuardState(inner_state, mean_norm, state.count + 1,
+                                        state.skipped + spike.astype(jnp.int32))
+
+    return optax.GradientTransformation(init_fn, update_fn)
+
+
+def _obs_ind(env, group, what):
+    """Return the observation indices of a group (``None`` for no group); raise if the group is empty."""
+    if group is None:
+        return None
+    ind = jnp.asarray(env.obs_container.get_obs_ind_by_group(group), dtype=jnp.int32)
+    if ind.size == 0:
+        raise ValueError(f"{what}={group!r} selected no observations. Check the group name(s) "
+                         f"against the observation spec.")
+    return ind
+
+
+@dataclass(frozen=True)
+class SuperMimicAgentConf(AgentConfBase):
+    """
+    Static configuration of a SuperMimic agent.
+
+    Attributes:
+        config (DictConfig): The full configuration; the hyperparameters live under ``config.experiment``.
+        actor_net (nn.Module): The policy network definition, a
+            :class:`~loco_mujoco.algorithms.experimental.td3_jax.TD3ActorNet` or, with ``history_len > 0``, a
+            :class:`SuperMimicPolicyNet`.
+        critic_net (SuperMimicValueNet): The critic network definition.
+        wm_net (SuperMimicWorldModelNet): The world-model network definition.
+        actor_tx (optax.GradientTransformation): Optimizer of the policy.
+        critic_tx (optax.GradientTransformation): Optimizer of the critic.
+        wm_tx (optax.GradientTransformation): Optimizer of the world model.
+        term_obs_ind (jax.Array): Observation entries the termination head reads; ``None`` means all.
+        goal_ind (jax.Array): With ``history_len > 0``, the observation entries of the policy's encoder;
+            ``None`` otherwise.
+        history_ind (jax.Array): With ``history_len > 0``, the observation entries stacked into the policy's
+            history; ``None`` otherwise.
+
+    """
+    config: DictConfig
+    actor_net: TD3ActorNet
+    critic_net: SuperMimicValueNet
+    wm_net: SuperMimicWorldModelNet
+    actor_tx: Any
+    critic_tx: Any
+    wm_tx: Any
+    term_obs_ind: Any = None
+    goal_ind: Any = None  # with history_len > 0: the observation entries of the policy's encoder and history
+    history_ind: Any = None
+
+    def serialize(self):
+        """
+        Serialize the agent configuration, the network definitions and the observation indices.
+
+        The optimizers are rebuilt from the configuration when loading.
+
+        Returns:
+            dict: Dictionary from which :meth:`from_dict` rebuilds the configuration.
+
+        """
+        return {"config": OmegaConf.to_container(self.config, resolve=True, throw_on_missing=True),
+                "goal_ind": None if self.goal_ind is None else np.asarray(self.goal_ind),
+                "history_ind": None if self.history_ind is None else np.asarray(self.history_ind),
+                "actor_net": flax.serialization.to_state_dict(self.actor_net),
+                "critic_net": flax.serialization.to_state_dict(self.critic_net),
+                "wm_net": flax.serialization.to_state_dict(self.wm_net),
+                "term_obs_ind": None if self.term_obs_ind is None else np.asarray(self.term_obs_ind)}
+
+    @classmethod
+    def from_dict(cls, d):
+        """
+        Restore the agent configuration from a dictionary.
+
+        No environment is needed: the observation indices are stored with the networks and in the dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+
+        Returns:
+            SuperMimicAgentConf: The restored configuration with newly built optimizers.
+
+        """
+        config = OmegaConf.create(d["config"])
+        actor_net = d["actor_net"]
+        critic_net = flax.serialization.from_state_dict(SuperMimicValueNet, d["critic_net"])
+        wm_net = flax.serialization.from_state_dict(SuperMimicWorldModelNet, d["wm_net"])
+        # Optimisers only need the config, not the env (obs_ind lives on the restored nets).
+        _, _, _, actor_tx, critic_tx, wm_tx = _build_nets(_NoGroupEnv(), _strip_groups(config))
+        term = d.get("term_obs_ind")
+        return cls(config=config, actor_net=actor_net, critic_net=critic_net, wm_net=wm_net,
+                   actor_tx=actor_tx, critic_tx=critic_tx, wm_tx=wm_tx,
+                   term_obs_ind=None if term is None else jnp.asarray(term),
+                   goal_ind=None if d.get("goal_ind") is None else jnp.asarray(d["goal_ind"]),
+                   history_ind=None if d.get("history_ind") is None else jnp.asarray(d["history_ind"]))
+
+
+class _NoGroupEnv:
+    """Stand-in for the environment when the networks are rebuilt without observation groups."""
+    obs_container = None
+
+
+def _strip_groups(config):
+    """Return a copy of the configuration without actor and critic observation groups."""
+    config = OmegaConf.create(OmegaConf.to_container(config, resolve=True))
+    with open_dict(config.experiment):
+        for k in ("actor_obs_group", "critic_obs_group"):
+            config.experiment[k] = None
+    return config
+
+
+@struct.dataclass
+class SuperMimicAgentState(AgentStateBase):
+    """
+    Dynamic state of a SuperMimic agent.
+
+    The first block of attributes is the learned state, which is saved with the agent. The run state (buffers,
+    environment state, episode statistics) is created by the first call of the training function and is not
+    serialized.
+
+    Attributes:
+        actor_state (TrainState): Parameters and optimizer state of the policy.
+        critic_state (TrainState): Parameters and optimizer state of the critic.
+        wm_state (TrainState): Parameters and optimizer state of the world model.
+        xi_mean (jax.Array): Mean of the domain-randomization context, shape ``(xi_dim,)``.
+        xi_std (jax.Array): Standard deviation of the domain-randomization context, shape ``(xi_dim,)``.
+        xi_initialized (jax.Array): Whether ``xi_mean`` and ``xi_std`` have been estimated.
+        num_updates (jax.Array): Number of updates performed so far.
+        iteration (jax.Array): Environment steps taken over all calls of the training function. It drives the
+            pacing of the updates and the logged timestep, so a run can be continued in chunks (the learning-rate
+            schedules live in the optimizer states).
+        window_buffer (WindowBuffer): Transitions for world-model fitting (run state).
+        start_buffer (StartBuffer): Start states of the imagined rollouts (run state).
+        env_state (MjxState): Current batched environment state (run state).
+        episode_stats (EpisodeStats): Running episode statistics (run state).
+        bin_resets (BinResetState): State of the reset distribution, with ``bin_resets`` enabled (run state).
+        actor_ema: Polyak average of the policy parameters, the policy to deploy; ``None`` without
+            ``policy_ema``.
+        lr_decay_start (jax.Array): Update at which the boost of the policy learning rate starts to decay; -1
+            before.
+        actor_norm (RunningNorm): Running statistics of the observations, used to normalize the policy input;
+            ``None`` without ``obs_norm``.
+        critic_norm (RunningNorm): Running statistics of the imagined critic observations; ``None`` without
+            ``obs_norm``.
+        obs_history (jax.Array): Observation history of the policy, shape ``(n_envs, history_len, history_dim)``
+            (run state).
+        wm_norm (dict): :class:`RunningNorm` of the ``"input"``, ``"output"`` and ``"error"`` of the world model;
+            ``None`` without ``wm_running_norm``.
+
+    """
+    actor_state: TrainState
+    critic_state: TrainState
+    wm_state: TrainState
+    xi_mean: jnp.ndarray
+    xi_std: jnp.ndarray
+    xi_initialized: jnp.ndarray
+    num_updates: jnp.ndarray
+    # Env steps taken over all train calls: drives the UTD pacing and the logged timestep, so a run can be
+    # continued in chunks (the learning-rate schedules live in the optimiser states).
+    iteration: jnp.ndarray
+    # Run state (not serialised); created by the first call of the train function.
+    window_buffer: Any = None
+    start_buffer: Any = None
+    env_state: Any = None
+    episode_stats: Any = None
+    bin_resets: Any = None
+    # Polyak average of the actor parameters, the policy to deploy (None without policy_ema).
+    actor_ema: Any = None
+    lr_decay_start: Any = None  # update at which the policy learning-rate boost starts to decay, -1 before
+    actor_norm: Any = None  # RunningNorm of the observations, of the imagined observations for the critic
+    critic_norm: Any = None
+    obs_history: Any = None  # (n_envs, history_len, history_dim), run state
+    wm_norm: Any = None  # dict of RunningNorm: "input", "output" and "error" of the world model
+
+    @property
+    def deployed_params(self):
+        """Policy parameters to deploy: the Polyak average if there is one, else the current ones."""
+        return self.actor_state.params if self.actor_ema is None else self.actor_ema
+
+    def serialize(self):
+        """
+        Serialize the learned state.
+
+        The run state (``window_buffer``, ``start_buffer``, ``env_state``, ``episode_stats``, ``bin_resets`` and
+        ``obs_history``) is not serialized.
+
+        Returns:
+            dict: Dictionary from which :meth:`from_dict` rebuilds the state.
+
+        """
+        return {"actor_state": flax.serialization.to_state_dict(self.actor_state),
+                "actor_ema": None if self.actor_ema is None else flax.serialization.to_state_dict(self.actor_ema),
+                "lr_decay_start": None if self.lr_decay_start is None else np.asarray(self.lr_decay_start),
+                "actor_norm": None if self.actor_norm is None else jax.tree.map(np.asarray, self.actor_norm),
+                "critic_norm": None if self.critic_norm is None else jax.tree.map(np.asarray, self.critic_norm),
+                "wm_norm": None if self.wm_norm is None else jax.tree.map(np.asarray, self.wm_norm),
+                "critic_state": flax.serialization.to_state_dict(self.critic_state),
+                "wm_state": flax.serialization.to_state_dict(self.wm_state),
+                "xi": {"mean": np.asarray(self.xi_mean), "std": np.asarray(self.xi_std),
+                       "initialized": np.asarray(self.xi_initialized)},
+                "num_updates": np.asarray(self.num_updates),
+                "iteration": np.asarray(self.iteration)}
+
+    @classmethod
+    def from_dict(cls, d, agent_conf):
+        """
+        Restore the agent state from a dictionary.
+
+        Args:
+            d (dict): Dictionary created by :meth:`serialize`.
+            agent_conf (SuperMimicAgentConf): Agent configuration providing the networks and the optimizers.
+
+        Returns:
+            SuperMimicAgentState: The restored state, including the optimizer states; the run state is ``None``.
+
+        """
+        template = SuperMimicJax._init_state_from_conf(agent_conf, jax.random.PRNGKey(0))
+        restore = lambda st, key: flax.serialization.from_state_dict(st, d[key])  # noqa: E731
+        conf = agent_conf
+        return template.replace(
+            actor_state=restore(template.actor_state, "actor_state").replace(apply_fn=conf.actor_net.apply),
+            critic_state=restore(template.critic_state, "critic_state").replace(apply_fn=conf.critic_net.apply),
+            wm_state=restore(template.wm_state, "wm_state").replace(apply_fn=conf.wm_net.apply),
+            xi_mean=jnp.asarray(d["xi"]["mean"]), xi_std=jnp.asarray(d["xi"]["std"]),
+            xi_initialized=jnp.asarray(d["xi"]["initialized"]),
+            actor_ema=None if d.get("actor_ema") is None else
+            flax.serialization.from_state_dict(template.actor_state.params, d["actor_ema"]),
+            lr_decay_start=None if d.get("lr_decay_start") is None else jnp.asarray(d["lr_decay_start"]),
+            actor_norm=None if d.get("actor_norm") is None else jax.tree.map(jnp.asarray, d["actor_norm"]),
+            critic_norm=None if d.get("critic_norm") is None else jax.tree.map(jnp.asarray, d["critic_norm"]),
+            wm_norm=None if d.get("wm_norm") is None else jax.tree.map(jnp.asarray, d["wm_norm"]),
+            num_updates=jnp.asarray(d["num_updates"]),
+            iteration=jnp.asarray(d.get("iteration", 0), dtype=jnp.int32))
+
+
+class BinResets:
+    """
+    Reset distribution over the time bins of the dataset.
+
+    Chooses episode starts by the time bin of the dataset they fall in: uniformly, towards bins with low returns,
+    and, with share ``fail_share``, one bin before recent failures. The share fades with the failures themselves.
+    The statistics are kept in a :class:`BinResetState`.
+
+    """
+
+    def __init__(self, split_points, n_samples, bin_frames, max_return, fail_share):
+        """
+        Initialize the bins.
+
+        Args:
+            split_points (jnp.ndarray): Start of each clip, then the end of the last one. Padded with -1.
+            n_samples (int): Static upper bound of the number of frames.
+            bin_frames (int): Frames per bin.
+            max_return (float): Scale of the discounted returns.
+            fail_share (float): Share of the resets sent before failures.
+
+        """
+        n_clips = split_points.shape[0] - 1
+        self.n_bins = n_samples // bin_frames + n_clips
+        self.bin_frames, self.max_return, self.fail_share = bin_frames, max_return, fail_share
+        lengths = jnp.maximum(split_points[1:] - split_points[:-1], 0)
+        lengths = jnp.where(split_points[1:] >= 0, lengths, 0)
+        self.clip_len = lengths
+        self.first_bin = jnp.concatenate((jnp.zeros(1, dtype=int), jnp.cumsum(-(-lengths // bin_frames))))
+        bins = jnp.arange(self.n_bins)
+        self.bin_clip = jnp.clip(jnp.searchsorted(self.first_bin, bins, side="right") - 1, 0, n_clips - 1)
+        self.valid = bins < self.first_bin[-1]
+        self.prev_bin = jnp.where(bins > self.first_bin[self.bin_clip], bins - 1, bins)
+
+    def init_state(self):
+        """
+        Create the initial statistics: zero returns and failure rates and a uniform focus.
+
+        Returns:
+            BinResetState: The initial state.
+
+        """
+        w = self.valid / jnp.sum(self.valid)
+        return BinResetState(ret=jnp.zeros(self.n_bins), avg_focus=w, fail=jnp.zeros(self.n_bins))
+
+    def bin_of(self, traj_no, step):
+        """
+        Return the bin of a frame.
+
+        Args:
+            traj_no (jax.Array): Index of the clip.
+            step (jax.Array): Frame within the clip.
+
+        Returns:
+            jax.Array: Index of the bin.
+
+        """
+        return self.first_bin[traj_no] + step // self.bin_frames
+
+    def probs(self, state):
+        """
+        Compute the reset probabilities of the bins.
+
+        The base distribution mixes a uniform distribution over the valid bins (weight 0.5), a softmax focus on bins
+        with low returns (0.4) and the running average of that focus (0.1). It is then mixed, with a share of at most
+        ``fail_share``, with the distribution of recent failures moved one bin towards the start of the clip.
+
+        Args:
+            state (BinResetState): Current statistics.
+
+        Returns:
+            Tuple[jax.Array, jax.Array]: The reset probabilities and the return-based focus, each of shape
+            ``(n_bins,)``.
+
+        """
+        n = jnp.sum(self.valid)
+        logits = jnp.where(self.valid, -25.0 * state.ret / self.max_return, -jnp.inf)
+        focus = jax.nn.softmax(logits)
+        p = 0.5 * self.valid / n + 0.4 * focus + 0.1 * state.avg_focus / jnp.sum(state.avg_focus)
+        fail = jnp.zeros_like(state.fail).at[self.prev_bin].add(state.fail * self.valid)
+        total = jnp.sum(fail)
+        share = self.fail_share * jnp.minimum(total, 1.0)  # no failures left: back to the base distribution
+        return (1 - share) * p + share * fail / jnp.maximum(total, 1e-6), focus
+
+    def sample(self, state, rng, n):
+        """
+        Sample episode starts.
+
+        Args:
+            state (BinResetState): Current statistics.
+            rng (jax.Array): PRNG key.
+            n (int): Number of episode starts.
+
+        Returns:
+            Tuple[jax.Array, jax.Array, jax.Array]: The clips, the frames within the clips and the bins of the
+            ``n`` episode starts.
+
+        """
+        p, _ = self.probs(state)
+        rng_bin, rng_frame = jax.random.split(rng)
+        cdf = jnp.cumsum(p)
+        bins = jnp.searchsorted(cdf, jax.random.uniform(rng_bin, (n,)) * cdf[-1])
+        bins = jnp.minimum(bins, jnp.sum(self.valid) - 1)
+        clip = self.bin_clip[bins]
+        start = (bins - self.first_bin[clip]) * self.bin_frames
+        end = jnp.minimum(start + self.bin_frames, self.clip_len[clip] - 1)  # at least one step before the clip ends
+        span = jnp.maximum(end - start, 1)
+        return clip, start + jax.random.randint(rng_frame, (n,), 0, 1 << 30) % span, bins
+
+    def update(self, state, done, term, start_bin, end_bin, disc_ret):
+        """
+        Update the statistics with the episodes that ended.
+
+        Args:
+            state (BinResetState): Current statistics.
+            done (jax.Array): Flags of the environments whose episode ended, shape ``(n_envs,)``.
+            term (jax.Array): Flags of the environments whose episode ended in an absorbing state, shape
+                ``(n_envs,)``.
+            start_bin (jax.Array): Bin in which each episode started, shape ``(n_envs,)``.
+            end_bin (jax.Array): Bin in which each episode ended, shape ``(n_envs,)``.
+            disc_ret (jax.Array): Discounted return of each episode, shape ``(n_envs,)``.
+
+        Returns:
+            BinResetState: The updated statistics.
+
+        """
+        w = done.astype(jnp.float32)
+
+        def ema(stat, bins, x, old):
+            count = jnp.zeros_like(stat).at[bins].add(w)
+            mean = jnp.zeros_like(stat).at[bins].add(x * w) / jnp.maximum(count, 1.0)
+            return jnp.where(count > 0, old * stat + (1 - old) * mean, stat)
+
+        any_done = jnp.any(done)
+        _, focus = self.probs(state)
+        return state.replace(
+            ret=ema(state.ret, start_bin, disc_ret, 0.8),
+            avg_focus=jnp.where(any_done, 0.999 * state.avg_focus + 0.001 * focus, state.avg_focus),
+            fail=ema(jnp.where(any_done, 0.999 * state.fail, state.fail), end_bin, term.astype(jnp.float32), 0.9))
+
+
+@struct.dataclass
+class BinResetState:
+    """
+    Statistics of :class:`BinResets`.
+
+    Attributes:
+        ret (jax.Array): Running average of the discounted return of the episodes starting in each bin, shape
+            ``(n_bins,)``.
+        avg_focus (jax.Array): Running average of the return-based focus, shape ``(n_bins,)``.
+        fail (jax.Array): Running termination rate of the episodes ending in each bin, shape ``(n_bins,)``.
+
+    """
+    ret: jnp.ndarray  # discounted return of the episodes starting in each bin
+    avg_focus: jnp.ndarray  # running average of the return-based focus
+    fail: jnp.ndarray  # termination rate of the episodes ending in each bin
+
+
+@struct.dataclass
+class EpisodeStats:
+    """
+    Running episode statistics of the training environments; every field has the shape ``(n_envs,)``.
+
+    Attributes:
+        ret (jax.Array): Undiscounted return of the running episode.
+        length (jax.Array): Length of the running episode.
+        last_ret (jax.Array): Undiscounted return of the last finished episode.
+        last_length (jax.Array): Length of the last finished episode.
+        disc_ret (jax.Array): Discounted return of the running episode.
+        start_bin (jax.Array): Reset bin in which the running episode started (see :class:`BinResets`).
+
+    """
+    ret: jnp.ndarray
+    length: jnp.ndarray
+    last_ret: jnp.ndarray
+    last_length: jnp.ndarray
+    disc_ret: jnp.ndarray
+    start_bin: jnp.ndarray
+
+
+# ---------------------------------------------------------------------------
+# Algorithm
+# ---------------------------------------------------------------------------
+
+class SuperMimicJax(JaxRLAlgorithmBase):
+    """
+    SuperMimic (Liao et al., 2026): model-based motion tracking with a differentiable world model.
+
+    Every iteration takes one step in ``num_envs`` parallel environments with the deterministic policy plus
+    Gaussian action noise. At the configured update-to-data ratio it then fits the world model on windows of the
+    collected transitions, improves the policy by backpropagating through imagined rollouts of the world model
+    and fits the critic to the lambda-returns of these rollouts. See the module docstring for how imagined steps
+    reuse the environment's observation, reward and termination functions.
+
+    The class is stateless; see :class:`~loco_mujoco.algorithms.common.base_algorithm.JaxRLAlgorithmBase` for the
+    general workflow. Usage::
+
+        agent_conf = SuperMimicJax.init_agent_conf(env, config)
+        agent_state = SuperMimicJax.init_agent_state(env, agent_conf, rng)
+        train_fn = jax.jit(SuperMimicJax.build_train_fn(env, agent_conf))
+        out = train_fn(rng, agent_state, traj)
+        SuperMimicJax.save_agent(result_dir, agent_conf, out["agent_state"])
+
+    The environment must have a free root joint followed by hinge/slide joints only. A complete training and
+    evaluation script is in ``examples/training_examples/jax_rl_mimic_supermimic``.
+
+    """
+    _agent_conf = SuperMimicAgentConf
+    _agent_state = SuperMimicAgentState
+
+    # ---------- conf / state --------------------------------------------
+    @classmethod
+    def init_agent_conf(cls, env, config):
+        """
+        Create the static agent configuration: derived dimensions, the networks and the optimizers.
+
+        The hyperparameters are read from ``config.experiment``; see ``conf.yaml`` in
+        ``examples/training_examples/jax_rl_mimic_supermimic`` for a complete, commented set. The main ones are:
+
+        - ``num_envs``, ``total_timesteps``: number of parallel environments and total number of environment steps.
+        - ``updates_per_env_step``, ``warmup_steps``: update-to-data ratio and minimum number of environment steps
+          collected before the first update.
+        - ``hidden_layers``, ``critic_hidden_layers``, ``activation``: policy and critic networks.
+        - ``wm_hidden_layers``, ``wm_term_hidden_layers``, ``wm_activation``, ``wm_in_scale``, ``wm_out_scale``,
+          ``wm_err_scale``: world-model network and the scales of :class:`WorldModelSpec`.
+        - ``wm_window``, ``wm_batch_size``, ``wm_batches_per_update``, ``wm_term_loss_weight``, ``buffer_len``:
+          world-model fitting.
+        - ``imag_horizon``, ``imag_batch_size``, ``start_buffer_len``, ``gamma``, ``gae_lambda``: imagined rollouts
+          and lambda-returns.
+        - ``critic_epochs``, ``critic_minibatches``: critic fitting per update.
+        - ``lr_actor``, ``lr_critic``, ``lr_wm``, ``lr_decay_fraction``, ``lr_final_ratio`` and the
+          ``*_max_grad_norm`` keys: optimizers (cosine learning-rate decay and gradient clipping).
+        - ``action_noise_std``: standard deviation of the exploration noise.
+        - ``actor_obs_group``, ``critic_obs_group``, ``termination_obs_group`` (optional): observation groups of the
+          policy, the critic and the termination head; by default each gets the full observation.
+        - ``history_len``, ``goal_obs_group``, ``history_obs_group`` (optional): with ``history_len > 0`` the policy
+          is a :class:`SuperMimicPolicyNet` that encodes the goal group and decodes from a history of the history
+          group.
+
+        The keys ``obs_dim``, ``action_dim``, ``n_joints``, ``nq``, ``nv``, ``xi_index``, ``xi_dim``,
+        ``term_obs_dim``, ``dt`` and ``num_iterations`` are written to ``config.experiment`` (the configuration is
+        modified in place). The environment is reset a few times to find the varying entries of the
+        domain-randomization context.
+
+        Args:
+            env: The (unwrapped) environment the agent is trained on.
+            config (DictConfig): Configuration with the hyperparameters under ``config.experiment``.
+
+        Returns:
+            SuperMimicAgentConf: The agent configuration.
+
+        Raises:
+            ValueError: If the model does not have a free root joint followed by hinge/slide joints only, or if an
+                observation group selects no observations.
+
+        """
+        nj = check_floating_base(env._model)
+        exp = config.experiment
+        term_group = getattr(exp, "termination_obs_group", None)
+        term_obs_ind = _obs_ind(env, term_group, "termination_obs_group")
+        if not bool(getattr(exp, "wm_term_head", True)):  # the buffer then keeps one unused column
+            term_obs_ind = jnp.zeros(1, dtype=jnp.int32)
+        obs_dim = int(env.info.observation_space.shape[0])
+        with open_dict(config.experiment):
+            exp.obs_dim = obs_dim
+            exp.action_dim = int(env.info.action_space.shape[0])
+            exp.n_joints = int(nj)
+            exp.nq = int(env._model.nq)
+            exp.nv = int(env._model.nv)
+            exp.xi_index = context_index(env)
+            exp.xi_dim = len(exp.xi_index)
+            exp.term_obs_dim = obs_dim if term_obs_ind is None else int(term_obs_ind.size)
+            exp.dt = float(env.dt)
+            exp.num_iterations = int(float(exp.total_timesteps) // int(exp.num_envs))
+        actor_net, critic_net, wm_net, actor_tx, critic_tx, wm_tx = _build_nets(env, config)
+        use_history = int(getattr(exp, "history_len", 0)) > 0
+        return cls._agent_conf(config=config, actor_net=actor_net, critic_net=critic_net, wm_net=wm_net,
+                               actor_tx=actor_tx, critic_tx=critic_tx, wm_tx=wm_tx,
+                               term_obs_ind=term_obs_ind,
+                               goal_ind=_obs_ind(env, exp.goal_obs_group, "goal_obs_group") if use_history else None,
+                               history_ind=_obs_ind(env, exp.history_obs_group, "history_obs_group")
+                               if use_history else None)
+
+    @classmethod
+    def init_agent_state(cls, env, agent_conf, rng):
+        """
+        Initialize the agent state (network parameters and optimizer states).
+
+        Args:
+            env: The environment (unused; all dimensions come from the configuration).
+            agent_conf (SuperMimicAgentConf): Agent configuration created by :meth:`init_agent_conf`.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            SuperMimicAgentState: The initial agent state. Its run state is ``None`` and gets created by the first
+            call of the training function (or by the function of :meth:`build_init_fn`).
+
+        """
+        return cls._init_state_from_conf(agent_conf, rng)
+
+    @classmethod
+    def _init_state_from_conf(cls, agent_conf, rng):
+        """
+        Initialize the agent state from the agent configuration alone.
+
+        Args:
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+            rng (jax.Array): PRNG key used to initialize the network parameters.
+
+        Returns:
+            SuperMimicAgentState: The initial agent state without run state.
+
+        """
+        exp = agent_conf.config.experiment
+        obs_dim, action_dim, xi_dim = int(exp.obs_dim), int(exp.action_dim), int(exp.xi_dim)
+        feat_dim = 13 + 2 * int(exp.n_joints)
+        rng_a, rng_c, rng_w = jax.random.split(rng, 3)
+        history_len = int(getattr(exp, "history_len", 0))
+        # compiled: op by op, every primitive of an initializer is its own compilation
+        init = lambda net, key, *dims: jax.jit(  # noqa: E731
+            lambda k: net.init(k, *(jnp.zeros((1, d)) for d in dims))["params"])(key)
+        if history_len > 0:
+            actor_params = init(agent_conf.actor_net, rng_a, agent_conf.goal_ind.size,
+                                history_len * agent_conf.history_ind.size)
+        else:
+            actor_params = init(agent_conf.actor_net, rng_a, obs_dim)
+        critic_params = init(agent_conf.critic_net, rng_c, obs_dim, xi_dim)
+        wm_params = init(agent_conf.wm_net, rng_w, feat_dim, action_dim, xi_dim, int(exp.term_obs_dim))
+        mk = lambda net, params, tx: TrainState.create(apply_fn=net.apply, params=params,  # noqa: E731
+                                                       run_stats={}, tx=tx)
+        return SuperMimicAgentState(
+            actor_state=mk(agent_conf.actor_net, actor_params, agent_conf.actor_tx),
+            critic_state=mk(agent_conf.critic_net, critic_params, agent_conf.critic_tx),
+            wm_state=mk(agent_conf.wm_net, wm_params, agent_conf.wm_tx),
+            xi_mean=jnp.zeros(xi_dim), xi_std=jnp.ones(xi_dim),
+            xi_initialized=jnp.array(False), num_updates=jnp.array(0, dtype=jnp.int32),
+            iteration=jnp.array(0, dtype=jnp.int32),
+            actor_ema=jax.tree.map(jnp.copy, actor_params) if float(getattr(exp, "policy_ema", 0.0)) > 0 else None,
+            lr_decay_start=jnp.array(-1, dtype=jnp.int32),
+            actor_norm=RunningNorm.create(obs_dim) if bool(getattr(exp, "obs_norm", False)) else None,
+            critic_norm=RunningNorm.create(obs_dim if agent_conf.critic_net.obs_ind is None
+                                           else agent_conf.critic_net.obs_ind.size)
+            if bool(getattr(exp, "obs_norm", False)) else None,
+            wm_norm=dict(input=RunningNorm.create(feat_dim + action_dim + xi_dim),
+                         output=RunningNorm.create(feat_dim - 1), error=RunningNorm.create(feat_dim - 1))
+            if bool(getattr(exp, "wm_running_norm", False)) else None)
+
+    # ---------- training ------------------------------------------------
+    @classmethod
+    def build_init_fn(cls, env, agent_conf):
+        """
+        Build the function that creates the run state of an agent.
+
+        Calling the returned function before training in chunks lets the training function compile once, instead
+        of a second time for the filled state.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+
+        Returns:
+            Callable: A function ``init(rng, agent_state, traj)`` that returns the agent state with the environments
+            reset and the buffers created.
+
+        """
+        return lambda rng_key, agent_state, traj: cls._train_fn(rng_key, env, agent_conf, agent_state, traj=traj,
+                                                                init_only=True)
+
+    @classmethod
+    def _train_fn(cls, rng, env, agent_conf, agent_state=None, traj=None, mh=None, init_only=False):
+        """
+        Run SuperMimic for one training call.
+
+        A call runs ``iterations_per_call`` environment steps (default: the whole run of ``num_iterations`` steps),
+        rounded down to a multiple of ``log_every`` and at least ``log_every``, continuing from
+        ``agent_state.iteration``. If the agent state has no run state yet, the environments are reset and the buffers
+        are created first. No validation rollouts are run.
+
+        Args:
+            rng (jax.Array): PRNG key.
+            env: The environment; wrappers are removed.
+            agent_conf (SuperMimicAgentConf): Static agent configuration.
+            agent_state (SuperMimicAgentState): Agent state to start or continue from. If ``None``, a new one is
+                initialized.
+            traj: Trajectory data passed on to the environment functions. Required with ``bin_resets``.
+            mh (MetricsHandler): Unused.
+            init_only (bool): If True, only the run state is created and the agent state is returned.
+
+        Returns:
+            dict: Dictionary with the keys
+
+            - ``"agent_state"`` (:class:`SuperMimicAgentState`): the agent state after the call, including the run
+              state.
+            - ``"training_metrics"`` (:class:`SuperMimicSummaryMetrics`): training metrics with one entry per
+              logging interval of ``log_every`` environment steps.
+            - ``"validation_metrics"`` (:class:`~loco_mujoco.utils.metrics.ValidationSummary`): always empty.
+
+            With ``init_only`` the agent state is returned instead of the dictionary.
+
+        """
+        exp = agent_conf.config.experiment
+        if isinstance(env, BaseWrapper):
+            env = env.unwrapped()
+        actor_net, critic_net, wm_net = agent_conf.actor_net, agent_conf.critic_net, agent_conf.wm_net
+        term_obs_ind = agent_conf.term_obs_ind
+        use_xi = int(exp.xi_dim) > 0
+
+        spec = WorldModelSpec(int(exp.n_joints), float(exp.dt), _tuple(exp.wm_in_scale),
+                              _tuple(exp.wm_out_scale), _tuple(exp.wm_err_scale),
+                              float(getattr(exp, "wm_drift", 1.0)))
+        n_envs = int(exp.num_envs)
+        gamma, lam = float(exp.gamma), float(exp.gae_lambda)
+        horizon = int(exp.imag_horizon)
+        imag_batch = int(exp.imag_batch_size)
+        window = int(exp.wm_window)
+        wm_batch = int(exp.wm_batch_size)
+        wm_batches = int(exp.wm_batches_per_update)
+        critic_epochs, critic_mb = int(exp.critic_epochs), int(exp.critic_minibatches)
+        utd = float(exp.updates_per_env_step)
+        warmup = max(int(exp.warmup_steps), window + 1)
+        action_noise = float(exp.action_noise_std)
+        max_abs_qvel = float(getattr(exp, "max_abs_qvel", 100.0))
+        remat = bool(getattr(exp, "remat", True))
+        remat_keep_dots = bool(getattr(exp, "remat_keep_dots", False))
+        # imag_pack: the imagined rollout carries and stacks one array per dtype instead of one per leaf
+        imag_pack = bool(getattr(exp, "imag_pack", False))
+        actor_loss_sum = bool(getattr(exp, "actor_loss_sum", False))
+        analytic_only_truncates = bool(getattr(exp, "imag_soft_termination_only", False))
+        policy_ema = float(getattr(exp, "policy_ema", 0.0))
+        start_stride = int(getattr(exp, "start_buffer_stride", 1))
+        # Policy learning rate x lr_mult, ramping to x1 over lr_decay_len updates once the training return
+        # reaches lr_decay_return, at update lr_decay_by at the latest.
+        lr_mult = float(getattr(exp, "policy_lr_mult", 1.0))
+        lr_decay_len = int(getattr(exp, "lr_decay_len", 300))
+        lr_decay_return = float(getattr(exp, "lr_decay_return", 0.75))
+        lr_decay_by = int(getattr(exp, "lr_decay_by", 1400))
+        max_step_reward = float(getattr(exp, "max_step_reward", 0.1))
+
+        if agent_state is None:
+            rng, _rng = jax.random.split(rng)
+            agent_state = cls.init_agent_state(env, agent_conf, _rng)
+
+        term_obs = (lambda o: o) if term_obs_ind is None else (lambda o: o[..., term_obs_ind])  # noqa: E731
+        xi_index = list(exp.xi_index) if use_xi else None
+        xi_of = lambda carry: context_from_carry(carry, use_xi, xi_index)  # noqa: E731
+
+        actor_apply = cls.policy_fn(agent_conf)
+        history_ind = agent_conf.history_ind
+        history_len = int(getattr(exp, "history_len", 0))
+
+        def push_history(history, obs):
+            return None if history is None else jnp.concatenate([history[:, 1:], take_columns(obs, history_ind)[:, None]], axis=1)
+
+        def fresh_history(obs):
+            return None if history_ind is None else jnp.repeat(obs[:, None, history_ind], history_len, axis=1)
+
+        # The stored rollouts hold the critic's columns only, which it reads several times per update.
+        critic_ind, critic_core = critic_net.obs_ind, critic_net.clone(obs_ind=None)
+        critic_obs = (lambda o: o) if critic_ind is None else (lambda o: take_columns(o, critic_ind))  # noqa: E731
+
+        def critic_apply(params, obs, xi_n, norm):
+            return critic_core.apply({"params": params}, obs if norm is None else norm(obs), xi_n)
+
+        def wm_dynamics(wm, feat, action, xi_n):
+            params, norm = wm
+            y = wm_net.apply({"params": params}, feat, action, xi_n, None if norm is None else norm["input"],
+                             method=SuperMimicWorldModelNet.dynamics)
+            return y if norm is None else y * norm["output"].std() + norm["output"].mean
+
+        def wm_termination(params, obs_t):
+            return wm_net.apply({"params": params}, obs_t, method=SuperMimicWorldModelNet.termination)
+
+        # ----- env (vmapped, no wrappers: the terminal state is needed before the reset) -----
+        def _env_step(state, action):
+            nstate = env.mjx_step(state, action, traj, auto_reset=False)
+            reset = jax.lax.cond(nstate.done, lambda s: env._mjx_reset_in_step(s, traj), lambda s: s, nstate)
+            return nstate, reset
+
+        v_env_step = jax.vmap(_env_step, axis_name=VECENV_AXIS_NAME)
+        v_reset = jax.vmap(lambda k: env.mjx_reset(k, traj), axis_name=VECENV_AXIS_NAME)
+
+        use_bin_resets = bool(getattr(exp, "bin_resets", False))
+        bins = BinResets(traj.data.split_points, traj.data.qpos.shape[0], max(1, round(float(exp.bin_seconds) / env.dt)),
+                         float(exp.max_step_reward) / (1 - gamma), float(exp.fail_reset)) if use_bin_resets else None
+
+        # ----- run state -----
+        if agent_state.env_state is None:
+            rng, _rng = jax.random.split(rng)
+            env_state = v_reset(jax.random.split(_rng, n_envs))
+            xi0 = jax.vmap(xi_of)(env_state.additional_carry)
+            xi_mean = jnp.where(agent_state.xi_initialized, agent_state.xi_mean, jnp.mean(xi0, axis=0))
+            xi_std = jnp.where(agent_state.xi_initialized, agent_state.xi_std, jnp.std(xi0, axis=0))
+            agent_state = agent_state.replace(
+                xi_mean=xi_mean, xi_std=xi_std, xi_initialized=jnp.array(True), env_state=env_state,
+                obs_history=fresh_history(env_state.observation),
+                window_buffer=WindowBuffer.create(int(exp.buffer_len), n_envs, int(exp.nq), int(exp.nv),
+                                                  int(exp.action_dim), int(exp.xi_dim), int(exp.term_obs_dim)),
+                start_buffer=StartBuffer.create(int(exp.start_buffer_len), env_state,
+                                                fresh_history(env_state.observation)),
+                episode_stats=EpisodeStats(*(jnp.zeros(n_envs) for _ in range(5)), jnp.zeros(n_envs, dtype=int)),
+                bin_resets=bins.init_state() if use_bin_resets else None)
+            if use_bin_resets:
+                ts = env_state.additional_carry.traj_state
+                agent_state = agent_state.replace(episode_stats=agent_state.episode_stats.replace(
+                    start_bin=bins.bin_of(ts.traj_no, ts.subtraj_step_no)))
+        # weak types differ between the input and output state, which would force a recompile per chunk
+        strong_types = lambda tree: jax.tree.map(lambda x: jnp.asarray(x, jnp.asarray(x).dtype), tree)  # noqa: E731
+        if init_only:
+            return strong_types(agent_state)
+
+        xi_mean = agent_state.xi_mean
+        # Dimensions that do not vary across envs (not randomised) are mapped to 0.
+        xi_inv_std = jnp.where(agent_state.xi_std > 1e-6, 1.0 / jnp.maximum(agent_state.xi_std, 1e-6), 0.0)
+        xi_norm = lambda xi: (xi - xi_mean) * xi_inv_std  # noqa: E731
+
+        # ----- world-model fitting (Eq. 1) -----
+        err_floor = jnp.concatenate([jnp.full((n,), f) for f, n in zip(
+            WM_ERR_FLOOR[0] + WM_ERR_FLOOR[1], (3, 3, 3, 3, int(exp.n_joints), int(exp.n_joints)))])
+
+        # without the head, the terminal state handler must provide a smooth termination for imagination
+        term_head = bool(getattr(exp, "wm_term_head", True))
+
+        def wm_loss_fn(params, batch, mask, norm):
+            xi_n = xi_norm(batch["xi"])
+
+            def step(s, j):
+                qpos, qvel = s
+                delta = wm_dynamics((params, norm), spec.features(qpos, qvel), batch["action"][j], xi_n)
+                qpos, qvel = spec.integrate(qpos, qvel, delta)
+                e = spec.error(qpos, qvel, batch["next_qpos"][j], batch["next_qvel"][j])
+                if norm is not None:
+                    e = e * spec.err_scale / jnp.maximum(norm["error"].std(), err_floor)
+                return (qpos, qvel), jnp.sum(e * e, axis=-1)
+
+            _, sq = jax.lax.scan(step, (batch["qpos"][0], batch["qvel"][0]), jnp.arange(window),  # (k, n)
+                                 unroll=window if bool(getattr(exp, "wm_unroll", False)) else 1)
+            w = mask.astype(jnp.float32)
+            w_sum = jnp.maximum(jnp.sum(w), 1.0)
+            state_loss = jnp.sum(jnp.mean(sq, axis=0) * w) / w_sum
+            term_loss, acc = jnp.zeros(()), jnp.zeros(())
+            if term_head:
+                logits = wm_termination(params, batch["next_term_obs"])  # (k, n)
+                bce = optax.sigmoid_binary_cross_entropy(logits, batch["absorbing"])
+                term_loss = jnp.sum(jnp.mean(bce, axis=0) * w) / w_sum
+                acc = jnp.sum(jnp.mean((logits > 0) == (batch["absorbing"] > 0.5), axis=0) * w) / w_sum
+            # mean normalised squared error per dimension, at each step of the window
+            nse = jnp.sum(sq * w[None], axis=1) / w_sum / spec.delta_dim
+            loss = state_loss + float(exp.wm_term_loss_weight) * term_loss
+            return loss, dict(wm_loss=loss, term_bce=term_loss, term_acc=acc, nse_1=nse[0], nse_k=nse[-1])
+
+        def wm_update(wm_state, buf, rng, norm):
+            def body(st, r):
+                batch, mask = buf.sample_windows(r, wm_batch, window)
+                (_, m), g = jax.value_and_grad(wm_loss_fn, has_aux=True)(st.params, batch, mask, norm)
+                return st.apply_gradients(grads=g), m
+
+            wm_state, m = jax.lax.scan(body, wm_state, jax.random.split(rng, wm_batches))
+            return wm_state, jax.tree.map(jnp.mean, m)
+
+        # ----- imagination (Eq. 2) -----
+        # The gradients run through the kinematics, which the warp kernels cannot differentiate, so with
+        # MjWarp only the real env steps use warp and imagination gets a JAX copy of the model.
+        use_warp = getattr(env, "_use_mjwarp", False)
+        kin_sys = mjx.put_model(env._model, impl="jax") if use_warp else None
+        first_data = mjx.make_data(env._model, impl="jax") if use_warp else env._first_data
+
+        # needs observations and rewards that only read the fields FlatKinematics updates
+        flat_kin = FlatKinematics(env._model) if bool(getattr(exp, "flat_kinematics", False)) else None
+
+        def imag_kinematics(sys, data):
+            if flat_kin is not None:
+                return flat_kin(data)
+            sys = kin_sys if use_warp else sys
+            return mjx.com_vel(sys, mjx.com_pos(sys, mjx.kinematics(sys, data)))
+
+        # imag_lean: the rollout computes only what the policy reads, and the critic inputs come afterwards.
+        # Needs a smooth termination, and rewards that do not read the previous observation.
+        lean = bool(getattr(exp, "imag_lean", False))
+        assert not lean or (analytic_only_truncates and agent_conf.history_ind is not None)
+        # imag_unroll: no XLA while loop around the rollout (fewer, larger kernels; compilation takes about twice
+        # as long)
+        imag_unroll = horizon if bool(getattr(exp, "imag_unroll", False)) else 1
+        # imag_compact: the rollout step is only the policy decoder, the world model and the policy's history
+        # columns of the next state. What does not depend on the imagined state comes from a forward-only pass over
+        # the env's carry before it (goals, on which the policy encoder runs once for all steps, observation noise,
+        # carries and infos), and kinematics, reward, termination and critic inputs are computed afterwards for all
+        # states of the rollout at once. The networks get hand-written backward passes (see _slim_layer). Few enough
+        # values per step to store them (remat=false) instead of recomputing the step.
+        # Needs, on top of imag_lean: an env step that changes the simulated state only in the physics (no pushes);
+        # a carry and info that do not depend on the simulated state or the action, apart from ``last_action``;
+        # policy observations that read only qpos, qvel and the trajectory, with noise that is added without
+        # reading them (no observation delay); and a reward whose only state is ``reward_state.last_action``.
+        compact = bool(getattr(exp, "imag_compact", False))
+        assert not compact or (lean and not imag_pack and isinstance(agent_conf.actor_net, SuperMimicPolicyNet)), \
+            "imag_compact needs imag_lean, a SuperMimicPolicyNet actor and no imag_pack"
+        goal_ind, net_actor = agent_conf.goal_ind, agent_conf.actor_net
+        # an imagined env step leaves out the stateful observations the policy does not read
+        step_obs_ind = None
+        if lean:
+            read = np.union1d(goal_ind, agent_conf.history_ind)
+            unread = [o.obs_ind for o in env.obs_container.list_all_stateful() if not np.isin(o.obs_ind, read).any()]
+            if unread:
+                step_obs_ind = np.setdiff1d(np.arange(env.info.observation_space.shape[0]), np.concatenate(unread))
+
+        def imag_env_step(state, action, wm_params):
+            def physics(sys, data, carry, a):
+                delta = wm_dynamics(wm_params, spec.features(data.qpos, data.qvel), a, xi_norm(xi_of(carry)))
+                qpos, qvel = spec.integrate(data.qpos, data.qvel, delta)
+                return imag_kinematics(sys, data.replace(qpos=qpos, qvel=qvel)), carry
+            return env.mjx_step(state, action, traj, auto_reset=False, physics_fn=physics, obs_ind=step_obs_ind)
+
+        v_imag_env_step = jax.vmap(imag_env_step, in_axes=(0, 0, None))
+        # the env step with the state left as it is: advances the carry and computes only the goal, which leaves
+        # in the other entries of the observation what the env adds to it (noise)
+        v_goal_env_step = jax.vmap(lambda state, action: env.mjx_step(
+            state, action, traj, auto_reset=False, physics_fn=lambda sys, data, carry, a: (data, carry),
+            obs_ind=np.asarray(goal_ind), skip_reward=True))
+
+        def slim_wm_delta(wm, qpos, qvel, xi_n, action):
+            """The world model's output for a batch of states, as ``physics`` in ``imag_env_step`` computes it."""
+            params, norm = wm
+            x = jnp.concatenate([spec.features(qpos, qvel), action, xi_n], axis=-1)
+            y = slim_mlp_apply(params["dynamics_net"], x if norm is None else norm["input"](x), wm_net.activation,
+                               wm_net.compute_dtype)
+            return y if norm is None else y * norm["output"].std() + norm["output"].mean
+
+        v_absorbing_prob = jax.vmap(lambda s: env._mjx_absorbing_prob(s.observation, s.info, s.data,
+                                                                      s.additional_carry, traj))
+
+        def has_horizon_left(st):
+            """Whether a full imagined rollout fits before the end of the clip."""
+            if traj is None:
+                return jnp.ones(st.done.shape, dtype=bool)
+            ts = st.additional_carry.traj_state
+            points = traj.data.split_points
+            return ts.subtraj_step_no + horizon < points[ts.traj_no + 1] - points[ts.traj_no]
+
+        obs_sys = kin_sys if use_warp else env.sys
+
+        def critic_inputs(qpos, qvel, carry):
+            """The critic's observation columns of a batch of imagined states, without observation noise."""
+            def one(qp, qv, c):
+                data = imag_kinematics(env.sys, first_data.replace(qpos=qp, qvel=qv))
+                return env._mjx_create_observation(obs_sys, data, c, traj, critic_ind)[0]
+            return jax.vmap(one)(qpos, qvel, carry)
+
+        def deferred_outputs(qpos, qvel, carry, info, action, prev_action):
+            """Critic observation, reward and termination probability of imagined states, each reached with
+            ``action``. The observation is the critic's training input and takes no gradient."""
+            def one(qp, qv, c, i, a, a_prev):
+                data = imag_kinematics(env.sys, first_data.replace(qpos=qp, qvel=qv))
+                critic_in = env._mjx_create_observation(obs_sys, *jax.lax.stop_gradient((data, c)), traj,
+                                                        critic_ind)[0]
+                # only computed if the reward or the termination read it
+                obs = env._mjx_create_observation(obs_sys, data, c, traj)[0]
+                d_hat = env._mjx_absorbing_prob(obs, i, data, c, traj)
+                # the carry as the reward sees it in mjx_step: before the step counters advance
+                c = c.replace(cur_step_in_episode=c.cur_step_in_episode - 1, global_step=c.global_step - 1)
+                if hasattr(c.reward_state, "last_action"):
+                    c = c.replace(reward_state=c.reward_state.replace(last_action=a_prev))
+                absorbing, c = env._mjx_is_absorbing(obs, i, data, c, traj)
+                reward = env._mjx_reward(jnp.zeros_like(obs), a, obs, absorbing, i, env._model, data, c, traj)[0]
+                return critic_in, reward, d_hat
+            return jax.vmap(jax.vmap(one))(qpos, qvel, carry, info, action, prev_action)
+
+        def imag_scan(step, c0, xs=None):
+            """``horizon`` steps of ``step``, rematerialized in the backward pass if ``remat``."""
+            def wrap(f):
+                if not remat:
+                    return f
+                # keeps the network matmuls, so the backward pass only recomputes the env functions
+                return jax.checkpoint(f, policy=jax.checkpoint_policies.dots_with_no_batch_dims_saveable
+                                      if remat_keep_dots else None)
+
+            if not imag_pack:
+                return jax.lax.scan(wrap(step), c0, xs, horizon, unroll=imag_unroll)
+            c_shape, o_shape = jax.eval_shape(step, c0, None)
+            pc, po = _Packed(c_shape), _Packed(o_shape)
+
+            def packed_step(c, _):
+                c, o = step(pc.unpack(c), None)
+                return pc.pack(c), po.pack(o)
+
+            cH, ro = jax.lax.scan(wrap(packed_step), pc.pack(c0), None, horizon)
+            return pc.unpack(cH), po.unpack(ro, (horizon,))
+
+        def imagine_lean(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
+            """``imagine`` for imag_lean: the critic inputs of the rollout are left to ``with_critic_inputs``."""
+            n = start.qpos.shape[0]
+            carry0 = start.carry.replace(key=jax.random.split(rng, n),
+                                         cur_step_in_episode=jnp.ones_like(start.carry.cur_step_in_episode))
+            data_template = jax.vmap(lambda qp, qv: first_data.replace(qpos=qp, qvel=qv))(start.qpos, start.qvel)
+            no_obs = jnp.zeros_like(start.observation)
+
+            def step(c, _):
+                qpos, qvel, goal, history, info, carry, surv = c
+                hist = actor_norm(history, agent_conf.history_ind)
+                a = net_actor.apply({"params": actor_params}, actor_norm(goal, goal_ind),
+                                    hist.reshape(hist.shape[:-2] + (-1,)))
+                ns = v_imag_env_step(MjxState(data=data_template.replace(qpos=qpos, qvel=qvel), observation=no_obs,
+                                              reward=jnp.zeros(n), absorbing=jnp.zeros(n, dtype=bool),
+                                              done=jnp.zeros(n, dtype=bool), info=info, additional_carry=carry),
+                                     a, wm_params)
+                d_hat = v_absorbing_prob(ns)
+                out = dict(reward=ns.reward, surv=surv, d_hat=d_hat, action_norm=jnp.linalg.norm(a, axis=-1),
+                           state=jax.lax.stop_gradient((ns.data.qpos, ns.data.qvel, ns.additional_carry)))
+                return (ns.data.qpos, ns.data.qvel, take_columns(ns.observation, goal_ind),
+                        push_history(history, ns.observation), ns.info, ns.additional_carry,
+                        surv * (1.0 - d_hat)), out
+
+            ones = jnp.ones(n)
+            c0 = (start.qpos, start.qvel, take_columns(start.observation, goal_ind), start.history, start.info,
+                  carry0, ones)
+            cH, ro = imag_scan(step, c0)
+            xi_H = jax.vmap(xi_of)(cH[5])
+            obs_H = critic_inputs(cH[0], cH[1], cH[5])
+            v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
+            ro.update(alive=jnp.ones_like(ro["surv"]), done=jnp.zeros_like(ro["surv"]),
+                      start=jax.lax.stop_gradient((start.qpos, start.qvel, carry0)))
+            return ro, (obs_H, xi_H, cH[6], ones, v_H)
+
+        def imagine_compact(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
+            """``imagine`` for imag_compact: the rollout comes with the critic inputs of all its states."""
+            n = start.qpos.shape[0]
+            carry0 = start.carry.replace(key=jax.random.split(rng, n),
+                                         cur_step_in_episode=jnp.ones_like(start.carry.cur_step_in_episode))
+            data_template = jax.vmap(lambda qp, qv: first_data.replace(qpos=qp, qvel=qv))(start.qpos, start.qvel)
+            no_obs, ones, hist_ind = jnp.zeros_like(start.observation), jnp.ones(n), agent_conf.history_ind
+            stack = lambda s, x: jnp.concatenate([s[None], x])  # noqa: E731
+
+            def normalize(norm, x, ind):
+                return x if norm is None else norm(x, ind)
+
+            # forward-only pass over the env's carry: goal, observation noise, carry and info of s_1 .. s_H
+            def ahead_step(c, _):
+                state = MjxState(data=data_template, observation=no_obs, reward=jnp.zeros(n),
+                                 absorbing=jnp.zeros(n, dtype=bool), done=jnp.zeros(n, dtype=bool),
+                                 info=c[0], additional_carry=c[1])
+                ns = v_goal_env_step(state, jnp.zeros((n, env.info.action_space.shape[0])))
+                return (ns.info, ns.additional_carry), dict(
+                    goal=take_columns(ns.observation, goal_ind), noise=take_columns(ns.observation, hist_ind),
+                    state=(ns.additional_carry, ns.info))
+
+            ahead = jax.lax.stop_gradient(
+                jax.lax.scan(ahead_step, (start.info, carry0), None, horizon, unroll=imag_unroll)[1])
+            carries, infos = ahead["state"]
+            # the policy encoder once, on the goals of s_0 .. s_{H-1}
+            goals = stack(take_columns(start.observation, goal_ind), ahead["goal"][:-1])
+            z = slim_mlp_apply(actor_params["enc"],
+                               normalize(actor_norm, goals.reshape((-1, goals.shape[-1])), goal_ind),
+                               net_actor.activation, net_actor.compute_dtype)
+            z = jnp.tanh(z).reshape((horizon, n, -1))
+            xi_n = xi_norm(jax.vmap(jax.vmap(xi_of))(jax.tree.map(lambda s, x: stack(s, x[:-1]), carry0, carries)))
+            # the history is carried normalized, so each observation is normalized once, when it is produced
+            hist_norm = None if actor_norm is None else actor_norm.replace(
+                mean=actor_norm.mean[hist_ind], var=actor_norm.var[hist_ind])
+
+            def step(c, x):
+                qpos, qvel, history = c
+                z_t, xi_t, next_carry, noise = x
+                a = slim_mlp_apply(actor_params["dec"], jnp.concatenate([z_t, history.reshape((n, -1))], axis=-1),
+                                   net_actor.activation, net_actor.compute_dtype)
+                qpos, qvel = spec.integrate(qpos, qvel, slim_wm_delta(wm_params, qpos, qvel, xi_t, a))
+                new = jax.vmap(lambda qp, qv, nc, a_: env._mjx_create_observation(
+                    obs_sys, first_data.replace(qpos=qp, qvel=qv), nc.replace(last_action=a_), traj,
+                    hist_ind)[0])(qpos, qvel, next_carry, a)
+                # as the env step finishes its observation
+                new = normalize(hist_norm, jnp.nan_to_num(new + noise, nan=0.0), None)
+                return ((qpos, qvel, jnp.concatenate([history[:, 1:], new[:, None]], axis=1)),
+                        dict(action=a, qpos=qpos, qvel=qvel))
+
+            _, ro = imag_scan(step, (start.qpos, start.qvel, normalize(actor_norm, start.history, hist_ind)),
+                              (z, xi_n, carries, ahead["noise"]))
+            act = ro["action"]
+            # states s_0 .. s_H in one pass; s_0 is not reached by an action and only gives critic inputs.
+            # The carry gets the actions with their gradient: the reward and the bootstrap value read them.
+            carry, info = jax.tree.map(stack, (carry0, start.info), (carries.replace(last_action=act), infos))
+            last = getattr(carry0.reward_state, "last_action", jnp.zeros_like(act[0]))
+            obs, reward, d_hat = deferred_outputs(
+                stack(start.qpos, ro["qpos"]), stack(start.qvel, ro["qvel"]), carry, info,
+                stack(jnp.zeros_like(act[0]), act), jnp.concatenate([jnp.zeros_like(act[:1]), last[None], act[:-1]]))
+            reward, d_hat = reward[1:], d_hat[1:]
+            surv = jnp.cumprod(1.0 - d_hat, axis=0)
+            # the bootstrap value is the only reader of an observation with its gradient
+            carry_H = jax.tree.map(lambda x: x[-1], carry)
+            xi_H = jax.vmap(xi_of)(carry_H)
+            obs_H = critic_inputs(ro["qpos"][-1], ro["qvel"][-1], carry_H)
+            v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
+            ro = dict(reward=reward, surv=stack(ones, surv[:-1]), d_hat=d_hat,
+                      action_norm=jnp.linalg.norm(act, axis=-1), alive=jnp.ones_like(reward),
+                      done=jnp.zeros_like(reward), obs=obs,
+                      xi=jax.lax.stop_gradient(jax.vmap(jax.vmap(xi_of))(carry)))
+            return ro, (obs_H, xi_H, surv[-1], ones, v_H)
+
+        def with_critic_inputs(ro, obs_H, xi_H):
+            """The rollout with the critic inputs of all its states s_0 .. s_H."""
+            if compact:  # has them from its pass over all states
+                return ro
+            ro = dict(ro)
+            if lean:
+                start, states = ro.pop("start"), ro.pop("state")
+                qpos, qvel, carry = jax.tree.map(lambda s, x: jnp.concatenate([s[None], x[:-1]]), start, states)
+                ro.update(obs=jax.vmap(critic_inputs)(qpos, qvel, carry), xi=jax.vmap(jax.vmap(xi_of))(carry))
+            return dict(ro, obs=jnp.concatenate([ro["obs"], obs_H[None]]), xi=jnp.concatenate([ro["xi"], xi_H[None]]))
+
+        def imagine(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
+            """H-step rollout; returns per-step tensors (H, B) and the critic inputs (H+1, B, .)."""
+            keys = jax.random.split(rng, start.qpos.shape[0])
+            # fresh keys, so replayed start states do not repeat the env's noise samples
+            # and the episode time limit is not part of the imagined MDP: the critic cannot see it
+            carry0 = start.carry.replace(key=keys, cur_step_in_episode=jnp.ones_like(start.carry.cur_step_in_episode))
+            data_template = jax.vmap(lambda qp, qv: first_data.replace(qpos=qp, qvel=qv))(start.qpos, start.qvel)
+
+            def make_state(qpos, qvel, obs, info, carry):
+                return MjxState(data=data_template.replace(qpos=qpos, qvel=qvel), observation=obs,
+                                reward=jnp.zeros(qpos.shape[0]), absorbing=jnp.zeros(qpos.shape[0], dtype=bool),
+                                done=jnp.zeros(qpos.shape[0], dtype=bool), info=info, additional_carry=carry)
+
+            def step(c, _):
+                qpos, qvel, obs, history, info, carry, surv, alive = c
+                a = actor_apply(actor_params, actor_norm, obs, history)
+                ns = v_imag_env_step(make_state(qpos, qvel, obs, info, carry), a, wm_params)
+                d_hat = v_absorbing_prob(ns)
+                if d_hat is None:  # the handler has no smooth version
+                    assert term_head
+                    d_hat = jax.nn.sigmoid(wm_termination(wm_params[0], term_obs(ns.observation)))
+                # with a smooth termination the survival weight already covers the absorbing states
+                ended = ns.done if analytic_only_truncates is False else ns.done & ~ns.absorbing
+                done = jax.lax.stop_gradient(ended.astype(jnp.float32))
+                out = dict(reward=ns.reward, surv=surv, alive=alive, d_hat=d_hat, done=done,
+                           action_norm=jnp.linalg.norm(a, axis=-1),
+                           obs=critic_obs(obs), xi=jax.vmap(xi_of)(carry))
+                nc = (ns.data.qpos, ns.data.qvel, ns.observation, push_history(history, ns.observation), ns.info,
+                      ns.additional_carry,
+                      surv * (1.0 - d_hat), alive * (1.0 - done))
+                return nc, out
+
+            ones = jnp.ones(start.qpos.shape[0])
+            c0 = (start.qpos, start.qvel, start.observation, start.history, start.info, carry0, ones, ones)
+            cH, ro = imag_scan(step, c0)
+            obs_H, carry_H, surv_H, alive_H = cH[2], cH[5], cH[6], cH[7]
+            xi_H = jax.vmap(xi_of)(carry_H)
+            obs_H = critic_obs(obs_H)
+            v_H = critic_apply(critic_params, obs_H, xi_norm(xi_H), critic_norm)
+            return ro, (obs_H, xi_H, surv_H, alive_H, v_H)
+
+        def actor_loss_fn(actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm):
+            rollout = imagine_compact if compact else imagine_lean if lean else imagine
+            ro, (obs_H, xi_H, surv_H, alive_H, v_H) = rollout(
+                actor_params, wm_params, critic_params, start, rng, actor_norm, critic_norm)
+            disc = gamma ** jnp.arange(horizon)
+            J = jnp.sum(disc[:, None] * ro["surv"] * ro["alive"] * ro["reward"], axis=0)
+            J = J + gamma ** horizon * surv_H * alive_H * v_H
+            loss = -jnp.mean(J) / (1.0 if actor_loss_sum else horizon)
+            return loss, (ro, obs_H, xi_H, alive_H)
+
+        def critic_update(critic_state, ro, rng, norm):
+            """Fits the critic to the lambda-returns of a rollout with the critic inputs of its states s_0 .. s_H."""
+            obs = (ro["obs"] if norm is None else norm(ro["obs"])).astype(critic_net.compute_dtype)
+            # one array of inputs, so that a minibatch is one gather
+            X = jnp.concatenate([obs, xi_norm(ro["xi"]).astype(obs.dtype)], axis=-1)  # (H+1, B, .)
+            value = lambda params, x: critic_apply(params, x, x[..., :0], None)  # noqa: E731
+            values = value(critic_state.params, X)
+            cont = (1.0 - ro["d_hat"]) * (1.0 - ro["done"])  # continuation into s_{t+1}
+
+            def back(R, t):
+                R = ro["reward"][t] + gamma * cont[t] * ((1.0 - lam) * values[t + 1] + lam * R)
+                return R, R
+
+            _, targets = jax.lax.scan(back, values[horizon], jnp.arange(horizon - 1, -1, -1))
+            Y = jax.lax.stop_gradient(targets[::-1]).reshape(-1)
+            W = ro["alive"].reshape(-1)
+            n = Y.shape[0]
+            X = X.reshape((-1, X.shape[-1]))  # the minibatches only index its first n rows, s_0 .. s_{H-1}
+            mb = n // critic_mb
+
+            def mb_step(st, idx):
+                def loss_fn(params):
+                    err = value(params, X[idx]) - Y[idx]
+                    return jnp.sum(W[idx] * err ** 2) / jnp.maximum(jnp.sum(W[idx]), 1.0)
+
+                loss, g = jax.value_and_grad(loss_fn)(st.params)
+                return st.apply_gradients(grads=g), loss
+
+            # the minibatches of all epochs: one loop
+            perms = jnp.concatenate([jax.random.permutation(r, n)[:mb * critic_mb].reshape((critic_mb, mb))
+                                     for r in jax.random.split(rng, critic_epochs)])
+            critic_state, losses = jax.lax.scan(mb_step, critic_state, perms)
+            return critic_state, losses[-1]
+
+        def policy_update(actor_state, critic_state, wm_params, start_buffer, rng, mult, actor_norm, critic_norm):
+            rng_s, rng_i, rng_c = jax.random.split(rng, 3)
+            start = start_buffer.sample(rng_s, imag_batch)
+            (loss, (ro, obs_H, xi_H, alive_H)), g = jax.value_and_grad(actor_loss_fn, has_aux=True)(
+                actor_state.params, wm_params, critic_state.params, start, rng_i, actor_norm, critic_norm)
+            old_params = actor_state.params
+            actor_state = actor_state.apply_gradients(grads=g)
+            actor_state = actor_state.replace(params=jax.tree.map(lambda o, n: o + mult * (n - o), old_params,
+                                                                  actor_state.params))
+            ro = with_critic_inputs(*jax.lax.stop_gradient((ro, obs_H, xi_H)))
+            if critic_norm is not None:
+                critic_norm = critic_norm.update(ro["obs"][:-1])
+            with jax.named_scope("critic_update"):
+                critic_state, critic_loss = critic_update(critic_state, ro, rng_c, critic_norm)
+            m = dict(imag_return=jnp.mean(jnp.sum(ro["surv"] * ro["alive"] * ro["reward"], axis=0)),
+                     imag_survival=jnp.mean(ro["surv"][-1]), imag_alive=jnp.mean(ro["alive"][-1]),
+                     critic_loss=critic_loss, actor_grad_norm=optax.global_norm(g),
+                     action_norm=jnp.mean(ro["action_norm"]))
+            return actor_state, critic_state, critic_norm, m
+
+        def one_update(_, c):
+            agent_state, rng, _ = c
+            rng, rng_w, rng_p = jax.random.split(rng, 3)
+            with jax.named_scope("wm_update"):
+                wm_state, m_wm = wm_update(agent_state.wm_state, agent_state.window_buffer, rng_w, agent_state.wm_norm)
+            decay_at = agent_state.lr_decay_start
+            ramp = jnp.where(decay_at >= 0, jnp.clip((agent_state.num_updates - decay_at) / lr_decay_len, 0.0, 1.0), 0.0)
+            with jax.named_scope("policy_update"):
+                actor_state, critic_state, critic_norm, m_pi = policy_update(
+                    agent_state.actor_state, agent_state.critic_state, (wm_state.params, agent_state.wm_norm),
+                    agent_state.start_buffer, rng_p,
+                    lr_mult + (1.0 - lr_mult) * ramp, agent_state.actor_norm, agent_state.critic_norm)
+            if policy_ema > 0:
+                agent_state = agent_state.replace(actor_ema=jax.tree.map(
+                    lambda e, p: policy_ema * e + (1.0 - policy_ema) * p, agent_state.actor_ema, actor_state.params))
+            agent_state = agent_state.replace(wm_state=wm_state, actor_state=actor_state, critic_norm=critic_norm,
+                                              critic_state=critic_state, num_updates=agent_state.num_updates + 1)
+            return agent_state, rng, {**m_wm, **m_pi}
+
+        metric_keys = ("wm_loss", "term_bce", "term_acc", "nse_1", "nse_k", "imag_return", "imag_survival",
+                       "imag_alive", "critic_loss", "actor_grad_norm", "action_norm")
+
+        # ----- one env step + updates at the configured update-to-data ratio -----
+        def iteration(c, it):
+            agent_state, rng, last_m = c
+            rng, rng_a = jax.random.split(rng)
+            st = agent_state.env_state
+            actor_norm, history = agent_state.actor_norm, agent_state.obs_history
+            if actor_norm is not None:
+                actor_norm = actor_norm.update(st.observation)
+            action = actor_apply(agent_state.actor_state.params, actor_norm, st.observation, history)
+            action = action + action_noise * jax.random.normal(rng_a, action.shape)
+            start_ok = state_is_valid(st.data.qpos, st.data.qvel, max_abs_qvel) & \
+                jnp.all(jnp.isfinite(st.observation), axis=-1)
+            start_buffer = agent_state.start_buffer.add(st, start_ok & has_horizon_left(st),
+                                                        (it + 1) % start_stride == 0, history)
+            next_bin = None
+            if use_bin_resets:
+                rng, rng_b = jax.random.split(rng)
+                next_clip, next_frame, next_bin = bins.sample(agent_state.bin_resets, rng_b, n_envs)
+                carry = st.additional_carry
+                st = st.replace(additional_carry=carry.replace(traj_state=carry.traj_state.replace(
+                    next_traj_no=next_clip, next_subtraj_step_no=next_frame)))
+            with jax.named_scope("real_step"):
+                nstate, reset_state = v_env_step(st, action)
+            next_obs_t = term_obs(nstate.observation)
+            transition_ok = (start_ok & state_is_valid(nstate.data.qpos, nstate.data.qvel, max_abs_qvel)
+                             & jnp.all(jnp.isfinite(action), axis=-1) & jnp.all(jnp.isfinite(nstate.observation), axis=-1))
+            window_buffer = agent_state.window_buffer.add(
+                transition_ok,
+                qpos=st.data.qpos, qvel=st.data.qvel, next_qpos=nstate.data.qpos, next_qvel=nstate.data.qvel,
+                action=action, xi=jax.vmap(xi_of)(st.additional_carry),
+                next_term_obs=next_obs_t, absorbing=nstate.absorbing.astype(jnp.float32), done=nstate.done)
+            wm_norm = agent_state.wm_norm
+            if wm_norm is not None:
+                def masked_update(norm, x):
+                    return norm.update(jnp.where(transition_ok[:, None], x, norm.mean))
+
+                wm_in = jnp.concatenate([spec.features(st.data.qpos, st.data.qvel), action,
+                                         xi_norm(jax.vmap(xi_of)(st.additional_carry))], axis=-1)
+                wm_norm = dict(input=masked_update(wm_norm["input"], wm_in),
+                               output=masked_update(wm_norm["output"], spec.targets(
+                                   st.data.qpos, st.data.qvel, nstate.data.qpos, nstate.data.qvel)),
+                               error=masked_update(wm_norm["error"], spec.error(
+                                   nstate.data.qpos, nstate.data.qvel, st.data.qpos, st.data.qvel) * spec.err_scale))
+            es = agent_state.episode_stats
+            ret, length = es.ret + nstate.reward, es.length + 1
+            disc_ret = es.disc_ret + gamma ** es.length * nstate.reward
+            bin_resets, start_bin = agent_state.bin_resets, es.start_bin
+            if use_bin_resets:
+                # truncated episodes bootstrap with their mean reward
+                boot = jnp.where(nstate.absorbing, 0.0, gamma ** length * (ret / length) / (1 - gamma))
+                ts = nstate.additional_carry.traj_state
+                bin_resets = bins.update(bin_resets, nstate.done, nstate.absorbing, es.start_bin,
+                                         bins.bin_of(ts.traj_no, ts.subtraj_step_no), disc_ret + boot)
+                start_bin = jnp.where(nstate.done, next_bin, es.start_bin)
+            es = EpisodeStats(ret=jnp.where(nstate.done, 0.0, ret), length=jnp.where(nstate.done, 0.0, length),
+                              last_ret=jnp.where(nstate.done, ret, es.last_ret),
+                              last_length=jnp.where(nstate.done, length, es.last_length),
+                              disc_ret=jnp.where(nstate.done, 0.0, disc_ret), start_bin=start_bin)
+            step_return = jnp.mean(es.last_ret / jnp.maximum(es.last_length, 1.0)) / max_step_reward
+            trigger = (step_return >= lr_decay_return) | (agent_state.num_updates >= lr_decay_by)
+            decay_at = jnp.where((agent_state.lr_decay_start < 0) & trigger, agent_state.num_updates,
+                                 agent_state.lr_decay_start)
+            if history is not None:
+                history = jnp.where(nstate.done[:, None, None], fresh_history(reset_state.observation),
+                                    push_history(history, reset_state.observation))
+            agent_state = agent_state.replace(env_state=reset_state, start_buffer=start_buffer, lr_decay_start=decay_at,
+                                              actor_norm=actor_norm, obs_history=history, wm_norm=wm_norm,
+                                              window_buffer=window_buffer, episode_stats=es, bin_resets=bin_resets)
+
+            # Warm-up waits for the window buffer, which starts empty in every new process.
+            ready = window_buffer.count >= min(warmup + 1, int(exp.buffer_len))
+            n_up = jnp.where(ready, jnp.floor((it + 1) * utd) - jnp.floor(it * utd), 0).astype(jnp.int32)
+            agent_state, rng, last_m = jax.lax.fori_loop(0, n_up, one_update, (agent_state, rng, last_m))
+
+            metric = SuperMimicSummaryMetrics(
+                mean_episode_return=jnp.mean(es.last_ret), mean_episode_length=jnp.mean(es.last_length),
+                max_timestep=(it + 1) * n_envs,
+                mean_wm_loss=last_m["wm_loss"], mean_wm_nse_1step=last_m["nse_1"], mean_wm_nse_kstep=last_m["nse_k"],
+                mean_term_bce=last_m["term_bce"], mean_term_acc=last_m["term_acc"],
+                mean_imag_return=last_m["imag_return"], mean_imag_survival=last_m["imag_survival"],
+                mean_imag_alive=last_m["imag_alive"], mean_critic_loss=last_m["critic_loss"],
+                mean_actor_grad_norm=last_m["actor_grad_norm"], mean_action_norm=last_m["action_norm"],
+                num_updates=agent_state.num_updates)
+            return (agent_state, rng, last_m), metric
+
+        log_every = max(1, int(getattr(exp, "log_every", 100)))
+        # One call runs `iterations_per_call` env steps (default: the whole run) from agent_state.iteration on.
+        n_call = int(getattr(exp, "iterations_per_call", None) or exp.num_iterations)
+        num_outer = max(1, n_call // log_every)
+        start = agent_state.iteration
+
+        def logged(c, outer):
+            c, ms = jax.lax.scan(iteration, c, start + outer * log_every + jnp.arange(log_every))
+            agg = jax.tree.map(lambda x: jnp.mean(x, axis=0), ms)
+            agg = agg.replace(max_timestep=ms.max_timestep[-1], num_updates=ms.num_updates[-1])
+            return c, agg
+
+        last_m0 = {k: jnp.zeros((), jnp.float32) for k in metric_keys}
+        rng, _rng = jax.random.split(rng)
+        (agent_state, _, _), training_metrics = jax.lax.scan(logged, (agent_state, _rng, last_m0),
+                                                             jnp.arange(num_outer))
+        agent_state = agent_state.replace(iteration=start + num_outer * log_every)
+        return {"agent_state": strong_types(agent_state), "training_metrics": training_metrics,
+                "validation_metrics": ValidationSummary()}
+
+    @classmethod
+    def policy_fn(cls, agent_conf):
+        """
+        Build the function that evaluates the deterministic policy.
+
+        Args:
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+
+        Returns:
+            Callable: A function ``act(params, norm, obs, history=None) -> action`` for batched observations.
+            ``norm`` is the :class:`RunningNorm` of the observations or ``None``. ``history`` has the shape
+            ``(n_envs, history_len, history_dim)`` and is only used by policies with ``history_len > 0``.
+
+        """
+        goal_ind, history_ind, net = agent_conf.goal_ind, agent_conf.history_ind, agent_conf.actor_net
+
+        def act(params, norm, obs, history=None):
+            if history_ind is None:
+                return net.apply({"params": params}, obs if norm is None else norm(obs))
+            goal, hist = take_columns(obs, goal_ind), history
+            if norm is not None:
+                goal, hist = norm(goal, goal_ind), norm(hist, history_ind)
+            return net.apply({"params": params}, goal, hist.reshape(hist.shape[:-2] + (-1,)))
+
+        return act
+
+    # ---------- play ----------------------------------------------------
+    @classmethod
+    def play_policy(cls, env, agent_conf, agent_state, n_envs: int, n_steps=None, render=True,
+                    record=False, rng=None, deterministic=True, use_mujoco=False, traj=None):
+        """
+        Roll out a trained policy in a Python loop and render it.
+
+        The deployed parameters are used (the Polyak average if the agent has one). By default the policy runs in
+        ``n_envs`` parallel MJX environments; with ``use_mujoco`` it runs in the CPU MuJoCo environment instead.
+        Policies with an observation history (``history_len > 0``) are not supported. The environment is stopped at
+        the end.
+
+        Args:
+            env: The (unwrapped) environment.
+            agent_conf (SuperMimicAgentConf): Agent configuration.
+            agent_state (SuperMimicAgentState): Agent state holding the trained policy.
+            n_envs (int): Number of parallel environments; use 1 with ``use_mujoco``.
+            n_steps (int): Number of steps to run. If ``None``, the loop runs until it is interrupted.
+            render (bool): Unused; the environment is rendered at every step.
+            record (bool): Whether to record a video.
+            rng (jax.Array): PRNG key for environment resets and action noise. Defaults to ``jax.random.key(0)``.
+            deterministic (bool): If False, Gaussian noise with standard deviation ``action_noise_std`` is added to
+                the actions, as during training.
+            use_mujoco (bool): If True, use the CPU MuJoCo backend instead of MJX.
+            traj: Trajectory data passed on to ``env.reset`` and ``env.step`` of the MJX environment.
+
+        """
+        from loco_mujoco.core.wrappers import LogWrapper, VecEnv
+
+        exp = agent_conf.config.experiment
+        assert agent_conf.history_ind is None, "play_policy does not keep an observation history."
+        policy = cls.policy_fn(agent_conf)
+        params = agent_state.deployed_params
+        if not use_mujoco:
+            env = VecEnv(LogWrapper(env))
+        rng = jax.random.key(0) if rng is None else rng
+        keys = jax.random.split(rng, n_envs + 1)
+        rng, env_keys = keys[0], keys[1:]
+
+        @jax.jit
+        def _act(obs, _rng):
+            action = policy(params, agent_state.actor_norm, obs)
+            if not deterministic:
+                action = action + float(exp.action_noise_std) * jax.random.normal(_rng, action.shape)
+            return action
+
+        if use_mujoco:
+            obs, env_state = env.reset(), None
+        else:
+            obs, env_state = env.reset(env_keys, traj)
+        n_steps = np.iinfo(np.int32).max if n_steps is None else n_steps
+        for _ in range(n_steps):
+            rng, _rng = jax.random.split(rng)
+            action = jnp.atleast_2d(_act(obs, _rng))
+            if use_mujoco:
+                obs, _, _, done, _ = env.step(action)
+                env.render(record=record)
+                if done:
+                    obs = env.reset()
+            else:
+                obs, _, _, done, _, env_state = env.step(env_state, action, traj)
+                env.mjx_render(env_state, record=record)
+        env.stop()

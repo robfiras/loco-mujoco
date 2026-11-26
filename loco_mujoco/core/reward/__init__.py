@@ -1,6 +1,8 @@
+"""Reward functions: the base class, task rewards and rewards based on a reference trajectory."""
+
 from .base import Reward
 from .default import NoReward, TargetVelocityGoalReward, TargetXVelocityReward, LocomotionReward
-from .trajectory_based import TargetVelocityTrajReward, MimicReward
+from .trajectory_based import TargetVelocityTrajReward, MimicReward, SiteTrackingReward
 from .utils import *
 
 # register all rewards
@@ -9,4 +11,5 @@ TargetVelocityGoalReward.register()
 TargetXVelocityReward.register()
 TargetVelocityTrajReward.register()
 MimicReward.register()
+SiteTrackingReward.register()
 LocomotionReward.register()

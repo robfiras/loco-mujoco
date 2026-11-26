@@ -1,3 +1,11 @@
+"""
+Browser-based viewer built on viser and mjviser, a drop-in alternative to the OpenGL
+:class:`~loco_mujoco.core.visuals.viewer.MujocoViewer`.
+
+The viewer needs the optional dependencies ``viser`` and ``mjviser``.
+
+"""
+
 import base64
 import mimetypes
 import time
@@ -35,7 +43,7 @@ DEFAULT_LOGO = "https://github.com/robfiras/loco-mujoco/assets/69359729/bd2a219e
 
 VISER_IMPORT_ERROR = (
     "The viser viewer requires the optional dependencies `viser` and `mjviser`. "
-    "Install them with:\n\n    pip install loco-mujoco[viser]\n"
+    "Install them with:\n\n    pip install -e \".[viser]\"\n"
 )
 
 
@@ -178,7 +186,7 @@ class ViserViewer:
             port (int): Port the viser server binds to.
             verbose (bool): If True, viser logs client connections and disconnections. The
                 server URL is printed by viser regardless.
-            logo (str): Logo shown in the bottom right corner. Either a URL, which the browser
+            logo (str): Logo shown in the top left corner. Either a URL, which the browser
                 fetches itself, or a path to a local image file, which is embedded in the page.
                 Set to None to disable the overlay.
             logo_width (int): Width of the logo overlay in pixels.
@@ -188,6 +196,8 @@ class ViserViewer:
             sky (str/tuple): Background gradient. "model" reproduces the OpenGL viewer by
                 reading the model's skybox texture, a (top_rgb, bottom_rgb) pair sets an
                 explicit gradient, and None leaves viser's plain background.
+            **unsupported_params: Viewer parameters the viser viewer does not support. They are
+                ignored with a warning.
 
         """
         check_optional_imports()
@@ -1053,6 +1063,13 @@ class ViserViewer:
 
     @property
     def video_file_path(self):
+        """
+        Path of the video file of the recorder.
+
+        Returns:
+            str: The path, or None if the viewer does not record.
+
+        """
         if self._recorder is not None:
             return self._recorder.file_path
         else:

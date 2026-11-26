@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose a new robot, component, algorithm, dataset or another improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: What do you want to do?
+      description: The use case or the problem that the library does not cover today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How the feature could look, for example the API you would like to call.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+      description: What you have tried, or how other libraries handle it.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Environments and robot models
+        - Environment components (observations, rewards, control, randomization, terrain, ...)
+        - Datasets and retargeting
+        - Algorithms and training
+        - Rendering
+        - Documentation
+        - Other
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to work on this myself and open a pull request.

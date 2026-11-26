@@ -1,3 +1,5 @@
+"""Proportional-derivative (PD) control function on joint positions."""
+
 from typing import Any, Dict, List, Union, Tuple
 from types import ModuleType
 
@@ -111,6 +113,7 @@ class PDControl(ControlFunction):
             model (Union[MjModel, Model]): The simulation model instance.
             data (Union[MjData, Data]): The simulation data instance.
             backend (ModuleType): Backend module (e.g., numpy or jax.numpy) for computation.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             PDControlState: The initialized PD control state containing zeroed noise values, offsets, and multipliers.
@@ -141,6 +144,7 @@ class PDControl(ControlFunction):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for calculation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[np.ndarray, jax.Array], Any]: The updated action and carry.

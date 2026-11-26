@@ -1,3 +1,5 @@
+"""Terminal state handler based on the height of the root."""
+
 from typing import Dict, Any, Union, Tuple
 from types import ModuleType
 
@@ -16,6 +18,8 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
     """
     Check if the current state is terminal based on the height of the root.
     """
+
+    soft_temperature_m = 0.02  # width of the smooth termination around the height limits, in meters
     def __init__(self, env: Any, **handler_config: Dict[str, Any]):
         """
         Initialize the TerminalStateHandler.
@@ -45,6 +49,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -71,6 +76,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             info (Dict[str, Any]): The info dictionary.
             data (MjData): The Mujoco data structure.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -94,6 +100,7 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             info (Dict[str, Any]): The info dictionary.
             data (Data): The Mujoco data structure for Mjx.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -119,13 +126,37 @@ class HeightBasedTerminalStateHandler(TerminalStateHandler):
             data (Union[MjData, Data]): The Mujoco data structure.
             carry (Any): Additional carry information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
 
         """
-        root_pose = data.qpos[self.root_free_joint_xml_ind]
-        height = root_pose[2]
-        height_cond = backend.logical_or(backend.less(height, self.root_height_range[0]),
-                                         backend.greater(height, self.root_height_range[1]))
-        return height_cond, carry
+        return self.hard_any(self._violations(data), backend), carry
+
+    def mjx_absorbing_prob(self, env: Any, obs: jnp.ndarray, info: Dict[str, Any], data: Data, carry: Any,
+                           traj=None) -> jnp.ndarray:
+        """
+        Smooth termination probability of the root height range, see ``TerminalStateHandler.soft_any``.
+
+        Args:
+            env (Any): The environment instance.
+            obs (jnp.ndarray): Observation of the environment.
+            info (Dict[str, Any]): The info dictionary.
+            data (Data): The Mujoco data structure for Mjx.
+            carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
+
+        Returns:
+            jnp.ndarray: Probability in [0, 1] that the current state is terminal.
+
+        """
+        return self.soft_any(self._violations(data))
+
+    def _violations(self, data: Union[MjData, Data]):
+        """
+        (excess, temperature) pairs of the conditions: the root height below and above the healthy range.
+        """
+        height = data.qpos[self.root_free_joint_xml_ind][2]
+        return [(self.root_height_range[0] - height, self.soft_temperature_m),
+                (height - self.root_height_range[1], self.soft_temperature_m)]

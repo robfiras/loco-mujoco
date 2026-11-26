@@ -1,6 +1,9 @@
-from typing import Dict, Any, Union, Tuple
+"""Base class of the terminal state handlers."""
+
+from typing import Dict, Any, Optional, Union, Tuple
 from types import ModuleType
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from mujoco import MjData, MjModel
@@ -43,6 +46,7 @@ class TerminalStateHandler(StatefulObject):
             data (Union[MjData, Data]): The simulation data.
             carry (Any): Carry instance with additional state information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Tuple[Union[MjData, Data], Any]: The updated simulation data and carry.
@@ -69,6 +73,7 @@ class TerminalStateHandler(StatefulObject):
             info (Dict[str, Any]): The info dictionary.
             data (MjData): The Mujoco data structure.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -94,6 +99,7 @@ class TerminalStateHandler(StatefulObject):
             info (Dict[str, Any]): The info dictionary.
             data (Data): The Mujoco data structure for Mjx.
             carry (Any): Additional carry information.
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.
@@ -102,6 +108,69 @@ class TerminalStateHandler(StatefulObject):
             NotImplementedError: If not implemented in a subclass.
         """
         raise NotImplementedError
+
+    def mjx_absorbing_prob(self,
+                           env: Any,
+                           obs: jnp.ndarray,
+                           info: Dict[str, Any],
+                           data: Data,
+                           carry: Any,
+                           traj=None) -> Optional[jnp.ndarray]:
+        """
+        Smooth, differentiable version of mjx_is_absorbing, used by algorithms that backpropagate through
+        imagined rollouts. Handlers without one return None, and such algorithms fall back to a learned estimate.
+
+        Handlers implement it as 1 - prod(1 - sigmoid(excess / temperature)) over the same excesses (error minus
+        threshold) that their hard check compares with zero, see ``soft_any``. Self-collision conditions have no
+        smooth version: imagination computes no contacts.
+
+        Args:
+            env (Any): The environment instance.
+            obs (jnp.ndarray): Observations with shape (n_samples, n_obs).
+            info (Dict[str, Any]): The info dictionary.
+            data (Data): The Mujoco data structure for Mjx.
+            carry (Any): Additional carry information.
+            traj: Trajectory to use (optional).
+
+        Returns:
+            Optional[jnp.ndarray]: Probability in [0, 1] that the current state is terminal, or None if the
+            handler has no smooth version.
+        """
+        return None
+
+    @staticmethod
+    def soft_any(violations) -> jnp.ndarray:
+        """
+        Smooth version of ``any(excess > 0)``: 1 - prod(1 - sigmoid(excess / temperature)).
+
+        Args:
+            violations: Iterable of (excess, temperature) pairs; the excess is positive past the threshold.
+
+        Returns:
+            jnp.ndarray: Probability in [0, 1].
+        """
+        alive = jnp.array(1.0)
+        for excess, temperature in violations:
+            alive = alive * (1.0 - jax.nn.sigmoid(excess / temperature))
+        return 1.0 - alive
+
+    @staticmethod
+    def hard_any(violations, backend: ModuleType):
+        """
+        ``any(excess > 0)`` over (excess, temperature) pairs.
+
+        Args:
+            violations (Iterable): (excess, temperature) pairs; the excess is positive past the threshold.
+            backend (ModuleType): Backend module, either ``numpy`` or ``jax.numpy``.
+
+        Returns:
+            Union[np.ndarray, jnp.ndarray]: Boolean scalar, True if any excess is positive.
+
+        """
+        is_absorbing = backend.array(False)
+        for excess, _ in violations:
+            is_absorbing = backend.logical_or(is_absorbing, backend.greater(excess, 0.0))
+        return is_absorbing
 
     def _is_absorbing_compat(self,
                              env: Any,
@@ -121,6 +190,7 @@ class TerminalStateHandler(StatefulObject):
             data (Union[MjData, Data]): The Mujoco data structure.
             carry (Any): Additional carry information.
             backend (ModuleType): Backend module used for computation (e.g., numpy or jax.numpy).
+            traj (Trajectory, optional): The trajectory of the environment, if any.
 
         Returns:
             Union[bool, Any]: Whether the current state is terminal, and the carry.

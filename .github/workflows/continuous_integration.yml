@@ -1,15 +1,25 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python.
-# Runs on: push to master or dev.
+# Jobs:
+#   build    the full test suite with coverage, on Python 3.11
+#   docs     docstring coverage and the documentation build
+#   install  builds the wheel and sdist, installs the wheel in a clean environment and runs a smoke test,
+#            on every supported Python version
+# Runs on: push to master or dev, pull requests into them, and weekly (install job only), so that a new
+# release of a dependency that breaks the installation is noticed before users report it.
 
 name: Continuous Integration
 
 on:
   push:
     branches: [ master, dev ]
+  pull_request:
+    branches: [ master, dev ]
+  schedule:
+    - cron: "0 5 * * 1"   # Mondays, 05:00 UTC
   workflow_dispatch:   # allows "Run workflow" from Actions tab
 
 jobs:
   build:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
 
     steps:
@@ -21,14 +31,119 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pytest
-        pip install -e .
+        pip install flake8
+        # CPU-only torch keeps the SMPL extra small; the tests do not need a GPU
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        # the optional extras are installed so that their tests run instead of being skipped
+        pip install -e ".[test,usd,viser,smpl,blender]"
 #    - name: Lint with flake8
 #      run: |
 #        # stop the build if there are Python syntax errors or undefined names
 #        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 #        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
 #        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Cache robot models
+      uses: actions/cache@v4
+      with:
+        path: ~/.loco-mujoco-caches/robot_models
+        key: robot-models-${{ hashFiles('loco_mujoco/core/utils/models.py') }}
+    - name: Download robot models
+      run: loco-mujoco-download-models
     - name: Test with pytest
       run: |
-        pytest --ignore=tests/test_task_factories.py
+        # One pytest process per test file: JAX keeps compiled functions in memory, and
+        # the whole suite in a single process peaks close to the runner's 16 GB.
+        status=0
+        for f in tests/test_*.py; do
+          [ "$f" = tests/test_task_factories.py ] && continue
+          pytest "$f" --cov=loco_mujoco --cov-append --cov-report= || status=1
+        done
+        python -m coverage report --skip-covered
+        python -m coverage xml
+        python -m coverage html
+        exit $status
+    - name: Publish coverage summary
+      if: always()
+      run: |
+        echo '### Test coverage' >> "$GITHUB_STEP_SUMMARY"
+        echo '```' >> "$GITHUB_STEP_SUMMARY"
+        python -m coverage report --skip-covered | tail -n 40 >> "$GITHUB_STEP_SUMMARY"
+        echo '```' >> "$GITHUB_STEP_SUMMARY"
+    - name: Upload coverage report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          coverage.xml
+          htmlcov
+
+  docs:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[docs]"
+    - name: Check docstring coverage
+      run: interrogate loco_mujoco
+    - name: Build documentation
+      # -W turns warnings into errors: a broken cross-reference or a malformed docstring fails the build
+      run: sphinx-build -b html -W --keep-going docs docs/_build/html
+    - name: Upload documentation
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation
+        path: docs/_build/html
+
+  install:
+    # Installs LocoMuJoCo the way users get it from PyPI: the built wheel, not an editable checkout, with
+    # the dependency versions that pip resolves today for each Python version.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    name: install (Python ${{ matrix.python-version }})
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Build the wheel and the source distribution
+      run: |
+        python -m pip install --upgrade pip build twine
+        python -m build
+        python -m twine check --strict dist/*
+    - name: Install the wheel in a clean environment
+      run: |
+        python -m venv "$RUNNER_TEMP/venv"
+        "$RUNNER_TEMP/venv/bin/pip" install --upgrade pip
+        "$RUNNER_TEMP/venv/bin/pip" install dist/*.whl
+        "$RUNNER_TEMP/venv/bin/pip" list | grep -i -E "^(loco-mujoco|mujoco|mujoco-mjx|mujoco-warp|jax|jaxlib|numpy) "
+    - name: Cache robot models
+      uses: actions/cache@v4
+      with:
+        path: ~/.loco-mujoco-caches/robot_models
+        key: robot-models-${{ hashFiles('loco_mujoco/core/utils/models.py') }}
+    - name: Smoke test
+      # run outside the checkout, so that the installed package is imported and not the source tree
+      working-directory: ${{ runner.temp }}
+      env:
+        JAX_PLATFORMS: cpu
+      run: |
+        cp "$GITHUB_WORKSPACE/.github/scripts/install_smoke_test.py" .
+        "$RUNNER_TEMP/venv/bin/loco-mujoco-download-models"
+        "$RUNNER_TEMP/venv/bin/python" install_smoke_test.py

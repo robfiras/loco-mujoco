@@ -1,3 +1,7 @@
+"""
+Environment of the Unitree H1 humanoid robot (CPU/MuJoCo version).
+"""
+
 from typing import List, Union, Tuple
 import mujoco
 from mujoco import MjSpec
@@ -11,14 +15,27 @@ from loco_mujoco.core.utils import info_property
 class UnitreeH1(BaseRobotHumanoid):
 
     """
+    Environment of the Unitree H1 humanoid robot.
+
     Description
-    ------------
+    -----------
 
-    Mujoco environment of the Unitree H1 robot.
+    MuJoCo environment of the Unitree H1, a humanoid robot by Unitree Robotics. This class uses the CPU (MuJoCo)
+    backend; :class:`~loco_mujoco.environments.humanoids.unitreeH1_mjx.MjxUnitreeH1` is its Mjx counterpart.
 
+    The model (``unitree_h1/h1.xml``) has a floating base and 19 actuated joints: the back joint, four joints per arm
+    and five joints per leg. With ``disable_arms=True``, the eight arm joints are removed together with their
+    actuators and observations, and the arms are re-oriented so that they do not collide with the hips. With
+    ``disable_back_joint=True``, the back joint is removed together with its actuator and observations.
+
+    By default, the observation has 49 dimensions: the height and the orientation quaternion of the floating base (its
+    horizontal position is left out), the 19 joint positions, the 6D velocity of the floating base and the 19 joint
+    velocities. The action has 19 dimensions, one per motor, each in ``[-1, 1]``. The default control function
+    (``DefaultControl``) rescales it to the control range of the motors. Both spaces are listed below and can be
+    changed with the constructor arguments ``observation_spec`` and ``actuation_spec``.
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================== ================ ==================================== ============================== ===
     Index in Obs Name               ObservationType  Min                                  Max                            Dim
@@ -105,7 +122,7 @@ class UnitreeH1(BaseRobotHumanoid):
     ============ ================== ================ ==================================== ============================== ===
 
     Default Action Space
-    -----------------
+    --------------------
 
     Control function type: **DefaultControl**
 
@@ -170,13 +187,23 @@ class UnitreeH1(BaseRobotHumanoid):
         Constructor.
 
         Args:
-            disable_arms (bool): Whether to disable arm joints.
-            disable_back_joint (bool): Whether to disable the back joint.
-            spec (Union[str, MjSpec]): Specification of the environment. Can be a path to the XML file or an MjSpec object.
-                If none is provided, the default XML file is used.
-            observation_spec (List[Observation], optional): List defining the observation space. Defaults to None.
-            actuation_spec (List[str], optional): List defining the action space. Defaults to None.
-            **kwargs: Additional parameters for the environment.
+            disable_arms (bool): If True, the arm joints are removed together with their actuators and observations,
+                and the arms are re-oriented to prevent collisions with the hips.
+            disable_back_joint (bool): If True, the back joint is removed together with its actuator and
+                observations.
+            spec (Union[str, MjSpec], optional): Model of the robot, either the path to a MuJoCo XML file or an
+                ``MjSpec`` object. If None, the default XML file is used (see :meth:`get_default_xml_file_path`).
+            observation_spec (List[Observation], optional): Observations that make up the observation space, as
+                :class:`~loco_mujoco.core.observations.base.Observation` objects or as dictionaries that are parsed
+                with ``parse_observation_spec``. If None, the default observation space listed in the class docstring
+                is used.
+            actuation_spec (List[str], optional): Names of the actuators in the model that make up the action
+                space. If None, the default action space listed in the class docstring is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`. The
+                keyword ``mjx_reduced_contacts`` (bool, default True) is consumed here: if False, the Mjx version of
+                this environment keeps the collision geoms of the model instead of the reduced set of contacts of
+                ``_modify_spec_for_mjx``. It has no effect on the CPU version.
+
         """
 
         self._disable_arms = disable_arms
@@ -199,7 +226,9 @@ class UnitreeH1(BaseRobotHumanoid):
             actuation_spec = self._get_action_specification(spec)
 
         # modify the specification if needed
-        if self.mjx_enabled:
+        # mjx_reduced_contacts=False keeps the robot's own collision geoms on Mjx/MjWarp instead of the
+        # simplified feet-only contacts of _modify_spec_for_mjx
+        if kwargs.pop("mjx_reduced_contacts", True) and self.mjx_enabled:
             spec = self._modify_spec_for_mjx(spec)
         if disable_arms or disable_back_joint:
             joints_to_remove, actuators_to_remove, equ_constraints_to_remove = self._get_spec_modifications()
@@ -215,11 +244,14 @@ class UnitreeH1(BaseRobotHumanoid):
 
     def _get_spec_modifications(self) -> Tuple[List[str], List[str], List[str]]:
         """
-        Specifies which joints, actuators, and equality constraints should be removed from the Mujoco specification.
+        Specifies which joints, actuators and equality constraints are removed from the MuJoCo specification.
+
+        The lists depend on ``disable_arms`` and ``disable_back_joint``.
 
         Returns:
-            Tuple[List[str], List[str], List[str]]: A tuple containing lists of joints to remove, actuators to remove,
-            and equality constraints to remove.
+            Tuple[List[str], List[str], List[str]]: The names of the joints to remove, of the actuators to remove
+            and of the equality constraints to remove (always empty for this robot).
+
         """
 
         joints_to_remove = []
@@ -243,13 +275,14 @@ class UnitreeH1(BaseRobotHumanoid):
     @staticmethod
     def _reorient_arms(spec: MjSpec) -> MjSpec:
         """
-        Reorients the arms to prevent collision with the hips. Used when disable_arms is set to True.
+        Reorients the arms to prevent collisions with the hips. Used when ``disable_arms`` is True.
 
         Args:
-            spec (MjSpec): Mujoco specification.
+            spec (MjSpec): MuJoCo specification. It is modified in place.
 
         Returns:
-            MjSpec: Modified Mujoco specification.
+            MjSpec: The modified MuJoCo specification.
+
         """
         # modify the arm orientation
         left_shoulder_pitch_link = [body for body in spec.bodies if body.name == "left_shoulder_pitch_link"][0]
@@ -266,13 +299,17 @@ class UnitreeH1(BaseRobotHumanoid):
     @staticmethod
     def _get_observation_specification(spec: MjSpec) -> List[Observation]:
         """
-        Returns the observation specification of the environment.
+        Returns the default observation specification of the environment.
+
+        The default observation consists of the height and orientation of the floating base, the joint positions,
+        the velocity of the floating base and the joint velocities.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[Observation]: List of observations.
+            List[Observation]: The list of default observations.
+
         """
         observation_spec = [# ------------- JOINT POS -------------
                             ObservationType.FreeJointPosNoXY("q_root", xml_name="root"),
@@ -323,13 +360,14 @@ class UnitreeH1(BaseRobotHumanoid):
     @staticmethod
     def _get_action_specification(spec: MjSpec) -> List[str]:
         """
-        Getter for the action space specification.
+        Returns the default action specification of the environment.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            List[str]: List of action names.
+            List[str]: The names of the actuators that make up the default action space.
+
         """
         action_spec = ["back_bkz_actuator", "l_arm_shy_actuator", "l_arm_shx_actuator",
                        "l_arm_shz_actuator", "left_elbow_actuator", "r_arm_shy_actuator", "r_arm_shx_actuator",
@@ -343,27 +381,45 @@ class UnitreeH1(BaseRobotHumanoid):
     @classmethod
     def get_default_xml_file_path(cls) -> str:
         """
-        Returns the default XML file path for the Unitree H1 environment.
+        Returns the default path to the XML file of the Unitree H1 model.
+
+        Returns:
+            str: Path to the XML file.
+
         """
         return cls.get_model_path("unitree_h1", "h1.xml")
 
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body specified in the XML file.
+        Returns the name of the upper body (the torso link) in the XML file.
+
+        Returns:
+            str: Name of the upper body.
+
         """
         return "torso_link"
 
     @info_property
     def root_free_joint_xml_name(self) -> str:
         """
-        Returns the name of the free joint of the root specified in the XML file.
+        Returns the name of the free joint of the root in the XML file.
+
+        Returns:
+            str: Name of the free joint.
+
         """
         return "root"
 
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
-        Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+        Returns the range of root heights in which the robot is considered healthy.
+
+        This is only used when the ``HeightBasedTerminalStateHandler`` is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
+
         """
         return (0.6, 1.5)

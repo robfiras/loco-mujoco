@@ -21,7 +21,7 @@ experiment:
         symmetry_air_coeff: 0.0
         energy_coeff: 0.0
     terrain_type: RoughTerrain
-    init_state_type: TrajInitialStateHandler
+    init_state_type: DefaultInitialStateHandler
   hidden_layers: [64, 64]
   activation: relu
   lr_actor: 3e-4

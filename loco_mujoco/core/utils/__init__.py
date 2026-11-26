@@ -1,3 +1,5 @@
+"""Utilities of the core: backend checks, the MDP description, MuJoCo index helpers, math and model files."""
+
 from .backend import *
 from .env import MDPInfo, Box
 from .mujoco import *

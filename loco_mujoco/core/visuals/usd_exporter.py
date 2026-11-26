@@ -118,7 +118,19 @@ class UsdTrajectoryExporter:
         )
 
     def render(self, data: mujoco.MjData, *_: Any) -> None:
-        """Append one MuJoCo state to the animated USD stage."""
+        """
+        Append one MuJoCo state to the animated USD stage.
+
+        Frames are skipped as needed to reach the frame rate of the exporter.
+
+        Args:
+            data (mujoco.MjData): The simulation data to export.
+            *_ (Any): Ignored; accepted for compatibility with the ``render`` method of the viewers.
+
+        Raises:
+            RuntimeError: If the exporter has already been finalized.
+
+        """
         if self._stopped or self._usd_finalized:
             raise RuntimeError("This UsdTrajectoryExporter has already been finalized.")
         source_time = self.source_frame_count * self.dt
@@ -146,7 +158,17 @@ class UsdTrajectoryExporter:
         self._next_frame_time = self.frame_count / self.fps
 
     def render_mjx(self, state: Any, env_idx: int = 0) -> None:
-        """Append one selected environment from a batched MJX state."""
+        """
+        Append one selected environment from a batched MJX state.
+
+        Args:
+            state (Any): MJX state, batched over environments or unbatched.
+            env_idx (int): Index of the environment to export.
+
+        Raises:
+            IndexError: If ``env_idx`` is outside the batch.
+
+        """
         qpos = np.asarray(state.data.qpos)
         if qpos.ndim == 1:
             if env_idx != 0:
@@ -168,7 +190,13 @@ class UsdTrajectoryExporter:
         self.render(self._mjx_data)
 
     def save_usd(self) -> Path:
-        """Save and return the USD stage path."""
+        """
+        Save and return the USD stage path.
+
+        Returns:
+            Path: Path of the written USD file.
+
+        """
         if self.usd_path is not None:
             return self.usd_path
         if self.frame_count == 0:
@@ -197,7 +225,13 @@ class UsdTrajectoryExporter:
         return self.usd_path
 
     def stop(self) -> Optional[str]:
-        """Finalize the USD stage and return its path."""
+        """
+        Finalize the USD stage and return its path.
+
+        Returns:
+            Optional[str]: Path of the written USD file, or None if no frames were collected.
+
+        """
         if self._stopped:
             return str(self.usd_path) if self.usd_path is not None else None
         if self.frame_count == 0:
@@ -210,6 +244,8 @@ class UsdTrajectoryExporter:
 
 
 class _IndexedData:
+    """View on a batched data structure that returns every attribute indexed with a fixed batch index."""
+
     def __init__(self, data: Any, index: int):
         self._data = data
         self._index = index

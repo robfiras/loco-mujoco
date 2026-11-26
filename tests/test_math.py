@@ -131,6 +131,17 @@ def test_quaternion_angular_distance(backend):
     assert float(np.asarray(d0)) == pytest.approx(0.0, abs=_ATOL)
 
 
+def test_quaternion_angular_distance_jax_matches_numpy_with_finite_gradients():
+    q1 = sRot.random(64, random_state=0).as_quat()
+    q2 = sRot.random(64, random_state=1).as_quat()
+    np.testing.assert_allclose(np.asarray(m.quaternion_angular_distance(jnp.asarray(q1), jnp.asarray(q2), jnp)),
+                               m.quaternion_angular_distance(q1, q2, np), atol=1e-5)
+    # equal rotations: jax.scipy's magnitude() has a NaN gradient here
+    g = jax.grad(lambda q: jnp.sum(m.quaternion_angular_distance(q, jnp.asarray(q1), jnp)))(jnp.asarray(q1))
+    assert np.all(np.isfinite(np.asarray(g)))
+
+
+
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_quat2angle(backend):
     q = backend.array(sRot.from_rotvec([0.0, 0.0, 0.7]).as_quat())
@@ -155,3 +166,98 @@ def test_atleast_3d(backend):
     # already-3d passes through unchanged
     w = backend.array(np.zeros((2, 3, 4)))
     assert m.atleast_3d(w, backend).shape == (2, 3, 4)
+
+
+def test_rotvec_from_matrix_jax_matches_scipy_and_has_finite_gradients():
+    rots = sRot.random(64, random_state=0)
+    special = sRot.from_rotvec([[0.0, 0.0, 0.0], [np.pi, 0.0, 0.0], [0.0, np.pi, 0.0],
+                                [0.0, 0.0, np.pi], [0.0, 0.0, 1e-4]])
+    mats = np.concatenate([rots.as_matrix(), special.as_matrix()])
+    got = np.asarray(m.rotvec_from_matrix_jax(jnp.asarray(mats)))
+    # compare as rotations: at angle pi, v and -v are the same rotation
+    np.testing.assert_allclose(sRot.from_rotvec(got).as_matrix(), mats, atol=1e-5)
+    np.testing.assert_allclose(got[:64], rots.as_rotvec(), atol=1e-5)
+
+    # the jax.scipy implementation this replaces has NaN gradients at the identity
+    grad = jax.grad(lambda x: jnp.sum(m.rotvec_from_matrix_jax(x)))(jnp.asarray(mats))
+    assert np.all(np.isfinite(np.asarray(grad)))
+
+
+# ---------------------------------------------------------------------------
+# Rotation helpers in MuJoCo's quaternion convention (w, x, y, z), checked against SciPy
+# ---------------------------------------------------------------------------
+
+def _random_rotations(n, seed=0):
+    """SciPy rotations and the matching scalar-first quaternions."""
+    from scipy.spatial.transform import Rotation
+    rot = Rotation.random(n, random_state=seed)
+    return rot, np.roll(rot.as_quat(), 1, axis=-1)   # scipy is scalar-last
+
+
+def test_quaternion_algebra_matches_scipy():
+    rot_a, qa = _random_rotations(16, seed=0)
+    rot_b, qb = _random_rotations(16, seed=1)
+    v = np.random.default_rng(2).normal(size=(16, 3))
+
+    def same_rotation(q, rot):
+        expected = np.roll(rot.as_quat(), 1, axis=-1)
+        q = np.asarray(q)
+        return np.allclose(q * np.sign(np.sum(q * expected, axis=-1, keepdims=True)), expected, atol=1e-5)
+
+    assert same_rotation(m.quat_mul(jnp.array(qa), jnp.array(qb)), rot_a * rot_b)
+    assert same_rotation(m.quat_conj(jnp.array(qa)), rot_a.inv())
+    assert np.allclose(m.quat_rotate(jnp.array(qa), jnp.array(v)), rot_a.apply(v), atol=1e-5)
+    assert np.allclose(m.quat_rotate_inv(jnp.array(qa), jnp.array(v)), rot_a.inv().apply(v), atol=1e-5)
+    assert np.allclose(np.linalg.norm(m.quat_normalize(3.0 * jnp.array(qa)), axis=-1), 1.0, atol=1e-5)
+
+
+def test_rotation_vector_conversions_match_scipy():
+    from scipy.spatial.transform import Rotation
+    rotvec = np.random.default_rng(3).normal(size=(16, 3))
+    rot = Rotation.from_rotvec(rotvec)
+
+    q = np.asarray(m.quat_from_rotvec(jnp.array(rotvec)))
+    expected = np.roll(rot.as_quat(), 1, axis=-1)
+    assert np.allclose(q * np.sign(np.sum(q * expected, axis=-1, keepdims=True)), expected, atol=1e-5)
+    # back to the rotation vector, also from the antipodal quaternion
+    assert np.allclose(m.rotvec_from_quat(jnp.array(q)), rot.as_rotvec(), atol=1e-4)
+    assert np.allclose(m.rotvec_from_quat(-jnp.array(q)), rot.as_rotvec(), atol=1e-4)
+
+
+@pytest.mark.parametrize("backend", (np, jnp))
+def test_rotation_matrix_helpers_match_scipy(backend):
+    rot, q = _random_rotations(8, seed=4)
+    mats = rot.as_matrix()
+
+    assert np.allclose(m.quat_to_mat(backend.asarray(q), backend), mats, atol=1e-5)          # batched
+    assert np.allclose(m.quat_to_mat(backend.asarray(q[0]), backend), mats[0], atol=1e-5)    # single
+
+    # the two 6D layouts: columns one after the other, and row by row
+    assert np.allclose(m.rot6d_from_quat(jnp.array(q)), np.concatenate([mats[:, :, 0], mats[:, :, 1]], axis=-1),
+                       atol=1e-5)
+    assert np.allclose(m.rot6d_from_mat(backend.asarray(mats[0]), backend), mats[0][:, :2].reshape(-1), atol=1e-6)
+
+    # heading: rotation about z by the yaw of the body x axis
+    yaw = np.arctan2(mats[0][1, 0], mats[0][0, 0])
+    expected = np.array([[np.cos(yaw), -np.sin(yaw), 0.0], [np.sin(yaw), np.cos(yaw), 0.0], [0.0, 0.0, 1.0]])
+    assert np.allclose(m.heading_mat(backend.asarray(mats[0]), backend), expected, atol=1e-5)
+    assert np.allclose(m.quat_to_mat(m.heading_quat(jnp.array(q[0]))), expected, atol=1e-5)
+
+    # angle between two rotations
+    angles = (rot[:4].inv() * rot[4:]).magnitude()
+    assert np.allclose(m.rotation_angle(backend.asarray(mats[:4]), backend.asarray(mats[4:]), backend), angles,
+                       atol=1e-4)
+
+
+def test_rotation_helpers_have_finite_gradients_at_zero_rotation():
+    """The learned dynamics are differentiated through these at zero angular velocity and equal rotations."""
+    identity = jnp.array([1.0, 0.0, 0.0, 0.0])
+
+    grads = [jax.jacobian(m.quat_from_rotvec)(jnp.zeros(3)),
+             jax.jacobian(m.rotvec_from_quat)(identity),
+             jax.grad(lambda v: m.eps_norm(v)[0])(jnp.zeros(3)),
+             jax.grad(lambda R: m.rotation_angle(R, jnp.eye(3)))(jnp.eye(3))]
+    for g in grads:
+        assert np.all(np.isfinite(np.asarray(g)))
+    # d rotvec / d (vector part of q) is 2 at the identity
+    assert np.allclose(grads[1][:, 1:], 2.0 * np.eye(3), atol=1e-4)

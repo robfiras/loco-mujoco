@@ -1,3 +1,7 @@
+"""
+Environment of the Unitree A1 quadruped robot (CPU/MuJoCo version).
+"""
+
 from typing import Union, List, Tuple
 
 import numpy as np
@@ -13,13 +17,28 @@ from loco_mujoco.core.utils import info_property
 class UnitreeA1(BaseRobotQuadruped):
 
     """
-    Description
-    ------------
+    Environment of the Unitree A1 quadruped robot.
 
-    Mujoco environment of Unitree A1 model.
+    Description
+    -----------
+
+    MuJoCo environment of the Unitree A1, a quadruped robot by Unitree Robotics. This class uses the CPU (MuJoCo)
+    backend; :class:`~loco_mujoco.environments.quadrupeds.unitreeA1_mjx.MjxUnitreeA1` is its Mjx counterpart.
+
+    The model (``unitree_a1/unitree_a1.xml``) has a floating base and 12 actuated joints: hip, thigh and calf joint of
+    each of the four legs.
+
+    By default, the observation has 35 dimensions: the height and the orientation quaternion of the floating base (its
+    horizontal position is left out), the 12 joint positions, the 6D velocity of the floating base and the 12 joint
+    velocities. The action has 12 dimensions, one per motor, each in ``[-1, 1]``. The default control function
+    (``DefaultControl``) rescales it to the control range of the motors. Both spaces are listed below and can be
+    changed with the constructor arguments ``observation_spec`` and ``actuation_spec``.
+
+    Unless another initial state handler or other parameters for it are given, an episode starts in the standing pose
+    defined by :attr:`init_qpos` and :attr:`init_qvel`.
 
     Default Observation Space
-    -----------------
+    -------------------------
 
     ============ ================= ================ ==================================== ============================== ===
     Index in Obs Name              ObservationType  Min                                  Max                            Dim
@@ -79,7 +98,7 @@ class UnitreeA1(BaseRobotQuadruped):
 
 
     Default Action Space
-    ------------
+    --------------------
 
     Control function type: **DefaultControl**
 
@@ -123,12 +142,21 @@ class UnitreeA1(BaseRobotQuadruped):
         Constructor.
 
         Args:
-            spec (Union[str, MjSpec]): Specification of the environment.
-                It can be a path to the xml file or a MjSpec object. If none, is provided, the default xml file is used.
-            camera_params (dict): Dictionary defining some of the camera parameters for visualization.
-            observation_spec (List[Observation]): Observation specification.
-            actuation_spec (List[str]): Action specification.
-            **kwargs: Additional arguments
+            spec (Union[str, MjSpec], optional): Model of the robot, either the path to a MuJoCo XML file or an
+                ``MjSpec`` object. If None, the default XML file is used (see :meth:`get_default_xml_file_path`).
+            camera_params (dict, optional): Parameters of the cameras used for visualization. If None, the
+                ``follow`` camera is placed further away from the robot than by default.
+            observation_spec (List[Observation], optional): Observations that make up the observation space, as
+                :class:`~loco_mujoco.core.observations.base.Observation` objects or as dictionaries that are parsed
+                with ``parse_observation_spec``. If None, the default observation space listed in the class docstring
+                is used.
+            actuation_spec (List[str], optional): Names of the actuators in the model that make up the action
+                space. If None, the default action space listed in the class docstring is used.
+            **kwargs: Additional arguments passed to :class:`~loco_mujoco.environments.base.LocoEnv`.
+                If ``init_state_type`` is not given or is ``"DefaultInitialStateHandler"`` without
+                ``init_state_params``, the robot is reset to the standing pose given by :attr:`init_qpos` and
+                :attr:`init_qvel`.
+
         """
 
         if spec is None:
@@ -147,10 +175,10 @@ class UnitreeA1(BaseRobotQuadruped):
         if actuation_spec is None:
             actuation_spec = self._get_action_specification(spec)
 
-        # set init position
-        if "init_state_handler" not in kwargs.keys():
-            kwargs["init_state_type"] = "DefaultInitialStateHandler"
-            kwargs["init_state_params"] = (dict(qpos_init=self.init_qpos, qvel_init=self.init_qvel))
+        # set init position: the robot's standing pose, unless the caller chose another handler or its params
+        kwargs.setdefault("init_state_type", "DefaultInitialStateHandler")
+        if kwargs["init_state_type"] == "DefaultInitialStateHandler" and kwargs.get("init_state_params") is None:
+            kwargs["init_state_params"] = dict(qpos_init=self.init_qpos, qvel_init=self.init_qvel)
 
         # modify the specification if needed
         if self.mjx_enabled:
@@ -166,13 +194,17 @@ class UnitreeA1(BaseRobotQuadruped):
     @staticmethod
     def _get_observation_specification(spec: MjSpec) -> List[Observation]:
         """
-        Returns the observation specification of the environment.
+        Returns the default observation specification of the environment.
+
+        The default observation consists of the height and orientation of the floating base, the joint positions,
+        the velocity of the floating base and the joint velocities.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of observations.
+            List[Observation]: The list of default observations.
+
         """
 
         observation_spec = [
@@ -217,13 +249,14 @@ class UnitreeA1(BaseRobotQuadruped):
     @staticmethod
     def _get_action_specification(spec: MjSpec) -> List[str]:
         """
-        Getter for the action space specification.
+        Returns the default action specification of the environment.
 
         Args:
             spec (MjSpec): Specification of the environment.
 
         Returns:
-            A list of actuator names.
+            List[str]: The names of the actuators that make up the default action space.
+
         """
         action_spec = [
             "FR_hip", "FR_thigh", "FR_calf",
@@ -236,15 +269,21 @@ class UnitreeA1(BaseRobotQuadruped):
     @classmethod
     def get_default_xml_file_path(cls) -> str:
         """
-        Returns the default path to the xml file of the environment.
-        
+        Returns the default path to the XML file of the Unitree A1 model.
+
+        Returns:
+            str: Path to the XML file.
+
         """
         return cls.get_model_path("unitree_a1", "unitree_a1.xml")
 
     @info_property
     def grf_size(self) -> int:
         """
-        Returns the size of the ground force vector.
+        Returns the size of the ground reaction force vector (three components for each of the four feet).
+
+        Returns:
+            int: The size of the ground reaction force vector.
 
         """
         return 12
@@ -252,7 +291,10 @@ class UnitreeA1(BaseRobotQuadruped):
     @info_property
     def upper_body_xml_name(self) -> str:
         """
-        Returns the name of the upper body.
+        Returns the name of the upper body in the XML file. For this robot, it is the root body.
+
+        Returns:
+            str: Name of the upper body.
 
         """
         return self.root_body_name
@@ -260,7 +302,10 @@ class UnitreeA1(BaseRobotQuadruped):
     @info_property
     def root_free_joint_xml_name(self) -> str:
         """
-        Returns the name of the free joint of the root body.
+        Returns the name of the free joint of the root in the XML file.
+
+        Returns:
+            str: Name of the free joint.
 
         """
         return "root"
@@ -268,24 +313,36 @@ class UnitreeA1(BaseRobotQuadruped):
     @info_property
     def root_height_healthy_range(self) -> Tuple[float, float]:
         """
-        Returns the healthy range of the root height. This is only used when HeightBasedTerminalStateHandler is used.
+        Returns the range of root heights in which the robot is considered healthy.
+
+        This is only used when the ``HeightBasedTerminalStateHandler`` is used.
+
+        Returns:
+            Tuple[float, float]: Minimum and maximum healthy height of the root in meters.
+
         """
         return (0.15, 1.0)
 
     @info_property
     def foot_geom_names(self) -> List[str]:
         """
-        Returns the names of the foot geometries.
+        Returns the names of the foot geoms in the XML file.
+
+        Returns:
+            List[str]: Names of the four foot geoms.
+
         """
         return ["RL_foot", "RR_foot", "FL_foot", "FR_foot"]
 
     @info_property
     def init_qpos(self) -> np.ndarray:
         """
-        Returns the initial joint positions of the robot.
+        Returns the joint positions of the default initial state, a standing pose.
 
         Returns:
-            np.ndarray: Initial joint positions.
+            np.ndarray: Array of shape ``(19,)`` with the position and orientation quaternion of the floating base
+            followed by the 12 joint positions.
+
         """
         return np.array([0.0, 0.0, 0.27, 1.0, 0.0, 0.0, 0.0, 0.0, 0.9, -1.8, 0.0,
                          0.9, -1.8, 0.0, 0.9, -1.8, 0.0, 0.9, -1.8])
@@ -293,9 +350,11 @@ class UnitreeA1(BaseRobotQuadruped):
     @info_property
     def init_qvel(self) -> np.ndarray:
         """
-        Returns the initial joint velocities of the robot.
+        Returns the joint velocities of the default initial state, which are all zero.
 
         Returns:
-            np.ndarray: Initial joint velocities.
+            np.ndarray: Array of shape ``(18,)`` with the velocity of the floating base followed by the 12 joint
+            velocities.
+
         """
         return np.zeros(18)

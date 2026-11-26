@@ -1,3 +1,8 @@
+"""
+Utilities: path and variable management for the command-line tools, trajectory-similarity metrics for validation,
+running statistics, logging, video conversion and the MyoSkeleton model download.
+"""
+
 from .video import video2gif
 from .myomodel_init import fetch_myoskeleton, clear_myoskeleton
 from .running_stats import *
@@ -7,3 +12,4 @@ from .dataset import (set_amass_path, set_smpl_model_path, set_converted_amass_p
 from .retarget_for_env import retarget_for_new_env_cli
 from .metrics import MetricsHandler, ValidationSummary
 from .logging import setup_logger
+from loco_mujoco.core.utils.models import download_models_cli
