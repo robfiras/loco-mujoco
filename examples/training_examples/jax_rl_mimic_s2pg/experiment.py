@@ -88,11 +88,12 @@ def experiment(config: DictConfig):
                                     metrics_to_log[f"Validation Measures/{measure_name}/{attr_name}"] = attr_value[i]
                     run.log(metrics_to_log, step=int(training_metrics.max_timestep[i]))
 
-                    site_rpos = validation_metrics.euclidean_distance.site_rpos[i]
-                    site_rrotvec = validation_metrics.euclidean_distance.site_rpos[i]
-                    site_rvel = validation_metrics.euclidean_distance.site_rpos[i]
-                    run.log({"Metric for Sweep": site_rpos + site_rrotvec + site_rvel},
-                            step=int(training_metrics.max_timestep[i]))
+                    # metric used for a wandb sweep (optional; needs the three site quantities)
+                    distances = validation_metrics.euclidean_distance
+                    sweep_quantities = (distances.site_rpos, distances.site_rrotvec, distances.site_rvel)
+                    if all(values.size for values in sweep_quantities):
+                        run.log({"Metric for Sweep": sum(values[i] for values in sweep_quantities)},
+                                step=int(training_metrics.max_timestep[i]))
 
         # record video with trained agent
         S2PGPPOJax.play_policy(env, agent_conf, agent_state, deterministic=True, n_steps=200, n_envs=20,

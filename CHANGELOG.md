@@ -9,6 +9,12 @@ Every version below is a git tag and a
 
 ## [Unreleased]
 
+### Fixed
+
+- The on-policy training examples log the sum of the relative site position, orientation and velocity errors as
+  `Metric for Sweep`; it was three times the position error. The metric is skipped, instead of raising an error,
+  when one of the three quantities is not evaluated.
+
 ## [1.2.1] - 2026-11-23
 
 ### Added

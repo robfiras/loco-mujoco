@@ -92,12 +92,12 @@ def experiment(config: DictConfig):
 
                     run.log(metrics_to_log, step=int(training_metrics.max_timestep[i]))
 
-                    # metric for used for wandb sweep (optional)
-                    site_rpos = validation_metrics.euclidean_distance.site_rpos[i]
-                    site_rrotvec = validation_metrics.euclidean_distance.site_rpos[i]
-                    site_rvel = validation_metrics.euclidean_distance.site_rpos[i]
-                    run.log({"Metric for Sweep": site_rpos + site_rrotvec + site_rvel},
-                            step=int(training_metrics.max_timestep[i]))
+                    # metric used for a wandb sweep (optional; needs the three site quantities)
+                    distances = validation_metrics.euclidean_distance
+                    sweep_quantities = (distances.site_rpos, distances.site_rrotvec, distances.site_rvel)
+                    if all(values.size for values in sweep_quantities):
+                        run.log({"Metric for Sweep": sum(values[i] for values in sweep_quantities)},
+                                step=int(training_metrics.max_timestep[i]))
 
         print(f"Time taken to log metrics: {time.time() - t_start}s")
 
