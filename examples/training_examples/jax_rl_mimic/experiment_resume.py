@@ -95,10 +95,12 @@ def experiment(config: DictConfig):
                                         metrics_to_log[f"Validation Measures/{measure_name}/{attr_name}"] = attr_value[i]
                         run.log(metrics_to_log, step=step)
 
-                        site_rpos = validation_metrics.euclidean_distance.site_rpos[i]
-                        site_rrotvec = validation_metrics.euclidean_distance.site_rpos[i]
-                        site_rvel = validation_metrics.euclidean_distance.site_rpos[i]
-                        run.log({"Metric for Sweep": site_rpos + site_rrotvec + site_rvel}, step=step)
+                        # metric used for a wandb sweep (optional; needs the three site quantities)
+                        distances = validation_metrics.euclidean_distance
+                        sweep_quantities = (distances.site_rpos, distances.site_rrotvec, distances.site_rvel)
+                        if all(values.size for values in sweep_quantities):
+                            run.log({"Metric for Sweep": sum(values[i] for values in sweep_quantities)},
+                                    step=step)
 
         # save final agent state
         save_path = PPOJax.save_agent(result_dir, agent_conf, agent_state)

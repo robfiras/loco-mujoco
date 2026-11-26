@@ -96,6 +96,7 @@ def experiment(config: DictConfig):
 
                     run.log(metrics_to_log, step=int(training_metrics.max_timestep[i]))
 
+                    # metric used for a wandb sweep (optional; needs the three site quantities)
                     distances = validation_metrics.euclidean_distance
                     sweep_quantities = (distances.site_rpos, distances.site_rrotvec, distances.site_rvel)
                     if all(values.size for values in sweep_quantities):

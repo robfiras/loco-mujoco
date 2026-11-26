@@ -11,7 +11,9 @@ Every version below is a git tag and a
 
 ### Fixed
 
-- `jax_rl_mimic/experiment.py` logs the sum of relative site position, orientation, and velocity errors as its sweep metric when all three are available.
+- The on-policy training examples log the sum of the relative site position, orientation and velocity errors as
+  `Metric for Sweep`; it was three times the position error. The metric is skipped, instead of raising an error,
+  when one of the three quantities is not evaluated.
 
 ## [1.2.1] - 2026-11-23
 
